@@ -1,0 +1,54 @@
+name: Daily Sentry
+
+on:
+  schedule:
+    # Weekdays at 14:00 UTC (09:00 EST) - Pre-market check
+    - cron: "0 14 * * 1-5"
+    # Weekdays at 20:30 UTC (15:30 EST) - Pre-close check
+    - cron: "30 20 * * 1-5"
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  daily-sentry:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run daily sentry
+        env:
+          ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
+          FMP_KEY: ${{ secrets.FMP_KEY }}
+          SEC_API_KEY: ${{ secrets.SEC_API_KEY }}
+          CLAUDE_KEY: ${{ secrets.CLAUDE_KEY }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+        run: uv run python -m titantrade.daily_sentry
+
+      - name: Run executor if sentry produced signals
+        if: success()
+        env:
+          ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
+          FMP_KEY: ${{ secrets.FMP_KEY }}
+        run: uv run python -m titantrade.executor
+
+      - name: Commit state changes
+        run: |
+          git config user.name "TitanTrade Bot"
+          git config user.email "bot@titantrade.dev"
+          git add state/ logs/
+          git commit -m "Daily sentry: $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
+          git push

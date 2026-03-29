@@ -1,0 +1,88 @@
+# ========================
+# Python (TitanTrade/)
+# ========================
+
+# Environment / secrets
+.env
+
+# Virtual environment
+.venv/
+
+# Bytecode
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime state (keep dirs with .gitkeep, ignore contents)
+TitanTrade/state/*.json
+TitanTrade/logs/*.json
+!TitanTrade/state/.gitkeep
+!TitanTrade/logs/.gitkeep
+
+# Data bundles (generated at runtime, large)
+TitanTrade/state/data_bundle.json
+TitanTrade/state/weekly_thesis.json
+TitanTrade/state/sentry_signals.json
+TitanTrade/state/costs.json
+
+# uv
+.python-version
+
+# ========================
+# Flutter (titan_trade_app/)
+# ========================
+
+# Build output
+titan_trade_app/build/
+titan_trade_app/.dart_tool/
+titan_trade_app/.flutter-plugins-dependencies
+
+# Pub
+.pub-cache/
+.pub/
+
+# Generated docs
+**/doc/api/
+
+# Symbolication / obfuscation
+app.*.symbols
+app.*.map.json
+
+# Platform build artifacts
+titan_trade_app/android/app/debug
+titan_trade_app/android/app/profile
+titan_trade_app/android/app/release
+**/ios/Flutter/.last_build_id
+
+# Coverage
+titan_trade_app/coverage/
+
+# ========================
+# IDE
+# ========================
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.swp
+*~
+
+# ========================
+# Claude Code
+# ========================
+.claude/
+
+# ========================
+# OS
+# ========================
+.DS_Store
+Thumbs.db
+desktop.ini

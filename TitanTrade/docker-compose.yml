@@ -1,0 +1,7 @@
+services:
+  titantrade:
+    build: .
+    env_file: .env
+    volumes:
+      - ./state:/app/state
+      - ./logs:/app/logs
