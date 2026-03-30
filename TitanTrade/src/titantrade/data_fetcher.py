@@ -50,7 +50,8 @@ def fetch_ohlcv(
     resp = fetch_with_retry("GET", url, params=params)
     data = resp.json()
 
-    historical = data.get("historical", [])
+    # Stable API returns a list; legacy returned {"historical": [...]}
+    historical = data if isinstance(data, list) else data.get("historical", [])
     # FMP returns newest-first, reverse to oldest-first
     bars = [
         {

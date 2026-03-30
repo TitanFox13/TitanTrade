@@ -123,7 +123,8 @@ def _fetch_bars(ticker: str, cfg: Config, days: int = 250) -> list[dict[str, Any
 
     resp = fetch_with_retry("GET", url, params=params)
     data = resp.json()
-    historical = data.get("historical", [])
+    # Stable API returns a list; legacy returned {"historical": [...]}
+    historical = data if isinstance(data, list) else data.get("historical", [])
 
     # FMP returns newest-first, we need oldest-first
     bars = [
