@@ -44,7 +44,7 @@ class ClaudeConfig:
     key: str = ""
     model: str = "claude-sonnet-4-6-20250514"
     temperature: float = 0.3
-    max_tokens: int = 4096
+    max_tokens: int = 8192
 
 
 @dataclass(frozen=True)
