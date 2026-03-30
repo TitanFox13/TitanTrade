@@ -50,7 +50,7 @@ class ClaudeConfig:
 @dataclass(frozen=True)
 class GeminiConfig:
     key: str = ""
-    model: str = "gemini-2.0-flash"
+    model: str = "gemini-2.5-flash"
     temperature: float = 0.1
     max_tokens: int = 1024
 
@@ -247,7 +247,7 @@ def load_config() -> Config:
         ),
         gemini=GeminiConfig(
             key=keys["GEMINI_KEY"],
-            model=os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
+            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
         ),
         trading=trading,
     )

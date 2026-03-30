@@ -241,7 +241,7 @@ def fetch_economic_calendar(cfg: Config, days_ahead: int = 7) -> list[dict[str, 
     Returns list of high-impact events in the next N days.
     """
     today = datetime.now(timezone.utc).date()
-    url = "https://financialmodelingprep.com/stable/economics-calendar"
+    url = "https://financialmodelingprep.com/stable/economic-calendar"
     params = {
         "from": today.isoformat(),
         "to": (today + timedelta(days=days_ahead)).isoformat(),

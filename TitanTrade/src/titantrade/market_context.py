@@ -143,7 +143,7 @@ def _fetch_bars(ticker: str, cfg: Config, days: int = 250) -> list[dict[str, Any
 
 def _fetch_vix_level(cfg: Config) -> float | None:
     """Fetch the current VIX level."""
-    url = "https://financialmodelingprep.com/stable/index-quote"
+    url = "https://financialmodelingprep.com/stable/quote"
     params = {"symbol": "^VIX", "apikey": cfg.fmp.key}
     try:
         resp = fetch_with_retry("GET", url, params=params)
