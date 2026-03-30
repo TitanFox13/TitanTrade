@@ -36,6 +36,8 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 | Price vs SMA | All periods | Above/below key levels |
 | Golden/Death Cross | 50 vs 200 SMA | Long-term trend change |
 | Volume Trend | 5d vs 20d avg | Volume confirmation of moves |
+| Relative Strength | 5d, 20d, 60d vs SPY | Outperformance/underperformance vs market |
+| Pairwise Correlation | 60-day rolling | Cross-stock correlation for portfolio risk |
 
 ### Market Context
 - SPY/QQQ trend (1d, 5d, 20d returns + full indicator suite)
@@ -43,6 +45,21 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - 10Y and 2Y Treasury yields
 - Sector rotation (11 SPDR sector ETFs, ranked by 5-day performance)
 - Market regime classification: strong_bullish, bullish, neutral, bearish, strong_bearish, crisis
+- Economic calendar: FOMC, CPI, jobs, GDP, PPI events for the next 7 days
+
+### Enhanced Data per Stock
+- Analyst consensus ratings and recent upgrades/downgrades (FMP)
+- Price target consensus (high, low, median)
+- Insider trading: Form 4 filings from the last 30 days (SEC-API)
+- Relative strength vs SPY over 5d, 20d, 60d periods
+- Pairwise correlation matrix with other watchlist stocks
+
+### AI Strategy Enhancements
+- **Mean reversion detection**: RSI < 30 + price near 200-SMA = bounce setup
+- **Sentiment divergence**: Bullish news + falling price = distribution warning
+- **Earnings run-up**: 10-15 days before earnings with no negative thesis = drift opportunity
+- **Analyst momentum**: Cluster upgrades/downgrades as directional catalysts
+- **Insider signal**: Cluster insider buying as a strong bullish signal
 
 ## Risk Management
 
@@ -59,14 +76,40 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - Stop-limit orders with 1% buffer to prevent catastrophic slippage
 - Stops live on Alpaca's servers, fire 24/7 even if bot is offline
 - Orphan detection: every run checks held positions have a stop order
-- **Bracket resubmission**: expired day-only brackets are auto-resubmitted next morning after fresh risk gate evaluation
+- **Bracket resubmission**: expired day-only brackets are auto-resubmitted next morning with dynamically adjusted entry prices based on current market conditions
+- **Gap-down protection**: detects unfilled stop-limit orders after overnight gaps and immediately market-sells the unprotected position
+
+### Trailing Stops
+- Activates once a position gains 5%+ from entry price
+- Trails 3% below the high-water mark (ratchets up only, never down)
+- Never trails below entry price (locks in at least breakeven)
+- Never trails below the original thesis stop (doesn't widen risk)
+- Cancels the existing stop and replaces with a higher one each execution cycle
 
 ### Portfolio-Level Protection
 - Peak portfolio tracking for drawdown calculation
 - Sector concentration monitoring
 - Cash reserve enforcement before any new entry
-- Thesis expiry (14-day maximum, stale thesis = no trading)
-- Pass 2 selection filter (only top 3-5 trades execute)
+- Weekly position reviews: CONTINUE, ADJUST (update levels), or CLOSE (explicit exit)
+- Pass 2 selection filter (only top 3-5 new trades execute)
+
+### Bear Market Hedging
+- In bearish/crisis regimes, inverse ETFs (SH, PSQ, SDS) are added to the analysis
+- Claude can recommend buying inverse ETFs to profit from market declines
+- These are regular long positions — no margin or shorting mechanics required
+- Hedges use short_term or medium_term horizons (not long-term holds)
+
+### Slippage-Aware Execution
+- **Entry**: Two-tranche limit orders (already slippage-minimized)
+- **News-based ABORT exits**: Limit sell at 0.2% below current (reduces slippage vs market sell)
+- **Price-based ABORT exits**: Market sell (urgent, price already moving)
+- **Backtesting**: Configurable slippage model (default 0.15% per fill) for realistic results
+
+### Intraday Price Checks
+- Lightweight price-only checks between the 9 AM and 3:30 PM sentry runs
+- Zero LLM cost — only checks SPY drops and per-stock adverse moves
+- Same 3% adverse / 2% SPY thresholds as the sentry's Layer 1 and 2
+- Fills the 6.5-hour gap during peak trading hours
 
 ## Execution
 
@@ -169,6 +212,12 @@ AI and broker interactions are mocked via `unittest.mock.patch`.
 - **Weekly Analyst** (5 tests): Mocked Claude returning valid/invalid/partial JSON
 - **Daily Sentry** (5 tests): Mocked Gemini, price-based ABORT override, garbage response handling
 - **Executor** (12 tests): Trade context building, bracket placement, near-miss recording, resubmission logic
+- **Trailing Stops** (10 tests): Activation threshold, HWM tracking, never-below-entry, state persistence, cleanup
+- **Price Check** (6 tests): SPY stress abort, per-stock adverse moves, signal file persistence
+- **Gap-Down Protection** (6 tests): Gap detection, stop-limit cancellation, margin tolerance, edge cases
+- **Orphan Close** (7 tests): Expired thesis, missing ticker, zero-qty positions, empty state
+- **Dynamic Entry** (13 tests): Price adjustment, chase limit, invalidated thesis, risk ratio preservation
+- **Strategy Features** (19 tests): Relative strength, correlation, macro blackout, correlation limit, two-tranche split
 
 ### Running Tests
 ```bash

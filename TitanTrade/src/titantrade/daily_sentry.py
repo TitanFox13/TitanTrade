@@ -81,13 +81,15 @@ def load_weekly_thesis() -> dict[str, Any] | None:
     with open(path) as f:
         thesis_doc = json.load(f)
 
-    # Check expiration
-    expires_at = thesis_doc.get("expires_at", "")
-    if expires_at:
-        expiry = datetime.fromisoformat(expires_at)
-        if datetime.now(timezone.utc) > expiry:
-            log.warning("Weekly thesis has expired - skipping sentry run")
-            return None
+    # Log if overdue for review (Sunday analysis may have failed)
+    next_review = thesis_doc.get("next_review_at", "")
+    if next_review:
+        try:
+            review_dt = datetime.fromisoformat(next_review)
+            if datetime.now(timezone.utc) > review_dt:
+                log.warning("Thesis is overdue for weekly review — sentry still running")
+        except (ValueError, TypeError):
+            pass
 
     return thesis_doc
 

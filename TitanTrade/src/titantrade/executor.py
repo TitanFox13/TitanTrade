@@ -205,6 +205,32 @@ def place_native_stop_loss(
     return resp.json()
 
 
+def place_limit_sell(
+    ticker: str,
+    qty: int,
+    limit_price: float,
+    cfg: Config,
+    time_in_force: str = "day",
+) -> dict[str, Any]:
+    """Place a limit sell with a small buffer below current price.
+
+    Reduces slippage compared to market orders for non-urgent exits.
+    Falls back to market sell if limit doesn't fill by close.
+    """
+    url = f"{cfg.alpaca.base_url}/v2/orders"
+    body = {
+        "symbol": ticker,
+        "qty": str(qty),
+        "side": "sell",
+        "type": "limit",
+        "limit_price": str(round(limit_price, 2)),
+        "time_in_force": time_in_force,
+    }
+    log.info(f"Limit SELL: {qty} {ticker} @ ${limit_price:.2f}")
+    resp = fetch_with_retry("POST", url, headers=_headers(cfg), json_body=body)
+    return resp.json()
+
+
 def close_position_at_market(ticker: str, cfg: Config) -> dict[str, Any]:
     """Close entire position at market price (Alpaca DELETE /positions/:ticker)."""
     url = f"{cfg.alpaca.base_url}/v2/positions/{ticker}"
@@ -321,7 +347,11 @@ def _trade_record(
 # ---------------------------------------------------------------------------
 
 def _handle_abort(ticker: str, sentry: dict[str, Any], cfg: Config) -> dict[str, Any] | None:
-    """Cancel all orders for ticker and close any position at market."""
+    """Cancel all orders for ticker and close position.
+
+    Uses market sell for price-based ABORT (urgent, price already moving against us).
+    Uses limit sell at 0.2% discount for news-based ABORT (less urgent, reduces slippage).
+    """
     reasoning = sentry.get("reasoning", "ABORT signal")
     cancelled = cancel_all_orders_for_ticker(ticker, cfg)
     log.info(f"Cancelled {cancelled} open orders for {ticker}")
@@ -335,7 +365,17 @@ def _handle_abort(ticker: str, sentry: dict[str, Any], cfg: Config) -> dict[str,
     if qty <= 0:
         return None
 
-    close_position_at_market(ticker, cfg)
+    # Price-based ABORT = urgent market sell. News-based = limit sell with small buffer.
+    is_price_urgent = sentry.get("price_concern", False)
+    if is_price_urgent:
+        close_position_at_market(ticker, cfg)
+    else:
+        current = float(position.get("current_price", 0))
+        if current > 0:
+            limit = round(current * 0.998, 2)  # 0.2% below current — reduces slippage
+            place_limit_sell(ticker, qty, limit, cfg, time_in_force="day")
+        else:
+            close_position_at_market(ticker, cfg)
     trade = _trade_record(
         ticker=ticker,
         action="SELL",
@@ -381,6 +421,9 @@ def _handle_bullish_entry(
     )
 
     # ---- Run ALL risk gates via the risk manager ----
+    economic_calendar = data_bundle.get("economic_calendar", [])
+    correlation_matrix = data_bundle.get("correlation_matrix", {})
+
     check = pre_trade_check(
         ticker=ticker,
         thesis=thesis,
@@ -390,6 +433,8 @@ def _handle_bullish_entry(
         stock_atr=stock_atr,
         earnings_blocked=earnings_blocked,
         cfg=cfg,
+        economic_calendar=economic_calendar,
+        correlation_matrix=correlation_matrix,
     )
 
     if not check["allowed"]:
@@ -429,15 +474,32 @@ def _handle_bullish_entry(
 
     shares = check["shares"]
 
-    # Place bracket order: limit entry + broker-side stop-loss + optional TP
+    # Two-tranche entry: 60% at target, 40% at 1.5% discount
+    # Improves average entry price on dips
+    tranche1_shares = max(int(shares * 0.6), 1)
+    tranche2_shares = shares - tranche1_shares
+    tranche2_price = round(entry_price * 0.985, 2)
+
+    # Tranche 1: main bracket at target entry
     place_bracket_order(
         ticker=ticker,
-        qty=shares,
+        qty=tranche1_shares,
         entry_limit_price=entry_price,
         stop_loss_price=stop_price,
         take_profit_price=take_profit_price,
         cfg=cfg,
     )
+
+    # Tranche 2: reload bracket at discount (only if meaningful size)
+    if tranche2_shares > 0:
+        place_bracket_order(
+            ticker=ticker,
+            qty=tranche2_shares,
+            entry_limit_price=tranche2_price,
+            stop_loss_price=stop_price,
+            take_profit_price=take_profit_price,
+            cfg=cfg,
+        )
 
     context = _build_trade_context(ticker, data_bundle, sentry)
 
@@ -450,7 +512,10 @@ def _handle_bullish_entry(
         reasoning=thesis.get("reasoning", ""),
         stop_loss_price=stop_price,
         take_profit_price=take_profit_price,
-        order_type="bracket",
+        order_type="bracket_2tranche",
+        tranche1_shares=tranche1_shares,
+        tranche2_shares=tranche2_shares,
+        tranche2_price=tranche2_price,
         confidence=thesis.get("confidence", 0),
         risk_flags=check.get("flags", []),
         gate_results=check.get("gate_results", {}),
@@ -459,10 +524,11 @@ def _handle_bullish_entry(
     _append_trade(trade)
     log_decision(
         log, "executor", ticker,
-        f"BUY BRACKET {shares} shares",
+        f"BUY 2-TRANCHE {tranche1_shares}+{tranche2_shares} shares",
         thesis.get("reasoning", ""),
         extra={
             "entry": entry_price,
+            "tranche2": tranche2_price,
             "stop": stop_price,
             "tp": take_profit_price,
             "atr": stock_atr,
@@ -549,12 +615,36 @@ def resubmit_expired_brackets(
             log.info(f"Skipping expired bracket for {ticker}: order already pending")
             continue
 
-        entry_price = thesis.get("target_entry_price")
-        stop_price = thesis.get("stop_loss_price")
+        original_entry = thesis.get("target_entry_price")
+        original_stop = thesis.get("stop_loss_price")
+
+        if not original_entry or not original_stop:
+            continue
+
+        # Dynamic entry price adjustment: use current price context
+        # to adjust entry/stop/TP instead of blindly reusing Sunday's levels
+        from titantrade.daily_sentry import _fetch_current_price
+        current_price = _fetch_current_price(ticker, cfg)
+
+        entry_price = original_entry
+        stop_price = original_stop
         take_profit_price = thesis.get("take_profit_price")
 
-        if not entry_price or not stop_price:
-            continue
+        if current_price:
+            adjusted = _adjust_entry_price(thesis, current_price)
+            if adjusted is None:
+                log.info(
+                    f"Skipping resubmission for {ticker}: "
+                    f"price ${current_price:.2f} outside adjustment range"
+                )
+                continue
+            entry_price, stop_price, take_profit_price = adjusted
+            if entry_price != original_entry:
+                log.info(
+                    f"Adjusted entry for {ticker}: "
+                    f"${original_entry:.2f} -> ${entry_price:.2f} "
+                    f"(current: ${current_price:.2f})"
+                )
 
         stock_atr = data_bundle.get("stocks", {}).get(ticker, {}).get("atr_14")
         earnings_blocked = (
@@ -619,6 +709,342 @@ def resubmit_expired_brackets(
     return resubmitted
 
 
+# ---------------------------------------------------------------------------
+# Trailing stop management
+# ---------------------------------------------------------------------------
+
+def _load_trailing_state() -> dict[str, Any]:
+    path = STATE_DIR / "trailing_stops.json"
+    if not path.exists():
+        return {}
+    with open(path) as f:
+        return json.load(f)
+
+
+def _save_trailing_state(state: dict[str, Any]) -> None:
+    with open(STATE_DIR / "trailing_stops.json", "w") as f:
+        json.dump(state, f, indent=2)
+
+
+def manage_trailing_stop(
+    ticker: str,
+    thesis: dict[str, Any],
+    position: dict[str, Any],
+    open_orders: list[dict[str, Any]],
+    cfg: Config,
+) -> None:
+    """Ratchet the stop-loss upward as the position gains value.
+
+    Uses the Alpaca position's avg_entry_price and current_price to determine
+    the gain. Once gain exceeds trailing_trigger_pct, replaces the stop-loss
+    with one that trails trailing_distance_pct below the high-water mark.
+    """
+    current_price = float(position.get("current_price", 0))
+    entry_price = float(position.get("avg_entry_price", 0))
+    qty = int(float(position.get("qty", 0)))
+
+    if not current_price or not entry_price or qty <= 0:
+        return
+
+    gain_pct = (current_price - entry_price) / entry_price
+    trigger = cfg.trading.trailing_trigger_pct
+    distance = cfg.trading.trailing_distance_pct
+
+    trailing_state = _load_trailing_state()
+    ts = trailing_state.get(ticker, {})
+
+    # Update high-water mark
+    hwm = max(current_price, ts.get("high_water_mark", current_price))
+    ts["high_water_mark"] = hwm
+    ts["entry_price"] = entry_price
+
+    if gain_pct < trigger:
+        # Not yet triggered — save state but don't trail
+        ts["trailing_active"] = False
+        trailing_state[ticker] = ts
+        _save_trailing_state(trailing_state)
+        return
+
+    # Calculate new trailing stop
+    new_stop = round(hwm * (1 - distance), 2)
+
+    # Never trail below the original thesis stop (would widen risk)
+    original_stop = thesis.get("stop_loss_price", 0)
+    if original_stop and new_stop < original_stop:
+        new_stop = original_stop
+
+    # Never trail below entry (lock in at least breakeven once trailing activates)
+    new_stop = max(new_stop, round(entry_price * 1.005, 2))
+
+    # Check if we need to replace the existing stop
+    existing_stop_order = None
+    existing_stop_price = 0.0
+    for o in open_orders:
+        if o.get("type") in ("stop", "stop_limit") and o.get("side") == "sell":
+            existing_stop_order = o
+            existing_stop_price = float(o.get("stop_price", 0))
+            break
+
+    if existing_stop_price >= new_stop:
+        # Existing stop is already at or above our trailing level
+        ts["trailing_active"] = True
+        ts["trailing_stop_price"] = existing_stop_price
+        ts["last_updated"] = datetime.now(timezone.utc).isoformat()
+        trailing_state[ticker] = ts
+        _save_trailing_state(trailing_state)
+        return
+
+    # Cancel old stop and place new higher one
+    if existing_stop_order:
+        try:
+            cancel_order(existing_stop_order["id"], cfg)
+        except Exception as exc:
+            log.error(f"Failed to cancel stop for trailing update on {ticker}: {exc}")
+            return
+
+    # Verify position still exists after cancellation
+    pos_check = get_position(ticker, cfg)
+    if not pos_check:
+        log.info(f"Position closed during trailing stop update for {ticker}")
+        trailing_state.pop(ticker, None)
+        _save_trailing_state(trailing_state)
+        return
+
+    try:
+        place_native_stop_loss(ticker, qty, new_stop, cfg)
+        log.info(
+            f"TRAILING STOP ratcheted for {ticker}: "
+            f"${existing_stop_price:.2f} -> ${new_stop:.2f} "
+            f"(HWM: ${hwm:.2f}, gain: {gain_pct:.1%})"
+        )
+    except Exception as exc:
+        log.error(f"Failed to place trailing stop for {ticker}: {exc}")
+        # Re-place the old stop as fallback
+        if existing_stop_price > 0:
+            try:
+                place_native_stop_loss(ticker, qty, existing_stop_price, cfg)
+            except Exception:
+                log.error(f"CRITICAL: {ticker} has no stop-loss order!")
+
+    ts["trailing_active"] = True
+    ts["trailing_stop_price"] = new_stop
+    ts["last_updated"] = datetime.now(timezone.utc).isoformat()
+    trailing_state[ticker] = ts
+    _save_trailing_state(trailing_state)
+
+
+def _cleanup_trailing_state(held_tickers: set[str]) -> None:
+    """Remove trailing state for tickers that are no longer held."""
+    state = _load_trailing_state()
+    stale = [t for t in state if t not in held_tickers]
+    for t in stale:
+        del state[t]
+    if stale:
+        _save_trailing_state(state)
+
+
+# ---------------------------------------------------------------------------
+# Thesis expiry: close orphaned positions
+# ---------------------------------------------------------------------------
+
+def close_orphaned_positions(cfg: Config) -> list[dict[str, Any]]:
+    """Close positions that have no active thesis or that Claude flagged for CLOSE.
+
+    Cases:
+    1. A held ticker has no entry in weekly_thesis.json (orphaned)
+    2. Claude's weekly review set review_action = "CLOSE" (explicit exit)
+    """
+    thesis_doc = _load("weekly_thesis.json")
+    positions = get_positions(cfg)
+
+    if not positions:
+        return []
+
+    # Index theses by ticker
+    theses_by_ticker = {
+        t["ticker"]: t for t in thesis_doc.get("theses", [])
+    }
+
+    closed: list[dict[str, Any]] = []
+
+    for pos in positions:
+        ticker = pos.get("symbol", "")
+        qty = int(float(pos.get("qty", 0)))
+        if qty <= 0:
+            continue
+
+        thesis = theses_by_ticker.get(ticker)
+
+        # Case 1: Position is covered by an active thesis that isn't CLOSE
+        if thesis and thesis.get("review_action") != "CLOSE":
+            continue
+
+        # Case 2: CLOSE action or no thesis at all
+        if thesis and thesis.get("review_action") == "CLOSE":
+            reason = f"Weekly review: CLOSE — {thesis.get('reasoning', 'Thesis invalidated')}"
+        else:
+            reason = f"No thesis entry for {ticker} in current weekly analysis"
+
+        log.warning(f"ORPHAN CLOSE: {ticker} — {reason}")
+        try:
+            cancel_all_orders_for_ticker(ticker, cfg)
+            close_position_at_market(ticker, cfg)
+            trade = _trade_record(
+                ticker=ticker,
+                action="SELL",
+                shares=qty,
+                price=float(pos.get("current_price", 0)),
+                trigger="thesis_expired",
+                reasoning=reason,
+            )
+            _append_trade(trade)
+            closed.append(trade)
+            log_decision(log, "executor", ticker, "SELL (ORPHAN)", reason)
+        except Exception as exc:
+            log.error(f"Failed to close orphaned position {ticker}: {exc}")
+
+    if closed:
+        # Clean up trailing state for closed tickers
+        _cleanup_trailing_state(
+            {p["symbol"] for p in get_positions(cfg)}
+        )
+
+    return closed
+
+
+# ---------------------------------------------------------------------------
+# Gap-down protection: detect unfilled stop-limits after gap
+# ---------------------------------------------------------------------------
+
+def check_gap_down_protection(cfg: Config) -> list[dict[str, Any]]:
+    """Detect positions where a stop-limit order failed to fill due to a gap-down.
+
+    If the current price is below the stop-limit's limit price, the stop either:
+    - Triggered but the limit didn't fill (price gapped through)
+    - Hasn't triggered because price gapped below the stop itself
+
+    In both cases the position is unprotected. Market-sell immediately.
+    """
+    positions = get_positions(cfg)
+    if not positions:
+        return []
+
+    closed: list[dict[str, Any]] = []
+
+    for pos in positions:
+        ticker = pos.get("symbol", "")
+        current_price = float(pos.get("current_price", 0))
+        qty = int(float(pos.get("qty", 0)))
+
+        if qty <= 0 or current_price <= 0:
+            continue
+
+        open_orders = get_open_orders(ticker, cfg)
+        for order in open_orders:
+            if order.get("type") != "stop_limit" or order.get("side") != "sell":
+                continue
+
+            limit_price = float(order.get("limit_price", 0))
+            stop_price = float(order.get("stop_price", 0))
+
+            # Gap-down: price is below the limit price (stop-limit is stale)
+            if current_price < limit_price * 0.99:
+                log.warning(
+                    f"GAP-DOWN DETECTED: {ticker} at ${current_price:.2f} "
+                    f"below stop-limit ${stop_price:.2f}/${limit_price:.2f}"
+                )
+                try:
+                    cancel_order(order["id"], cfg)
+                    place_market_sell(ticker, qty, cfg)
+                    trade = _trade_record(
+                        ticker=ticker,
+                        action="SELL",
+                        shares=qty,
+                        price=current_price,
+                        trigger="gap_down_protection",
+                        reasoning=(
+                            f"Stop-limit at ${stop_price:.2f}/${limit_price:.2f} "
+                            f"failed to fill — price gapped to ${current_price:.2f}"
+                        ),
+                    )
+                    _append_trade(trade)
+                    closed.append(trade)
+                    log_decision(
+                        log, "executor", ticker,
+                        "SELL (GAP-DOWN)", trade["reasoning"],
+                    )
+                except Exception as exc:
+                    log.error(f"Gap-down protection failed for {ticker}: {exc}")
+                break  # Only one market sell per ticker
+
+    return closed
+
+
+# ---------------------------------------------------------------------------
+# Dynamic entry price adjustment for bracket resubmission
+# ---------------------------------------------------------------------------
+
+def _adjust_entry_price(
+    thesis: dict[str, Any],
+    current_price: float,
+) -> tuple[float, float, float | None] | None:
+    """Adjust entry/stop/TP prices for bracket resubmission based on current price.
+
+    Returns (adjusted_entry, adjusted_stop, adjusted_tp) or None to skip.
+    """
+    original_entry = thesis.get("target_entry_price", 0)
+    original_stop = thesis.get("stop_loss_price", 0)
+    original_tp = thesis.get("take_profit_price")
+
+    if not original_entry or not original_stop or not current_price:
+        return None
+
+    # Don't chase: skip if price is >5% above original entry
+    if current_price > original_entry * 1.05:
+        return None
+
+    # Skip if price is below original stop (thesis invalidated)
+    if current_price < original_stop:
+        return None
+
+    # If current price is at or below original entry, use the original levels
+    if current_price <= original_entry:
+        return original_entry, original_stop, original_tp
+
+    # Price has moved above original entry — adjust
+    # Preserve the original risk ratio
+    original_risk_pct = (original_entry - original_stop) / original_entry
+
+    # Use support level if available and close to current price
+    tech_levels = thesis.get("key_technical_levels", {})
+    support = tech_levels.get("support")
+    resistance = tech_levels.get("resistance")
+
+    if support and abs(current_price - support) / current_price < 0.01:
+        # Price is within 1% of support — use support as entry
+        adjusted_entry = round(support, 2)
+    else:
+        # Small discount below current price (don't market-buy, still use limit)
+        adjusted_entry = round(current_price * 0.995, 2)
+
+    # Maintain same risk ratio on the adjusted entry
+    adjusted_stop = round(adjusted_entry * (1 - original_risk_pct), 2)
+
+    # Never widen risk below the original stop
+    adjusted_stop = max(adjusted_stop, original_stop)
+
+    # Adjust take-profit proportionally, or use resistance
+    adjusted_tp = None
+    if original_tp and original_tp > adjusted_entry:
+        if resistance and resistance > adjusted_entry:
+            adjusted_tp = round(resistance, 2)
+        else:
+            original_rr = (original_tp - original_entry) / (original_entry - original_stop)
+            adjusted_tp = round(adjusted_entry + original_rr * (adjusted_entry - adjusted_stop), 2)
+
+    return adjusted_entry, adjusted_stop, adjusted_tp
+
+
 def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     """Core execution: read thesis + sentry, run risk gates, place/cancel broker orders.
 
@@ -633,21 +1059,45 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     """
     log.info("Starting trade execution")
 
+    # --- Pre-flight safety checks (run before any thesis-based logic) ---
+
+    # Close orphaned positions (expired thesis or missing thesis entry)
+    try:
+        orphan_trades = close_orphaned_positions(cfg)
+        if orphan_trades:
+            log.info(f"Closed {len(orphan_trades)} orphaned positions")
+    except Exception as exc:
+        log.error(f"Orphan position check failed: {exc}")
+        orphan_trades = []
+
+    # Gap-down protection: detect unfilled stop-limits after overnight gaps
+    try:
+        gap_trades = check_gap_down_protection(cfg)
+        if gap_trades:
+            log.info(f"Gap-down protection: closed {len(gap_trades)} positions")
+    except Exception as exc:
+        log.error(f"Gap-down protection failed: {exc}")
+        gap_trades = []
+
+    # --- Load thesis and proceed with normal execution ---
+
     thesis_doc = _load("weekly_thesis.json")
     sentry_doc = _load("sentry_signals.json")
     data_bundle = _load("data_bundle.json")
 
     if not thesis_doc.get("theses"):
         log.warning("No weekly thesis - skipping execution")
-        return []
+        return orphan_trades + gap_trades
 
-    # Guard: refuse to trade on expired thesis
-    expires_at = thesis_doc.get("expires_at", "")
-    if expires_at:
-        expiry = datetime.fromisoformat(expires_at)
-        if datetime.now(timezone.utc) > expiry:
-            log.warning("Thesis expired - skipping execution")
-            return []
+    # Warn if thesis is overdue for review, but don't block execution
+    next_review = thesis_doc.get("next_review_at", "")
+    if next_review:
+        try:
+            review_dt = datetime.fromisoformat(next_review)
+            if datetime.now(timezone.utc) > review_dt:
+                log.warning("Thesis overdue for weekly review — executing with current thesis")
+        except (ValueError, TypeError):
+            pass
 
     account = get_account(cfg)
     portfolio_value = float(account.get("portfolio_value", 0))
@@ -660,6 +1110,8 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     )
 
     positions = get_positions(cfg)
+
+    executed: list[dict[str, Any]] = orphan_trades + gap_trades
 
     # Resubmit any expired bracket orders before processing new entries
     try:
@@ -675,8 +1127,6 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     sentry_signals = {
         s["ticker"]: s for s in sentry_doc.get("signals", [])
     }
-
-    executed: list[dict[str, Any]] = []
 
     for thesis in thesis_doc["theses"]:
         ticker = thesis.get("ticker")
@@ -757,7 +1207,26 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                 log.error(f"Bearish exit failed for {ticker}: {exc}")
 
         # ------------------------------------------------------------------
-        # 4. Holding a BULLISH position: ensure stop-loss order exists
+        # 4a. ADJUST review action: update stop/TP levels for held position
+        # ------------------------------------------------------------------
+        review_action = thesis.get("review_action", "NEW")
+        if review_action == "ADJUST" and ticker in held_tickers:
+            position = get_position(ticker, cfg)
+            if position:
+                qty = int(float(position.get("qty", 0)))
+                new_stop = thesis.get("stop_loss_price")
+                new_tp = thesis.get("take_profit_price")
+                if new_stop and qty > 0:
+                    log.info(f"ADJUST: Replacing stop for {ticker} to ${new_stop:.2f}")
+                    try:
+                        cancel_all_orders_for_ticker(ticker, cfg)
+                        place_native_stop_loss(ticker, qty, new_stop, cfg)
+                    except Exception as exc:
+                        log.error(f"Failed to adjust stop for {ticker}: {exc}")
+            continue
+
+        # ------------------------------------------------------------------
+        # 4b. Holding a BULLISH position: ensure stop-loss + trailing stop
         # ------------------------------------------------------------------
         elif direction == "BULLISH" and ticker in held_tickers:
             position = get_position(ticker, cfg)
@@ -779,8 +1248,23 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                     )
                     try:
                         place_native_stop_loss(ticker, qty, stop_price, cfg)
+                        # Refresh orders for trailing stop check
+                        open_orders = get_open_orders(ticker, cfg)
                     except Exception as exc:
                         log.error(f"Failed to place stop for {ticker}: {exc}")
+
+            # Trailing stop: ratchet the stop up as the position gains
+            try:
+                manage_trailing_stop(ticker, thesis, position, open_orders, cfg)
+            except Exception as exc:
+                log.error(f"Trailing stop management failed for {ticker}: {exc}")
+
+    # Clean up trailing state for tickers no longer held
+    try:
+        final_positions = get_positions(cfg)
+        _cleanup_trailing_state({p["symbol"] for p in final_positions})
+    except Exception:
+        pass
 
     log.info(f"Execution complete: {len(executed)} actions taken")
     return executed

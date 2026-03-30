@@ -72,6 +72,7 @@ config.py
 ├── data_fetcher.py         <- Master data collection (uses all above)
 ├── weekly_analyst.py       <- Two-pass Claude analysis (uses data_fetcher, performance)
 ├── daily_sentry.py         <- Three-layer sentry (uses data_fetcher, Gemini)
+├── price_check.py          <- Lightweight intraday price checks (no LLM)
 └── executor.py             <- Trade execution (uses risk_manager, Alpaca API)
 ```
 
@@ -92,6 +93,8 @@ All state lives in `state/` as JSON files. No database.
 | `portfolio.json` | Initial portfolio state | manual |
 | `peak_portfolio.json` | High-water mark for drawdown | risk_manager |
 | `thesis_history.json` | Archived theses (52 weeks) | weekly_analyst |
+| `trailing_stops.json` | Per-ticker trailing stop HWM + state | executor |
+| `pricecheck_signals.json` | Latest intraday price check results | price_check |
 
 ---
 

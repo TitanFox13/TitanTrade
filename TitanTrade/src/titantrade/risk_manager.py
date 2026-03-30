@@ -26,6 +26,8 @@ MAX_SECTOR_EXPOSURE_PCT = 40.0  # No more than 40% of portfolio in one sector
 MIN_CASH_RESERVE_PCT = 20.0     # Always keep 20% cash for opportunities
 MIN_CONFIDENCE = 0.70           # Only trade when AI confidence >= 70%
 ATR_RISK_BUDGET = 0.02          # Target 2% of portfolio at risk per position (ATR-based)
+MACRO_BLACKOUT_HOURS = 24       # No new entries within 24h of major macro events
+MAX_AVG_CORRELATION = 0.75      # Block entry if average correlation with held tickers > 75%
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +204,78 @@ def volatility_adjusted_shares(
 # Confidence threshold
 # ---------------------------------------------------------------------------
 
+def check_macro_blackout(economic_calendar: list[dict[str, Any]]) -> tuple[bool, str]:
+    """Check if a major macro event is within MACRO_BLACKOUT_HOURS.
+
+    Returns (is_blocked, event_description).
+    """
+    if not economic_calendar:
+        return False, ""
+
+    now = datetime.now(timezone.utc)
+    for event in economic_calendar:
+        event_date_str = event.get("date", "")
+        if not event_date_str:
+            continue
+        try:
+            event_dt = datetime.fromisoformat(event_date_str.replace("Z", "+00:00"))
+            if event_dt.tzinfo is None:
+                event_dt = event_dt.replace(hour=14, tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            try:
+                event_dt = datetime(
+                    *[int(x) for x in event_date_str[:10].split("-")],
+                    hour=14, tzinfo=timezone.utc,
+                )
+            except (ValueError, TypeError):
+                continue
+
+        hours_until = (event_dt - now).total_seconds() / 3600
+        if 0 <= hours_until <= MACRO_BLACKOUT_HOURS:
+            event_name = event.get("event", "Unknown macro event")
+            log.warning(
+                f"MACRO BLACKOUT: {event_name} in {hours_until:.0f}h — "
+                f"blocking new entries"
+            )
+            return True, event_name
+
+    return False, ""
+
+
+def check_correlation_limit(
+    ticker: str,
+    held_tickers: list[str],
+    correlation_matrix: dict[str, dict[str, float]],
+) -> tuple[bool, float]:
+    """Check if adding this ticker would make the portfolio too correlated.
+
+    Returns (is_allowed, avg_correlation_with_held).
+    """
+    if not held_tickers or ticker not in correlation_matrix:
+        return True, 0.0
+
+    corrs = []
+    ticker_corrs = correlation_matrix.get(ticker, {})
+    for held in held_tickers:
+        c = ticker_corrs.get(held)
+        if c is not None:
+            corrs.append(c)
+
+    if not corrs:
+        return True, 0.0
+
+    avg_corr = sum(corrs) / len(corrs)
+
+    if avg_corr > MAX_AVG_CORRELATION:
+        log.warning(
+            f"CORRELATION LIMIT: {ticker} avg correlation {avg_corr:.2f} "
+            f"with held positions exceeds {MAX_AVG_CORRELATION}"
+        )
+        return False, round(avg_corr, 3)
+
+    return True, round(avg_corr, 3)
+
+
 def passes_confidence_threshold(
     ticker: str, confidence: float, threshold: float = MIN_CONFIDENCE
 ) -> bool:
@@ -228,6 +302,8 @@ def pre_trade_check(
     stock_atr: float | None,
     earnings_blocked: bool,
     cfg: Config,
+    economic_calendar: list[dict[str, Any]] | None = None,
+    correlation_matrix: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, Any]:
     """Run all risk checks before allowing a trade.
 
@@ -334,6 +410,27 @@ def pre_trade_check(
         result["gate_results"].setdefault("sector_exposure", {
             "passed": False, "detail": "Not evaluated (no shares to size)",
         })
+
+    # Gate 7: Macro blackout
+    if economic_calendar:
+        macro_blocked, macro_event = check_macro_blackout(economic_calendar)
+        if macro_blocked:
+            _fail("macro_blackout", f"Macro event within {MACRO_BLACKOUT_HOURS}h: {macro_event}")
+        else:
+            _pass("macro_blackout", "No major macro events imminent")
+    else:
+        _pass("macro_blackout", "No economic calendar data (skipped)")
+
+    # Gate 8: Correlation limit
+    if correlation_matrix and shares > 0:
+        held = [p.get("symbol", "") for p in positions]
+        corr_allowed, avg_corr = check_correlation_limit(ticker, held, correlation_matrix)
+        if not corr_allowed:
+            _fail("correlation", f"Avg correlation {avg_corr:.2f} with held positions exceeds {MAX_AVG_CORRELATION}")
+        else:
+            _pass("correlation", f"Avg correlation {avg_corr:.2f} within limit")
+    else:
+        _pass("correlation", "No correlation data (skipped)")
 
     # Final determination
     if result["failed_gates"]:

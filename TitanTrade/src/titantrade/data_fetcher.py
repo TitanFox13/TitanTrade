@@ -140,6 +140,147 @@ def fetch_sec_filings(ticker: str, cfg: Config) -> list[dict[str, Any]]:
     ]
 
 
+def fetch_analyst_ratings(ticker: str, cfg: Config) -> dict[str, Any]:
+    """Fetch analyst consensus ratings and price targets from FMP."""
+    result: dict[str, Any] = {}
+
+    # Consensus ratings
+    url = f"{cfg.fmp.base_url}/grade/{ticker}"
+    params = {"apikey": cfg.fmp.key, "limit": "10"}
+    try:
+        resp = fetch_with_retry("GET", url, params=params)
+        grades = resp.json()
+        if grades and isinstance(grades, list):
+            recent = grades[:10]
+            result["recent_grades"] = [
+                {
+                    "date": g.get("date", ""),
+                    "company": g.get("gradingCompany", ""),
+                    "action": g.get("newGrade", ""),
+                    "previous": g.get("previousGrade", ""),
+                }
+                for g in recent
+            ]
+    except Exception as exc:
+        log.warning(f"Analyst grades fetch failed for {ticker}: {exc}")
+
+    # Price target consensus
+    url2 = f"{cfg.fmp.base_url}/price-target-consensus/{ticker}"
+    params2 = {"apikey": cfg.fmp.key}
+    try:
+        resp2 = fetch_with_retry("GET", url2, params=params2)
+        data = resp2.json()
+        if data and isinstance(data, list) and data[0]:
+            pt = data[0]
+            result["price_target"] = {
+                "consensus": pt.get("targetConsensus"),
+                "high": pt.get("targetHigh"),
+                "low": pt.get("targetLow"),
+                "median": pt.get("targetMedian"),
+            }
+    except Exception as exc:
+        log.warning(f"Price target fetch failed for {ticker}: {exc}")
+
+    return result
+
+
+def fetch_insider_trades(ticker: str, cfg: Config) -> list[dict[str, Any]]:
+    """Fetch recent Form 4 insider trades via SEC-API.
+
+    Returns structured list of insider buys/sells from the last 30 days.
+    """
+    if not cfg.sec_api.key:
+        return []
+
+    url = f"{cfg.sec_api.base_url}/v1/filings"
+    params = {"token": cfg.sec_api.key}
+
+    from_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
+
+    query_body = {
+        "query": {
+            "query_string": {
+                "query": (
+                    f'ticker:"{ticker}" AND formType:"4" AND '
+                    f'filedAt:{{{from_date} TO *}}'
+                )
+            }
+        },
+        "from": "0",
+        "size": "10",
+        "sort": [{"filedAt": {"order": "desc"}}],
+    }
+
+    try:
+        resp = fetch_with_retry("POST", url, params=params, json_body=query_body)
+        data = resp.json()
+    except Exception as exc:
+        log.warning(f"SEC-API Form 4 fetch failed for {ticker}: {exc}")
+        return []
+
+    filings = data.get("filings", [])
+    results = []
+    for f in filings:
+        results.append({
+            "filed_at": f.get("filedAt", ""),
+            "insider_name": f.get("reportingOwner", {}).get("name", "") if isinstance(f.get("reportingOwner"), dict) else "",
+            "description": f.get("description", ""),
+            "url": f.get("linkToHtml", ""),
+        })
+
+    return results
+
+
+def fetch_economic_calendar(cfg: Config, days_ahead: int = 7) -> list[dict[str, Any]]:
+    """Fetch upcoming macro events (FOMC, CPI, jobs, GDP, PPI) from FMP.
+
+    Returns list of high-impact events in the next N days.
+    """
+    today = datetime.now(timezone.utc).date()
+    url = f"{cfg.fmp.base_url}/economic_calendar"
+    params = {
+        "from": today.isoformat(),
+        "to": (today + timedelta(days=days_ahead)).isoformat(),
+        "apikey": cfg.fmp.key,
+    }
+
+    HIGH_IMPACT_KEYWORDS = {
+        "FOMC", "Federal Funds Rate", "Interest Rate Decision",
+        "CPI", "Consumer Price Index",
+        "Non-Farm", "Nonfarm", "Employment",
+        "PPI", "Producer Price",
+        "GDP", "Gross Domestic Product",
+        "Retail Sales",
+        "PCE", "Personal Consumption",
+    }
+
+    try:
+        resp = fetch_with_retry("GET", url, params=params)
+        data = resp.json()
+    except Exception as exc:
+        log.warning(f"Economic calendar fetch failed: {exc}")
+        return []
+
+    events = []
+    for entry in data:
+        event_name = entry.get("event", "")
+        country = entry.get("country", "")
+        if country != "US":
+            continue
+        if any(kw.lower() in event_name.lower() for kw in HIGH_IMPACT_KEYWORDS):
+            events.append({
+                "date": entry.get("date", ""),
+                "event": event_name,
+                "impact": entry.get("impact", ""),
+                "previous": entry.get("previous"),
+                "estimate": entry.get("estimate"),
+            })
+
+    return events
+
+
 def build_stock_data(ticker: str, cfg: Config) -> dict[str, Any]:
     """Build complete data for a single stock: prices, indicators, news, filings."""
     # Fetch full history for indicators
@@ -156,10 +297,13 @@ def build_stock_data(ticker: str, cfg: Config) -> dict[str, Any]:
 
     return {
         "ohlcv_recent": recent_bars,
+        "ohlcv_full": all_bars,  # Kept for correlation/RS computation
         "technical_indicators": indicators,
         "atr_14": stock_atr,
         "news": fetch_news(ticker, cfg),
         "sec_filings": fetch_sec_filings(ticker, cfg),
+        "insider_trades": fetch_insider_trades(ticker, cfg),
+        "analyst_ratings": fetch_analyst_ratings(ticker, cfg),
     }
 
 
@@ -208,9 +352,42 @@ def build_data_bundle(cfg: Config) -> dict[str, Any]:
                 "error": str(exc),
             }
 
+    # Fetch economic calendar (macro events)
+    try:
+        macro_events = fetch_economic_calendar(cfg, days_ahead=7)
+        if macro_events:
+            log.info(f"Macro events in next 7 days: {[e['event'] for e in macro_events]}")
+    except Exception as exc:
+        log.error(f"Economic calendar fetch failed: {exc}")
+        macro_events = []
+
+    # Compute relative strength vs SPY for each stock
+    from titantrade.indicators import relative_strength, correlation
+
+    spy_bars = market_ctx.pop("_spy_bars", [])
+    closes_map: dict[str, list[float]] = {}
+
+    for ticker, stock_data in stocks.items():
+        full_bars = stock_data.pop("ohlcv_full", [])
+        closes_map[ticker] = [b["close"] for b in full_bars] if full_bars else []
+        if full_bars and spy_bars:
+            stock_data["relative_strength_vs_spy"] = relative_strength(full_bars, spy_bars)
+
+    # Pairwise correlation matrix (60-day) across watchlist for Pass 2
+    tickers_list = [t for t in cfg.trading.watchlist if len(closes_map.get(t, [])) >= 60]
+    corr_matrix: dict[str, dict[str, float]] = {}
+    for i, t1 in enumerate(tickers_list):
+        for t2 in tickers_list[i + 1:]:
+            c = correlation(closes_map[t1], closes_map[t2], period=60)
+            if c is not None:
+                corr_matrix.setdefault(t1, {})[t2] = c
+                corr_matrix.setdefault(t2, {})[t1] = c
+
     bundle: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "market_context": market_ctx,
+        "economic_calendar": macro_events,
+        "correlation_matrix": corr_matrix,
         "stocks": stocks,
     }
 

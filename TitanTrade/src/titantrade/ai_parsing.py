@@ -110,9 +110,13 @@ THESIS_DEFAULTS = {
     "key_technical_levels": {},
     "reasoning": "",
     "sector": "Unknown",
+    "hold_horizon": "short_term",
+    "review_action": "NEW",
 }
 
 VALID_THESIS_VALUES = {"BULLISH", "BEARISH", "NEUTRAL"}
+VALID_HOLD_HORIZONS = {"short_term", "medium_term", "long_term"}
+VALID_REVIEW_ACTIONS = {"NEW", "CONTINUE", "ADJUST", "CLOSE"}
 
 SENTRY_DEFAULTS = {
     "signal": "CONTINUE",
@@ -183,6 +187,18 @@ def validate_thesis(raw: dict[str, Any], ticker: str) -> dict[str, Any]:
     ):
         result["stop_loss_price"] = round(result["target_entry_price"] * 0.95, 2)
         log.warning(f"Missing stop-loss for {ticker} - defaulting to 5% below entry")
+
+    # Validate hold_horizon
+    horizon = str(result.get("hold_horizon", "short_term")).lower().strip()
+    if horizon not in VALID_HOLD_HORIZONS:
+        horizon = "short_term"
+    result["hold_horizon"] = horizon
+
+    # Validate review_action
+    action = str(result.get("review_action", "NEW")).upper().strip()
+    if action not in VALID_REVIEW_ACTIONS:
+        action = "NEW"
+    result["review_action"] = action
 
     return result
 

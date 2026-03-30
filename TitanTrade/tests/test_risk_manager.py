@@ -208,7 +208,7 @@ class TestPreTradeCheck:
         assert result["allowed"] is True
         assert result["shares"] > 0
         assert result["failed_gates"] == []
-        assert len(result["gate_results"]) == 6
+        assert len(result["gate_results"]) == 8
 
     def test_confidence_gate_fails(
         self, tmp_state_dir, fake_config, bullish_thesis, sample_positions
@@ -294,7 +294,7 @@ class TestPreTradeCheck:
         )
         assert result["allowed"] is False
         # All 6 gates should have results
-        assert len(result["gate_results"]) == 6
+        assert len(result["gate_results"]) == 8
         for gate in ("confidence", "earnings", "drawdown", "cash_reserve", "position_size", "sector_exposure"):
             assert gate in result["gate_results"]
 

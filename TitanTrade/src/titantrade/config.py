@@ -58,12 +58,20 @@ class GeminiConfig:
 @dataclass(frozen=True)
 class TradingSettings:
     watchlist: list[str] = field(default_factory=lambda: [
-        "AAPL", "NVDA", "TSLA", "MSFT", "AMZN",
-        "GOOGL", "META", "BRK.B", "LLY", "JPM",
+        "CRWD", "ANET", "LLY", "DXCM", "HCA",
+        "JPM", "GS", "DVN", "FANG", "URI",
+        "GE", "DASH", "DECK", "FCX", "EQIX",
     ])
     risk_per_trade: float = 0.10
     trading_mode: str = "paper"
     stop_loss_pct: float = 0.05
+    trailing_trigger_pct: float = 0.05   # Activate trailing stop after 5% gain
+    trailing_distance_pct: float = 0.03  # Trail 3% below high-water mark
+    hedge_instruments: list[str] = field(default_factory=lambda: [
+        "SH",    # Inverse S&P 500 (1x)
+        "PSQ",   # Inverse Nasdaq 100 (1x)
+        "SDS",   # Inverse S&P 500 (2x) — more aggressive
+    ])
 
 
 @dataclass(frozen=True)

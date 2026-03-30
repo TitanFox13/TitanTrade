@@ -296,5 +296,9 @@ def build_market_context(cfg: Config) -> dict[str, Any]:
         },
     }
 
+    # Include raw bars for downstream relative strength / correlation computation
+    # These are stripped before saving to state
+    context["_spy_bars"] = spy_bars
+
     log.info(f"Market regime: {regime} | VIX: {vix_level} | SPY 5d: {context['spy']['return_5d']}%")
     return context

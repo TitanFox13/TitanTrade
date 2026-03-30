@@ -64,6 +64,46 @@
 - [x] Settings screen in Flutter app (change data path, configurable refresh interval)
 - [x] Dynamic refresh interval across all 7 providers (10s/15s/30s/60s/120s)
 
+## Phase 1.10: Position Protection & Monitoring
+- [x] Trailing stop mechanism (5% trigger, 3% trail below HWM)
+- [x] Thesis expiry: force-close orphaned positions with no active monitoring
+- [x] Dynamic entry price adjustment on bracket resubmission (current price awareness)
+- [x] Lightweight intraday price checks between sentry runs (zero LLM cost)
+- [x] Gap-down protection: detect unfilled stop-limits and market-sell immediately
+- [x] New CLI commands: `pricecheck`, `gapcheck`
+- [x] FastAPI HTTP server for Flutter app to connect remotely
+- [x] Cloudflare tunnel integration (docker-compose with cloudflared service)
+
+## Phase 1.11: Strategy Improvements
+- [x] Economic calendar awareness (FMP /economic_calendar + Gate 7 macro blackout)
+- [x] Analyst ratings and price target consensus (FMP upgrades/downgrades)
+- [x] Relative strength vs SPY (5d/20d/60d outperformance metric)
+- [x] Insider trading data (Form 4 filings via SEC-API)
+- [x] Pairwise correlation matrix (60-day rolling) + Gate 8 correlation limit
+- [x] Sentiment divergence detection (prompt enrichment)
+- [x] Mean reversion setup detection (RSI < 30 + 200-SMA proximity)
+- [x] Earnings run-up strategy (10-15 days before earnings)
+- [x] Two-tranche entry (60% at target + 40% at 1.5% discount)
+- [x] Time-of-day entry optimization (shifted to 10:15 AM ET, after opening volatility)
+
+## Phase 1.12: Flexible Holding & Backtesting
+- [x] Diversified watchlist: 15 stocks across 8 sectors (tech, healthcare, finance, energy, industrial, consumer, materials, real estate)
+- [x] Flexible hold horizons: short_term (1-2w), medium_term (2-6w), long_term (6w+)
+- [x] Weekly review pipeline: held positions get CONTINUE/ADJUST/CLOSE review, not forced expiry
+- [x] Removed 14-day hard thesis expiry — replaced with weekly review cycle
+- [x] CLOSE review action triggers position exit (Claude's explicit decision)
+- [x] ADJUST review action updates stop/TP levels
+- [x] Backtesting engine: synthetic thesis, portfolio simulator, metrics computation
+- [x] Backtest CLI: `python -m titantrade backtest [data-dir]`
+- [x] Historical data downloader: `python -m titantrade download-history [data-dir]`
+- [x] Backtest metrics: return, alpha vs SPY, win rate, Sharpe, Sortino, max drawdown, profit factor
+
+## Phase 1.13: Bear Market Hedging & Execution Quality
+- [x] Inverse ETF hedging: SH/PSQ/SDS analyzed in bearish/crisis regimes
+- [x] Slippage model in backtester (0.15% per fill, configurable)
+- [x] Slippage-aware limit exits for non-urgent ABORT signals
+- [x] Limit sell function for executor (reduces market order slippage)
+
 ## Phase 2: Testing & Validation
 - [x] Unit tests for indicators (known-good RSI/MACD values)
 - [x] Unit tests for risk manager gates

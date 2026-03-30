@@ -279,3 +279,65 @@
 - Persisted via SharedPreferences so the choice survives app restarts
 **Trade-offs**:
 - Very short intervals (10s) increase file system reads, though impact is negligible for JSON files
+
+## Decision 022: Trailing Stop Mechanism
+**Date**: 2026-03-30
+**Decision**: Ratchet the stop-loss upward once a position gains 5%+ from entry. Trail 3% below the high-water mark.
+**Reasoning**:
+- Without trailing stops, a stock that runs up 12% can reverse and hit the original 5% stop, turning a winner into a loser
+- The trailing stop activates after 5% gain (enough to avoid whipsaw on normal volatility)
+- Trail distance of 3% is tight enough to lock in meaningful gains but wide enough to avoid premature exits
+- Never trails below entry price once activated (locks in at least breakeven)
+- Never trails below the original stop (doesn't widen risk)
+**Trade-offs**:
+- Requires cancelling and re-placing stop orders on Alpaca (brief moment with no stop during the swap)
+- Only checks during execution cycles, not real-time — a flash crash between cycles could miss the trail
+- High-water mark tracking adds a new state file (`trailing_stops.json`)
+
+## Decision 023: Thesis Expiry Handling for Held Positions
+**Date**: 2026-03-30
+**Decision**: Force-close positions that have no active thesis monitoring them (expired or missing from current weekly analysis).
+**Reasoning**:
+- Previously, when a thesis expired, the system refused new entries but left existing positions as orphans
+- Orphaned positions had only their original stop-loss — no sentry monitoring, no thesis-aware exit signals
+- This could leave capital tied up indefinitely with no active management
+**Trade-offs**:
+- Forced exits may sell at a loss even if the stock would have recovered
+- Acceptable: a position with no thesis is an unmanaged bet, and capital preservation > hope
+
+## Decision 024: Dynamic Entry Price Adjustment on Resubmission
+**Date**: 2026-03-30
+**Decision**: When resubmitting expired bracket orders, adjust the entry price based on current market conditions instead of blindly reusing Sunday's level.
+**Reasoning**:
+- A static limit order that was 1% below the stock on Sunday may be 4% below by Wednesday, meaning the stock has moved away and the thesis entry point is stale
+- Adjustment uses support levels from the thesis when available, otherwise a small discount below current price
+- Preserves the original risk ratio (stop distance as a percentage)
+- Won't chase: skips resubmission if price is >5% above original entry
+- Won't enter invalidated thesis: skips if price is below original stop
+**Trade-offs**:
+- One extra FMP quote call per resubmission (negligible cost)
+- May enter at a slightly worse price than Sunday's level — but at least it enters
+
+## Decision 025: Lightweight Intraday Price Checks
+**Date**: 2026-03-30
+**Decision**: Add pure price-based checks between the 9 AM and 3:30 PM sentry runs. Zero LLM cost — only checks SPY and per-stock adverse moves.
+**Reasoning**:
+- The 6.5-hour gap between sentry runs left positions unmonitored during peak trading hours
+- LLM-based checks every 2 hours would be wasteful — most of the sentry's value comes from the price-based Layer 2 override anyway
+- The lightweight checks replicate only Layers 1 and 2 (SPY drop, adverse price move) without Layer 3 (news analysis)
+- Run at 11 AM and 1 PM EST via cron — fills the gap without excessive API usage
+**Trade-offs**:
+- No news analysis during these checks — a breaking headline between 9 AM and 3:30 PM is not caught until the next sentry run
+- Acceptable: broker-native stops cover the catastrophic case, and the price-based check catches most institutional selling
+
+## Decision 026: Gap-Down Protection Fallback
+**Date**: 2026-03-30
+**Decision**: Detect unfilled stop-limit orders after overnight gaps and market-sell the unprotected position immediately.
+**Reasoning**:
+- Stop-limit orders can fail to fill when a stock gaps below both the stop price and limit price overnight
+- This leaves the position completely unprotected — the stop triggered but the limit didn't fill
+- Also catches the case where price gaps below the stop itself (stop never triggers, position sits open)
+- Runs as part of the daily execution cycle and as a standalone `gapcheck` CLI command
+**Trade-offs**:
+- Market sell after a gap-down means selling at a potentially much worse price than the intended stop
+- But the alternative is holding an unprotected position that could fall further

@@ -1,5 +1,13 @@
 {
-  "watchlist": ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "META", "BRK.B", "LLY", "JPM"],
+  "watchlist": [
+    "CRWD", "ANET",
+    "LLY", "DXCM", "HCA",
+    "JPM", "GS",
+    "DVN", "FANG",
+    "URI", "GE",
+    "DASH", "DECK",
+    "FCX", "EQIX"
+  ],
   "settings": {
     "risk_per_trade": 0.10,
     "trading_mode": "paper",

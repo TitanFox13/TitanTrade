@@ -19,21 +19,54 @@ def main() -> None:
         "analyze": "titantrade.weekly_analyst",
         "sentry": "titantrade.daily_sentry",
         "execute": "titantrade.executor",
+        "pricecheck": "titantrade.price_check",
     }
 
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print("TitanTrade - Semi-automated AI trading system")
         print()
         print("Commands:")
-        print("  fetch      Fetch data bundle (prices, news, filings)")
-        print("  analyze    Run weekly Claude analysis")
-        print("  sentry     Run daily Gemini sentry check")
-        print("  execute    Execute trades via Alpaca")
-        print("  resubmit   Resubmit expired bracket orders")
-        print("  full       Run full pipeline (fetch -> analyze -> sentry -> execute)")
+        print("  fetch            Fetch data bundle (prices, news, filings)")
+        print("  analyze          Run weekly Claude analysis")
+        print("  sentry           Run daily Gemini sentry check")
+        print("  execute          Execute trades via Alpaca")
+        print("  pricecheck       Intraday price check (no LLM, pure price)")
+        print("  gapcheck         Check for unfilled stop-limits after gap-downs")
+        print("  resubmit         Resubmit expired bracket orders")
+        print("  full             Full pipeline (fetch -> analyze -> sentry -> execute)")
+        print("  backtest [dir]   Run backtest on historical data (default: data/historical)")
+        print("  download-history [dir]  Download OHLCV from FMP for backtesting")
         sys.exit(0)
 
     command = sys.argv[1]
+
+    if command == "backtest":
+        from titantrade.backtest.engine import run_backtest, print_summary
+
+        data_dir = sys.argv[2] if len(sys.argv) > 2 else "data/historical"
+        result = run_backtest(data_dir=data_dir)
+        print_summary(result)
+        return
+
+    if command == "download-history":
+        from titantrade.backtest.data_loader import download_historical_data
+        from titantrade.config import load_config as _load_cfg
+
+        cfg = _load_cfg()
+        data_dir = sys.argv[2] if len(sys.argv) > 2 else "data/historical"
+        download_historical_data(cfg.trading.watchlist, cfg.fmp.key, data_dir)
+        return
+
+    if command == "gapcheck":
+        from titantrade.config import load_config
+        from titantrade.executor import check_gap_down_protection
+
+        cfg = load_config()
+        trades = check_gap_down_protection(cfg)
+        print(f"Gap-down protection: {len(trades)} positions closed")
+        for t in trades:
+            print(f"  SELL {t.get('shares', '?'):>5} {t['ticker']:<6} @ ${t.get('price', 0):.2f}")
+        return
 
     if command == "resubmit":
         from titantrade.config import load_config

@@ -101,7 +101,7 @@ class TestHandleBullishEntry:
         assert result is not None
         assert result["action"] == "BUY"
         assert result["ticker"] == "AAPL"
-        mock_bracket.assert_called_once()
+        assert mock_bracket.call_count >= 1  # 2-tranche: may call twice
 
     @patch("titantrade.executor.place_bracket_order")
     @patch("titantrade.executor.get_open_orders", return_value=[])

@@ -104,6 +104,28 @@ Partial fills are matched FIFO.
 
 ---
 
+## Backtest & Analysis (`/backtest`)
+
+Control panel for backtesting and on-demand analysis.
+
+**Actions (three buttons):**
+- **Download History**: Downloads ~3 years of OHLCV for all watchlist stocks from FMP (one-time)
+- **Run Backtest**: Simulates the trading rules against historical data (zero API cost after download)
+- **Run Analysis Now**: Triggers the full weekly analysis pipeline on demand (uses Claude tokens)
+
+Each action runs in the background on the server. The UI polls for job completion.
+
+**Backtest Results:**
+Once a backtest completes, displays the full metrics card:
+- Total return vs SPY, alpha
+- Win rate, avg win/loss, profit factor
+- Max drawdown (% and duration)
+- Sharpe and Sortino ratios
+- Average holding period
+- Exit trigger breakdown (stop-loss, take-profit, trailing stop, etc.)
+
+---
+
 ## Settings (`/settings`)
 
 - **Server URL**: Change the TitanTrade backend URL — validates via `GET /api/health` before saving

@@ -105,8 +105,14 @@ Add these to your server's crontab (`crontab -e`):
 # Weekly analyst: Sunday 20:00 UTC
 0 20 * * 0 cd /path/to/TitanTrade && docker compose run --rm titantrade full >> /var/log/titantrade-weekly.log 2>&1
 
-# Daily sentry + execute pre-market: Weekdays 14:00 UTC (09:00 EST)
-0 14 * * 1-5 cd /path/to/TitanTrade && docker compose run --rm titantrade sentry && docker compose run --rm titantrade execute >> /var/log/titantrade-daily.log 2>&1
+# Gap-down check: Weekdays 13:35 UTC (09:35 EST, 5 min after open)
+35 13 * * 1-5 cd /path/to/TitanTrade && docker compose run --rm titantrade gapcheck >> /var/log/titantrade-daily.log 2>&1
+
+# Daily sentry + execute: Weekdays 14:15 UTC (10:15 EST, after opening volatility settles)
+15 14 * * 1-5 cd /path/to/TitanTrade && docker compose run --rm titantrade sentry && docker compose run --rm titantrade execute >> /var/log/titantrade-daily.log 2>&1
+
+# Intraday price checks: Weekdays 16:00 + 18:00 UTC (11:00 + 13:00 EST)
+0 16,18 * * 1-5 cd /path/to/TitanTrade && docker compose run --rm titantrade pricecheck >> /var/log/titantrade-daily.log 2>&1
 
 # Daily sentry + execute pre-close: Weekdays 20:30 UTC (15:30 EST)
 30 20 * * 1-5 cd /path/to/TitanTrade && docker compose run --rm titantrade sentry && docker compose run --rm titantrade execute >> /var/log/titantrade-daily.log 2>&1

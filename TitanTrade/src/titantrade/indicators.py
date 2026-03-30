@@ -243,6 +243,75 @@ def price_vs_sma(
 
 
 # ---------------------------------------------------------------------------
+# Relative strength vs benchmark
+# ---------------------------------------------------------------------------
+
+def relative_strength(
+    stock_bars: list[dict[str, Any]],
+    benchmark_bars: list[dict[str, Any]],
+    periods: list[int] | None = None,
+) -> dict[str, float | None]:
+    """Compute relative strength: stock return minus benchmark return.
+
+    Positive RS means the stock is outperforming the benchmark.
+    """
+    if periods is None:
+        periods = [5, 20, 60]
+
+    stock_closes = _closes(stock_bars)
+    bench_closes = _closes(benchmark_bars)
+
+    result: dict[str, float | None] = {}
+    for p in periods:
+        if len(stock_closes) <= p or len(bench_closes) <= p:
+            result[f"rs_{p}d"] = None
+            continue
+        stock_ret = (stock_closes[-1] - stock_closes[-(p + 1)]) / stock_closes[-(p + 1)] * 100
+        bench_ret = (bench_closes[-1] - bench_closes[-(p + 1)]) / bench_closes[-(p + 1)] * 100
+        result[f"rs_{p}d"] = round(stock_ret - bench_ret, 2)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Correlation
+# ---------------------------------------------------------------------------
+
+def correlation(
+    closes_a: list[float],
+    closes_b: list[float],
+    period: int = 60,
+) -> float | None:
+    """Pearson correlation between two close price series over the last N days."""
+    a = closes_a[-period:]
+    b = closes_b[-period:]
+    n = min(len(a), len(b))
+    if n < 20:
+        return None
+    a, b = a[-n:], b[-n:]
+
+    # Convert to returns
+    ret_a = [(a[i] - a[i - 1]) / a[i - 1] for i in range(1, n) if a[i - 1] != 0]
+    ret_b = [(b[i] - b[i - 1]) / b[i - 1] for i in range(1, n) if b[i - 1] != 0]
+    n = min(len(ret_a), len(ret_b))
+    if n < 10:
+        return None
+    ret_a, ret_b = ret_a[:n], ret_b[:n]
+
+    mean_a = sum(ret_a) / n
+    mean_b = sum(ret_b) / n
+
+    cov = sum((ret_a[i] - mean_a) * (ret_b[i] - mean_b) for i in range(n)) / n
+    std_a = (sum((x - mean_a) ** 2 for x in ret_a) / n) ** 0.5
+    std_b = (sum((x - mean_b) ** 2 for x in ret_b) / n) ** 0.5
+
+    if std_a == 0 or std_b == 0:
+        return None
+
+    return round(cov / (std_a * std_b), 3)
+
+
+# ---------------------------------------------------------------------------
 # Master function: compute all indicators for a stock
 # ---------------------------------------------------------------------------
 

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../providers/portfolio_provider.dart';
 import '../providers/sentry_provider.dart';
 import '../providers/trade_log_provider.dart';
+import '../providers/trailing_stops_provider.dart';
 import '../widgets/portfolio_summary_card.dart';
 import '../widgets/position_tile.dart';
 import '../widgets/sentry_badge.dart';
@@ -19,6 +20,7 @@ class DashboardScreen extends ConsumerWidget {
     final portfolio = ref.watch(portfolioProvider);
     final trades = ref.watch(tradeLogProvider);
     final sentry = ref.watch(sentryProvider);
+    final trailingStops = ref.watch(trailingStopsProvider);
 
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -41,9 +43,19 @@ class DashboardScreen extends ConsumerWidget {
           portfolio.when(
             loading: () => const SizedBox.shrink(),
             error: (e, st) => const SizedBox.shrink(),
-            data: (p) => p.positions.isEmpty
-                ? const Card(child: Padding(padding: EdgeInsets.all(20), child: Text('No open positions.')))
-                : Column(children: p.positions.map((pos) => PositionTile(position: pos)).toList()),
+            data: (p) {
+              final tsMap = trailingStops.valueOrNull ?? {};
+              return p.positions.isEmpty
+                  ? const Card(child: Padding(padding: EdgeInsets.all(20), child: Text('No open positions.')))
+                  : Column(
+                      children: p.positions
+                          .map((pos) => PositionTile(
+                                position: pos,
+                                trailingStop: tsMap[pos.ticker],
+                              ))
+                          .toList(),
+                    );
+            },
           ),
           const SizedBox(height: 24),
 

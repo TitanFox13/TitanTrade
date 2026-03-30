@@ -34,6 +34,7 @@ exist yet on a fresh deployment).
 | `/near-misses/:index` | Near Miss Detail |
 | `/watchlist` | Watchlist Management |
 | `/statistics` | Statistics / P&L |
+| `/backtest` | Backtest & Analysis (download, backtest, trigger analysis) |
 | `/settings` | Settings |
 | `/setup` | First-run directory picker |
 
@@ -54,13 +55,25 @@ and validates it by hitting `GET /api/health`.
 | `GET /api/sentry` | Latest CONTINUE/ABORT signals |
 | `GET /api/near-misses` | Trades blocked by 1–2 risk gates |
 | `GET /api/costs` | Per-API-call token usage and estimated costs |
+| `GET /api/trailing-stops` | Per-ticker trailing stop HWM and state |
+| `GET /api/pricecheck` | Latest intraday price check results |
 | `GET /api/watchlist` | Tracked tickers and settings |
+| `GET /api/backtest-results` | Latest backtest results |
+| `GET /api/jobs/{id}` | Job status for background tasks |
 
-### Write endpoint
+### Write endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
 | `PUT /api/watchlist` | Update the tracked tickers list |
+
+### Action endpoints (trigger background tasks)
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/actions/analyze` | Trigger weekly analysis pipeline (uses Claude tokens) |
+| `POST /api/actions/download-history` | Download historical OHLCV for backtesting |
+| `POST /api/actions/backtest` | Run backtest on downloaded data |
 
 ---
 
@@ -80,6 +93,8 @@ lib/
     sentry_signal.dart         # SentryBundle + SentrySignal
     near_miss.dart             # NearMiss, GateResult, TradeContext, TechnicalSnapshot
     cost_record.dart           # CostRecord (AI API usage + estimated cost)
+    trailing_stop.dart         # TrailingStopState (per-ticker HWM, trail price, active flag)
+    price_check_signal.dart    # PriceCheckResult + PriceCheckAction
   providers/
     config_provider.dart       # TitanTrade directory path
     portfolio_provider.dart    # Reads portfolio.json
@@ -89,6 +104,8 @@ lib/
     near_miss_provider.dart    # Reads near_misses.json (polled)
     watchlist_provider.dart    # Reads/writes data/watchlist.json
     costs_provider.dart        # Reads state/costs.json (polled)
+    trailing_stops_provider.dart  # Reads state/trailing_stops.json (polled)
+    price_check_provider.dart    # Reads state/pricecheck_signals.json (polled)
   screens/
     setup_screen.dart
     dashboard_screen.dart

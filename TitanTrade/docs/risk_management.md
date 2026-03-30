@@ -15,7 +15,7 @@ losses. Missed opportunities are cheap; blown accounts are permanent.
 - **Market regime awareness**: Fewer trades in bearish/crisis regimes
 
 ### Line 2: Programmatic Risk Gates
-Six hard gates between the AI and the brokerage, enforced in code:
+Eight hard gates between the AI and the brokerage, enforced in code:
 
 #### Gate 1: Confidence Threshold (>= 0.70)
 - Filters out weak conviction calls
@@ -54,12 +54,24 @@ Six hard gates between the AI and the brokerage, enforced in code:
 - Blocks new entry if it would push sector above 40%
 - Prevents tech concentration disaster (5 of 10 watchlist stocks are tech-adjacent)
 
+#### Gate 7: Macro Event Blackout (24 hours)
+- Checks FMP economic calendar for high-impact events (FOMC, CPI, jobs, GDP, PPI)
+- Blocks new entries within 24 hours of a major macro event
+- Macro events can move the entire market 1-3% in minutes, creating unhedgeable risk
+
+#### Gate 8: Correlation Limit (75% average)
+- Computes 60-day pairwise correlation between the new stock and all held positions
+- Blocks entry if the average correlation exceeds 75%
+- Prevents hidden concentration: AAPL+GOOGL+META are in different sectors but 80% correlated
+
 ### Line 3: Broker-Native Stop-Losses
 - Stop-loss orders live on Alpaca's servers
 - Fire in real time, 24/7, even if bot is completely offline
 - Stop-limit with 1% buffer (prevents unlimited slippage)
 - Every execution run checks for orphaned positions without stops
 - Bracket orders ensure stop is atomically placed with entry
+- **Trailing stops**: once a position gains 5%+, the stop ratchets up to trail 3% below the high-water mark
+- **Gap-down protection**: if a stop-limit fails to fill due to a price gap, the position is immediately market-sold
 
 ## Daily Protection (Sentry)
 
@@ -118,4 +130,7 @@ Fixed Fallback (no ATR available):
 | Concentrated portfolio | Pass 2 enforces diversification |
 | Overtrading | Cash reserve + 3-5 trade limit per week |
 | Volatile stock oversized | ATR-based sizing scales down |
-| Stale analysis | 14-day thesis expiry |
+| Stale analysis | 14-day thesis expiry + orphan position closing |
+| Stop-limit gap failure | Gap-down protection (market sell fallback) |
+| Giving back open gains | Trailing stop (5% trigger, 3% trail) |
+| Monitoring gap (6.5h) | Intraday price checks (no LLM cost) |
