@@ -100,7 +100,7 @@ def fetch_news(ticker: str, cfg: Config, limit: int = 50) -> list[dict[str, Any]
 
 def fetch_sec_filings(ticker: str, cfg: Config) -> list[dict[str, Any]]:
     """Check for recent SEC filings (8-K, 10-Q, 10-K) from SEC-API.io."""
-    url = f"{cfg.sec_api.base_url}/v1/filings"
+    url = cfg.sec_api.base_url
     params = {"token": cfg.sec_api.key}
 
     yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime(
@@ -194,7 +194,7 @@ def fetch_insider_trades(ticker: str, cfg: Config) -> list[dict[str, Any]]:
     if not cfg.sec_api.key:
         return []
 
-    url = f"{cfg.sec_api.base_url}/v1/filings"
+    url = cfg.sec_api.base_url
     params = {"token": cfg.sec_api.key}
 
     from_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime(

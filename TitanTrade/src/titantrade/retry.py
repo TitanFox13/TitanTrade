@@ -15,6 +15,12 @@ MAX_RETRIES = 3
 BASE_DELAY = 2  # seconds
 
 
+DEFAULT_HEADERS = {
+    "User-Agent": "TitanTrade/1.0 (https://github.com)",
+    "Accept": "application/json",
+}
+
+
 def fetch_with_retry(
     method: str,
     url: str,
@@ -29,6 +35,7 @@ def fetch_with_retry(
     Retries up to 3 times on network errors and 5xx responses.
     Raises on 4xx errors immediately (client errors aren't retryable).
     """
+    merged_headers = {**DEFAULT_HEADERS, **(headers or {})}
     last_exc: Exception | None = None
 
     for attempt in range(1, MAX_RETRIES + 1):
@@ -37,7 +44,7 @@ def fetch_with_retry(
                 response = client.request(
                     method,
                     url,
-                    headers=headers,
+                    headers=merged_headers,
                     params=params,
                     json=json_body,
                 )

@@ -36,7 +36,7 @@ class FMPConfig:
 @dataclass(frozen=True)
 class SECAPIConfig:
     key: str = ""
-    base_url: str = "https://efts.sec-api.io"
+    base_url: str = "https://api.sec-api.io"
 
 
 @dataclass(frozen=True)
