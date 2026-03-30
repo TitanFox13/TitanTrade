@@ -42,7 +42,7 @@ class SECAPIConfig:
 @dataclass(frozen=True)
 class ClaudeConfig:
     key: str = ""
-    model: str = "claude-sonnet-4-6-20250514"
+    model: str = "claude-sonnet-4-20250514"
     temperature: float = 0.3
     max_tokens: int = 8192
 
@@ -243,7 +243,7 @@ def load_config() -> Config:
         ),
         claude=ClaudeConfig(
             key=keys["CLAUDE_KEY"],
-            model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6-20250514"),
+            model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
         ),
         gemini=GeminiConfig(
             key=keys["GEMINI_KEY"],

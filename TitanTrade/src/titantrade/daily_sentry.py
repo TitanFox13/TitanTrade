@@ -96,8 +96,8 @@ def load_weekly_thesis() -> dict[str, Any] | None:
 
 def _fetch_current_price(ticker: str, cfg: Config) -> float | None:
     """Fetch the current price using FMP quote endpoint (lightweight, no history)."""
-    url = f"{cfg.fmp.base_url}/quote/{ticker}"
-    params = {"apikey": cfg.fmp.key}
+    url = "https://financialmodelingprep.com/stable/quote"
+    params = {"symbol": ticker, "apikey": cfg.fmp.key}
     try:
         resp = fetch_with_retry("GET", url, params=params)
         data = resp.json()
@@ -110,8 +110,8 @@ def _fetch_current_price(ticker: str, cfg: Config) -> float | None:
 
 def _fetch_spy_quote(cfg: Config) -> float | None:
     """Fetch SPY's daily change percentage via quote endpoint."""
-    url = f"{cfg.fmp.base_url}/quote/SPY"
-    params = {"apikey": cfg.fmp.key}
+    url = "https://financialmodelingprep.com/stable/quote"
+    params = {"symbol": "SPY", "apikey": cfg.fmp.key}
     try:
         resp = fetch_with_retry("GET", url, params=params)
         data = resp.json()

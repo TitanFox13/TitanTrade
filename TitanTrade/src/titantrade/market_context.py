@@ -70,8 +70,8 @@ def _save_sector_cache(cache: dict[str, str]) -> None:
 
 def _fetch_sector_from_fmp(ticker: str, cfg: Config) -> str:
     """Look up a stock's sector from FMP company profile. Returns sector name."""
-    url = f"{cfg.fmp.base_url}/profile/{ticker}"
-    params = {"apikey": cfg.fmp.key}
+    url = "https://financialmodelingprep.com/stable/profile"
+    params = {"symbol": ticker, "apikey": cfg.fmp.key}
     try:
         resp = fetch_with_retry("GET", url, params=params)
         data = resp.json()
@@ -143,8 +143,8 @@ def _fetch_bars(ticker: str, cfg: Config, days: int = 250) -> list[dict[str, Any
 
 def _fetch_vix_level(cfg: Config) -> float | None:
     """Fetch the current VIX level."""
-    url = f"{cfg.fmp.base_url}/quote/%5EVIX"
-    params = {"apikey": cfg.fmp.key}
+    url = "https://financialmodelingprep.com/stable/index-quote"
+    params = {"symbol": "^VIX", "apikey": cfg.fmp.key}
     try:
         resp = fetch_with_retry("GET", url, params=params)
         data = resp.json()
@@ -157,7 +157,7 @@ def _fetch_vix_level(cfg: Config) -> float | None:
 
 def _fetch_treasury_yield(cfg: Config) -> dict[str, float | None]:
     """Fetch 10Y and 2Y Treasury yields from FMP."""
-    url = f"{cfg.fmp.base_url}/treasury"
+    url = "https://financialmodelingprep.com/stable/treasury-rates"
     params = {"apikey": cfg.fmp.key}
     result: dict[str, float | None] = {"yield_10y": None, "yield_2y": None}
     try:

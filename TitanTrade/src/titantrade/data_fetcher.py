@@ -69,9 +69,9 @@ def fetch_ohlcv(
 
 def fetch_news(ticker: str, cfg: Config, limit: int = 50) -> list[dict[str, Any]]:
     """Pull recent news headlines and snippets from FMP."""
-    url = f"{cfg.fmp.base_url}/stock_news"
+    url = "https://financialmodelingprep.com/stable/news/stock"
     params = {
-        "tickers": ticker,
+        "symbol": ticker,
         "limit": str(limit),
         "apikey": cfg.fmp.key,
     }
@@ -147,8 +147,8 @@ def fetch_analyst_ratings(ticker: str, cfg: Config) -> dict[str, Any]:
     result: dict[str, Any] = {}
 
     # Consensus ratings
-    url = f"{cfg.fmp.base_url}/grade/{ticker}"
-    params = {"apikey": cfg.fmp.key, "limit": "10"}
+    url = "https://financialmodelingprep.com/stable/grades"
+    params = {"symbol": ticker, "apikey": cfg.fmp.key, "limit": "10"}
     try:
         resp = fetch_with_retry("GET", url, params=params)
         grades = resp.json()
@@ -167,8 +167,8 @@ def fetch_analyst_ratings(ticker: str, cfg: Config) -> dict[str, Any]:
         log.warning(f"Analyst grades fetch failed for {ticker}: {exc}")
 
     # Price target consensus
-    url2 = f"{cfg.fmp.base_url}/price-target-consensus/{ticker}"
-    params2 = {"apikey": cfg.fmp.key}
+    url2 = "https://financialmodelingprep.com/stable/price-target-consensus"
+    params2 = {"symbol": ticker, "apikey": cfg.fmp.key}
     try:
         resp2 = fetch_with_retry("GET", url2, params=params2)
         data = resp2.json()
@@ -241,7 +241,7 @@ def fetch_economic_calendar(cfg: Config, days_ahead: int = 7) -> list[dict[str, 
     Returns list of high-impact events in the next N days.
     """
     today = datetime.now(timezone.utc).date()
-    url = f"{cfg.fmp.base_url}/economic_calendar"
+    url = "https://financialmodelingprep.com/stable/economics-calendar"
     params = {
         "from": today.isoformat(),
         "to": (today + timedelta(days=days_ahead)).isoformat(),

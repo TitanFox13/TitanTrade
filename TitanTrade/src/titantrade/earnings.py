@@ -24,7 +24,7 @@ def fetch_earnings_date(ticker: str, cfg: Config) -> str | None:
 
     Returns ISO date string (YYYY-MM-DD) or None if not found.
     """
-    url = f"{cfg.fmp.base_url}/earning_calendar"
+    url = "https://financialmodelingprep.com/stable/earnings-calendar"
     today = datetime.now(timezone.utc).date()
     params = {
         "from": today.isoformat(),
@@ -54,7 +54,7 @@ def fetch_all_earnings_dates(
     FMP returns the full calendar, so we only make one API call
     and filter for our watchlist.
     """
-    url = f"{cfg.fmp.base_url}/earning_calendar"
+    url = "https://financialmodelingprep.com/stable/earnings-calendar"
     today = datetime.now(timezone.utc).date()
     params = {
         "from": today.isoformat(),

@@ -3,27 +3,34 @@
 ## External APIs Used
 
 ### 1. Financial Modeling Prep (FMP)
-**Purpose**: Price data and news headlines
-**Base URL**: `https://financialmodelingprep.com/api/v3`
+**Purpose**: Price data, news, market context, earnings, economic calendar
+**Base URL**: `https://financialmodelingprep.com/stable`
 **Auth**: API key as query parameter `?apikey={FMP_KEY}`
 
 #### Endpoints Used
 
-| Endpoint | Purpose | Rate Limit |
-|----------|---------|------------|
-| `/historical-price-full/{symbol}` | OHLCV daily candles | 250/day (free) |
-| `/stock_news?tickers={symbol}` | News headlines | 250/day (free) |
-| `/quote/{symbol}` | Current price quote | 250/day (free) |
+| Endpoint | Purpose |
+|----------|---------|
+| `/stable/historical-price-eod/full?symbol=X` | OHLCV daily candles |
+| `/stable/news/stock?symbol=X` | News headlines |
+| `/stable/quote?symbol=X` | Current price quote |
+| `/stable/index-quote?symbol=^VIX` | VIX level |
+| `/stable/profile?symbol=X` | Company profile (sector) |
+| `/stable/treasury-rates` | 10Y and 2Y Treasury yields |
+| `/stable/earnings-calendar` | Upcoming earnings dates |
+| `/stable/economics-calendar` | Macro events (FOMC, CPI, etc.) |
+| `/stable/grades?symbol=X` | Analyst upgrades/downgrades |
+| `/stable/price-target-consensus?symbol=X` | Price target consensus |
 
 #### Example: OHLCV Data
 ```
-GET /api/v3/historical-price-full/AAPL?from=2026-03-24&to=2026-03-29&apikey=xxx
+GET /stable/historical-price-eod/full?symbol=AAPL&from=2026-03-24&to=2026-03-29&apikey=xxx
 ```
-Response: `{ "symbol": "AAPL", "historical": [{ "date": "...", "open": ..., "high": ..., "low": ..., "close": ..., "volume": ... }] }`
+Response: `[{ "date": "...", "open": ..., "high": ..., "low": ..., "close": ..., "volume": ... }]`
 
 #### Example: News
 ```
-GET /api/v3/stock_news?tickers=AAPL&limit=50&apikey=xxx
+GET /stable/news/stock?symbol=AAPL&limit=50&apikey=xxx
 ```
 Response: `[{ "symbol": "AAPL", "title": "...", "text": "...", "publishedDate": "..." }]`
 
@@ -97,7 +104,7 @@ POST /v2/orders
 | `/messages` | POST | Send analysis prompt, receive thesis |
 
 #### Configuration
-- Model: `claude-sonnet-4-6-20250514` (default) or `claude-opus-4-6-20250610`
+- Model: `claude-sonnet-4-20250514` (default) or configurable via `CLAUDE_MODEL` env var
 - Temperature: 0.3 (deterministic analysis)
 - Max tokens: 4096 per stock analysis
 
