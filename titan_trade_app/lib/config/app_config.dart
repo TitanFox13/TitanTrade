@@ -1,20 +1,18 @@
-import 'dart:io';
-
-import 'package:path/path.dart' as p;
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-const _key = 'titan_trade_data_path';
+const _urlKey = 'titan_trade_base_url';
 const _refreshKey = 'titan_trade_refresh_seconds';
 const defaultRefreshSeconds = 30;
 
-Future<String?> loadDataPath() async {
+Future<String?> loadBaseUrl() async {
   final prefs = await SharedPreferences.getInstance();
-  return prefs.getString(_key);
+  return prefs.getString(_urlKey);
 }
 
-Future<void> saveDataPath(String path) async {
+Future<void> saveBaseUrl(String url) async {
   final prefs = await SharedPreferences.getInstance();
-  await prefs.setString(_key, path);
+  await prefs.setString(_urlKey, url);
 }
 
 Future<int> loadRefreshInterval() async {
@@ -27,9 +25,13 @@ Future<void> saveRefreshInterval(int seconds) async {
   await prefs.setInt(_refreshKey, seconds);
 }
 
-bool validateDataPath(String path) {
-  return File(p.join(path, 'state', 'portfolio.json')).existsSync();
+/// Validates a server URL by hitting /api/health. Returns true if reachable.
+Future<bool> validateBaseUrl(String url) async {
+  try {
+    final uri = Uri.parse('$url/api/health');
+    final response = await http.get(uri).timeout(const Duration(seconds: 5));
+    return response.statusCode == 200;
+  } catch (_) {
+    return false;
+  }
 }
-
-String statePath(String root) => p.join(root, 'state');
-String logsPath(String root) => p.join(root, 'logs');

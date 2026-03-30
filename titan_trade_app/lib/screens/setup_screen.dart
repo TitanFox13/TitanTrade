@@ -1,4 +1,3 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,8 +12,9 @@ class SetupScreen extends ConsumerStatefulWidget {
 }
 
 class _SetupScreenState extends ConsumerState<SetupScreen> {
-  final _controller = TextEditingController();
+  final _controller = TextEditingController(text: 'https://');
   String? _error;
+  bool _loading = false;
 
   @override
   void dispose() {
@@ -22,27 +22,26 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     super.dispose();
   }
 
-  Future<void> _browse() async {
-    final result = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Select TitanTrade directory',
-    );
-    if (result != null) {
-      _controller.text = result;
-      setState(() => _error = null);
-    }
-  }
-
   Future<void> _confirm() async {
-    final path = _controller.text.trim();
-    if (path.isEmpty) {
-      setState(() => _error = 'Please select a directory.');
+    final url = _controller.text.trim().replaceAll(RegExp(r'/+$'), '');
+    if (url.isEmpty || url == 'https:/') {
+      setState(() => _error = 'Please enter the server URL.');
       return;
     }
-    if (!validateDataPath(path)) {
-      setState(() => _error = 'Invalid directory: state/portfolio.json not found.');
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final valid = await validateBaseUrl(url);
+    if (!mounted) return;
+    if (!valid) {
+      setState(() {
+        _loading = false;
+        _error = 'Could not reach $url/api/health — check the URL and try again.';
+      });
       return;
     }
-    await ref.read(dataPathProvider.notifier).setPath(path);
+    await ref.read(baseUrlProvider.notifier).setUrl(url);
   }
 
   @override
@@ -62,37 +61,32 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                   Text('Welcome to TitanTrade', style: theme.textTheme.headlineMedium),
                   const SizedBox(height: 8),
                   Text(
-                    'Select the TitanTrade project directory to get started.',
+                    'Enter the TitanTrade server URL to get started.',
                     style: theme.textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _controller,
-                          decoration: InputDecoration(
-                            labelText: 'TitanTrade directory',
-                            hintText: 'C:\\path\\to\\TitanTrade',
-                            errorText: _error,
-                            border: const OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      FilledButton.icon(
-                        onPressed: _browse,
-                        icon: const Icon(Icons.folder_open),
-                        label: const Text('Browse'),
-                      ),
-                    ],
+                  TextField(
+                    controller: _controller,
+                    decoration: InputDecoration(
+                      labelText: 'Server URL',
+                      hintText: 'https://trade.praguefun.cz',
+                      errorText: _error,
+                      border: const OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => _confirm(),
                   ),
                   const SizedBox(height: 24),
                   Align(
                     alignment: Alignment.centerRight,
                     child: FilledButton(
-                      onPressed: _confirm,
-                      child: const Text('Continue'),
+                      onPressed: _loading ? null : _confirm,
+                      child: _loading
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Connect'),
                     ),
                   ),
                 ],

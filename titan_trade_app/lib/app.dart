@@ -73,9 +73,9 @@ class AppShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final pathAsync = ref.watch(dataPathProvider);
+    final urlAsync = ref.watch(baseUrlProvider);
 
-    return pathAsync.when(
+    return urlAsync.when(
       loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (e, _) => Scaffold(body: Center(child: Text('Error: $e'))),
       data: (path) {

@@ -48,6 +48,7 @@ uv run python -m titantrade.executor
 ### Prerequisites
 - Docker and Docker Compose installed on your server
 - API keys for all services (see Environment Variables below)
+- Cloudflare tunnel token (see `CLOUDFLARE_TUNNEL_TOKEN` in Environment Variables)
 
 ### Setup
 
@@ -59,7 +60,7 @@ cd /path/to/TitanTrade
 2. Create environment file:
 ```bash
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env with your API keys and CLOUDFLARE_TUNNEL_TOKEN
 ```
 
 3. Ensure state files exist:
@@ -73,14 +74,20 @@ ls state/
 docker compose build
 ```
 
-5. Test with a manual run:
+5. Start the always-on services (API + tunnel):
 ```bash
-docker compose run --rm titantrade fetch
+docker compose up -d api cloudflared
 ```
 
-### Running Commands
+6. Verify the API is reachable:
+```bash
+curl https://trade.praguefun.cz/api/health
+# Expected: {"status": "ok"}
+```
 
-All TitanTrade CLI commands are passed as arguments to docker compose:
+### Running CLI Commands
+
+Cron jobs use the `titantrade` service which runs one-off commands:
 
 ```bash
 docker compose run --rm titantrade fetch      # Fetch data bundle
@@ -99,28 +106,32 @@ Add these to your server's crontab (`crontab -e`):
 0 20 * * 0 cd /path/to/TitanTrade && docker compose run --rm titantrade full >> /var/log/titantrade-weekly.log 2>&1
 
 # Daily sentry + execute pre-market: Weekdays 14:00 UTC (09:00 EST)
-# execute_trades auto-resubmits expired brackets before processing new entries
 0 14 * * 1-5 cd /path/to/TitanTrade && docker compose run --rm titantrade sentry && docker compose run --rm titantrade execute >> /var/log/titantrade-daily.log 2>&1
 
 # Daily sentry + execute pre-close: Weekdays 20:30 UTC (15:30 EST)
 30 20 * * 1-5 cd /path/to/TitanTrade && docker compose run --rm titantrade sentry && docker compose run --rm titantrade execute >> /var/log/titantrade-daily.log 2>&1
 ```
 
-### Docker Architecture
+### Docker Services
 
-- **Image**: Python 3.12-slim with uv package manager
-- **Volumes**: `./state` and `./logs` are bind-mounted for persistence between runs
-- **Environment**: API keys loaded from `.env` via `env_file:` directive
+| Service | Role | Always-on? |
+|---------|------|-----------|
+| `api` | FastAPI HTTP server — serves state files to Flutter app | Yes (`restart: unless-stopped`) |
+| `cloudflared` | Cloudflare tunnel — exposes `api:8000` at `trade.praguefun.cz` | Yes (`restart: unless-stopped`) |
+| `titantrade` | CLI runner — used for cron jobs | No (one-off) |
+
+- **Volumes**: `./state` and `./logs` bind-mounted so API and CLI share the same files
 - **Config**: `data/watchlist.json` is baked into the image (rebuild after changes)
-- **No ports**: CLI-only container, no HTTP server
 
 ### Rebuilding After Changes
 
 ```bash
 # After code or watchlist changes
 docker compose build
+docker compose up -d api  # Restart API with new image
 
-# After .env changes — no rebuild needed (env file is read at runtime)
+# After .env changes — no rebuild needed
+docker compose up -d api cloudflared
 ```
 
 ---

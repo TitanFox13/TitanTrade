@@ -1,28 +1,25 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
+import 'package:http/http.dart' as http;
 
 import '../models/cost_record.dart';
 import 'config_provider.dart';
 
 final costsProvider = StreamProvider<List<CostRecord>>((ref) async* {
-  final pathAsync = ref.watch(dataPathProvider);
+  final urlAsync = ref.watch(baseUrlProvider);
   final refreshSeconds = ref.watch(refreshIntervalProvider);
-  final rootPath = pathAsync.valueOrNull;
-  if (rootPath == null) {
+  final baseUrl = urlAsync.valueOrNull;
+  if (baseUrl == null) {
     yield [];
     return;
   }
 
-  final filePath = p.join(rootPath, 'state', 'costs.json');
-
   while (true) {
     try {
-      final file = File(filePath);
-      if (file.existsSync()) {
-        final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+      final response = await http.get(Uri.parse('$baseUrl/api/costs'));
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
         final list = (json['costs'] as List<dynamic>?) ?? [];
         final records = list
             .map((e) => CostRecord.fromJson(e as Map<String, dynamic>))
@@ -35,6 +32,6 @@ final costsProvider = StreamProvider<List<CostRecord>>((ref) async* {
     } catch (_) {
       yield [];
     }
-    await Future.delayed(Duration(seconds: refreshSeconds));
+    await Future<void>.delayed(Duration(seconds: refreshSeconds));
   }
 });

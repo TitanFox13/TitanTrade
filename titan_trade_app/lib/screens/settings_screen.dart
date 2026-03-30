@@ -1,4 +1,3 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,59 +12,57 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  late TextEditingController _pathController;
-  String? _pathError;
-  String? _pathSuccess;
+  late TextEditingController _urlController;
+  String? _urlError;
+  String? _urlSuccess;
+  bool _validating = false;
 
   static const _refreshOptions = [10, 15, 30, 60, 120];
 
   @override
   void initState() {
     super.initState();
-    final currentPath = ref.read(dataPathProvider).valueOrNull ?? '';
-    _pathController = TextEditingController(text: currentPath);
+    final currentUrl = ref.read(baseUrlProvider).valueOrNull ?? '';
+    _urlController = TextEditingController(text: currentUrl);
   }
 
   @override
   void dispose() {
-    _pathController.dispose();
+    _urlController.dispose();
     super.dispose();
   }
 
-  Future<void> _browse() async {
-    final result = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Select TitanTrade directory',
-    );
-    if (result != null) {
-      _pathController.text = result;
-      setState(() {
-        _pathError = null;
-        _pathSuccess = null;
-      });
-    }
-  }
-
-  Future<void> _updatePath() async {
-    final path = _pathController.text.trim();
-    if (path.isEmpty) {
-      setState(() => _pathError = 'Path cannot be empty');
+  Future<void> _updateUrl() async {
+    final url = _urlController.text.trim().replaceAll(RegExp(r'/+$'), '');
+    if (url.isEmpty) {
+      setState(() => _urlError = 'URL cannot be empty');
       return;
     }
-    if (!validateDataPath(path)) {
-      setState(() => _pathError = 'Invalid: state/portfolio.json not found');
-      return;
-    }
-    await ref.read(dataPathProvider.notifier).setPath(path);
     setState(() {
-      _pathError = null;
-      _pathSuccess = 'Data path updated';
+      _validating = true;
+      _urlError = null;
+      _urlSuccess = null;
+    });
+    final valid = await validateBaseUrl(url);
+    if (!mounted) return;
+    if (!valid) {
+      setState(() {
+        _validating = false;
+        _urlError = 'Could not reach $url/api/health';
+      });
+      return;
+    }
+    await ref.read(baseUrlProvider.notifier).setUrl(url);
+    setState(() {
+      _validating = false;
+      _urlSuccess = 'Server URL updated';
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final currentPath = ref.watch(dataPathProvider).valueOrNull ?? '';
+    final currentUrl = ref.watch(baseUrlProvider).valueOrNull ?? '';
     final refreshSeconds = ref.watch(refreshIntervalProvider);
 
     return Scaffold(
@@ -75,11 +72,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Text('Settings', style: theme.textTheme.headlineMedium),
           const SizedBox(height: 24),
 
-          // ---- Data Path ----
-          Text('Data Path', style: theme.textTheme.titleLarge),
+          // ---- Server URL ----
+          Text('Server URL', style: theme.textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
-            'The TitanTrade project directory containing state/ and data/ folders.',
+            'The TitanTrade backend URL (e.g. https://trade.praguefun.cz).',
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 12),
@@ -87,31 +84,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             children: [
               Expanded(
                 child: TextField(
-                  controller: _pathController,
+                  controller: _urlController,
                   decoration: InputDecoration(
-                    labelText: 'TitanTrade directory',
-                    errorText: _pathError,
-                    helperText: _pathSuccess,
+                    labelText: 'Server URL',
+                    errorText: _urlError,
+                    helperText: _urlSuccess,
                     border: const OutlineInputBorder(),
                   ),
+                  onSubmitted: (_) => _updateUrl(),
                 ),
-              ),
-              const SizedBox(width: 12),
-              IconButton.filled(
-                onPressed: _browse,
-                icon: const Icon(Icons.folder_open),
-                tooltip: 'Browse',
               ),
               const SizedBox(width: 8),
               FilledButton(
-                onPressed: _updatePath,
-                child: const Text('Apply'),
+                onPressed: _validating ? null : _updateUrl,
+                child: _validating
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Apply'),
               ),
             ],
           ),
-          if (currentPath.isNotEmpty) ...[
+          if (currentUrl.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text('Current: $currentPath', style: theme.textTheme.bodySmall),
+            Text('Current: $currentUrl', style: theme.textTheme.bodySmall),
           ],
           const SizedBox(height: 32),
 
@@ -119,7 +117,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Text('Refresh Interval', style: theme.textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
-            'How often the app polls state files for updates.',
+            'How often the app polls the server for updates.',
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 12),

@@ -2,23 +2,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/app_config.dart';
 
-final dataPathProvider = StateNotifierProvider<DataPathNotifier, AsyncValue<String?>>((ref) {
-  return DataPathNotifier();
+final baseUrlProvider = StateNotifierProvider<BaseUrlNotifier, AsyncValue<String?>>((ref) {
+  return BaseUrlNotifier();
 });
 
-class DataPathNotifier extends StateNotifier<AsyncValue<String?>> {
-  DataPathNotifier() : super(const AsyncValue.loading()) {
+class BaseUrlNotifier extends StateNotifier<AsyncValue<String?>> {
+  BaseUrlNotifier() : super(const AsyncValue.loading()) {
     _load();
   }
 
   Future<void> _load() async {
-    final path = await loadDataPath();
-    state = AsyncValue.data(path);
+    final url = await loadBaseUrl();
+    state = AsyncValue.data(url);
   }
 
-  Future<void> setPath(String path) async {
-    await saveDataPath(path);
-    state = AsyncValue.data(path);
+  Future<void> setUrl(String url) async {
+    await saveBaseUrl(url);
+    state = AsyncValue.data(url);
   }
 }
 

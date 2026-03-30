@@ -1,28 +1,27 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
+import 'package:http/http.dart' as http;
 
 import '../models/thesis.dart';
 import 'config_provider.dart';
 
 final thesisProvider = StreamProvider<WeeklyThesisBundle?>((ref) async* {
-  final pathAsync = ref.watch(dataPathProvider);
+  final urlAsync = ref.watch(baseUrlProvider);
   final refreshSeconds = ref.watch(refreshIntervalProvider);
-  final root = pathAsync.valueOrNull;
-  if (root == null) return;
+  final baseUrl = urlAsync.valueOrNull;
+  if (baseUrl == null) return;
 
-  final file = File(p.join(root, 'state', 'weekly_thesis.json'));
   while (true) {
-    if (file.existsSync()) {
-      try {
-        final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/api/theses'));
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
         yield WeeklyThesisBundle.fromJson(json);
-      } on FormatException {
-        // skip
+      } else {
+        yield null;
       }
-    } else {
+    } catch (_) {
       yield null;
     }
     await Future<void>.delayed(Duration(seconds: refreshSeconds));
