@@ -14,9 +14,16 @@ class WeeklyThesisBundle {
   Duration get timeUntilExpiry => expiresAt.difference(DateTime.now());
 
   factory WeeklyThesisBundle.fromJson(Map<String, dynamic> json) {
+    // Backend uses "next_review_at" (weekly review cycle), fall back to +7 days
+    final expiresStr = json['expires_at'] ?? json['next_review_at'];
+    final generatedAt = DateTime.parse(json['generated_at'] as String);
+    final expiresAt = expiresStr != null
+        ? DateTime.parse(expiresStr as String)
+        : generatedAt.add(const Duration(days: 7));
+
     return WeeklyThesisBundle(
-      generatedAt: DateTime.parse(json['generated_at'] as String),
-      expiresAt: DateTime.parse(json['expires_at'] as String),
+      generatedAt: generatedAt,
+      expiresAt: expiresAt,
       theses: (json['theses'] as List<dynamic>)
           .map((t) => Thesis.fromJson(t as Map<String, dynamic>))
           .toList(),

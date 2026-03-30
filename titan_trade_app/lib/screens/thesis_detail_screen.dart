@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../providers/sentry_provider.dart';
 import '../providers/thesis_provider.dart';
@@ -43,7 +44,7 @@ class ThesisDetailScreen extends ConsumerWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: () => context.canPop() ? context.pop() : context.go('/theses'),
                   icon: const Icon(Icons.arrow_back),
                   label: const Text('Back'),
                 ),

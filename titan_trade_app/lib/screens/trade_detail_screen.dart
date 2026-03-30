@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../models/trade.dart';
@@ -51,7 +52,7 @@ class TradeDetailScreen extends ConsumerWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: () => context.canPop() ? context.pop() : context.go('/trades'),
                   icon: const Icon(Icons.arrow_back),
                   label: const Text('Back'),
                 ),

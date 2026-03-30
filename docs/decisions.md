@@ -398,3 +398,21 @@
 - Discord-specific (not a generic notification system) — simple and sufficient for v1
 - Daily summary reads state files which may be stale if the last sentry failed
 - No rate limiting on webhook calls — acceptable since jobs run at most ~8 times/day
+
+## Decision 021: Fractional Shares for Small Accounts
+**Date**: 2026-03-30
+**Decision**: Support fractional share trading for accounts too small for whole shares.
+**Reasoning**:
+- Starting with ~$500, the 10% position sizing produces ~$50 per trade
+- Most stocks above $50/share would get 0 shares after `int()` truncation, making them untradeable
+- Alpaca supports fractional shares natively via the same API (`qty: "0.25"`)
+**Implementation**:
+- Position sizing uses `float` instead of `int` — snaps to whole shares when >= 1, keeps fractional when < 1
+- Order routing: whole shares use bracket orders (atomic entry + stop + TP), fractional uses day-limit buys
+- All position quantity reading changed from `int(float(...))` to `float(...)` for fractional holdings
+- Minimum $1.00 notional check added (Alpaca requirement for fractional orders)
+**Trade-offs**:
+- Fractional positions have no broker-native stop-loss (Alpaca doesn't support fractional bracket/stop orders)
+- The sentry's price-based ABORT (3% adverse) and intraday price checks act as the safety net instead
+- Max loss on a fractional position is small ($50 at 10% sizing on a $500 account), so the risk is acceptable
+- As the account grows and positions become whole shares, bracket orders automatically resume

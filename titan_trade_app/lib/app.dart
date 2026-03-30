@@ -100,21 +100,30 @@ class AppShell extends ConsumerWidget {
         return Scaffold(
           body: Row(
             children: [
-              NavigationRail(
-                selectedIndex: selectedIndex,
-                onDestinationSelected: (index) => context.go(_routes[index]),
-                labelType: NavigationRailLabelType.all,
-                leading: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  child: Text(
-                    'TT',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.primary,
+              SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: MediaQuery.of(context).size.height,
+                  ),
+                  child: IntrinsicHeight(
+                    child: NavigationRail(
+                      selectedIndex: selectedIndex,
+                      onDestinationSelected: (index) => context.go(_routes[index]),
+                      labelType: NavigationRailLabelType.all,
+                      leading: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Text(
+                          'TT',
+                          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
                         ),
+                      ),
+                      destinations: _destinations,
+                    ),
                   ),
                 ),
-                destinations: _destinations,
               ),
               const VerticalDivider(thickness: 1, width: 1),
               Expanded(child: child),

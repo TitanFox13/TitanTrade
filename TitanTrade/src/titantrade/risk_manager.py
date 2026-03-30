@@ -163,10 +163,11 @@ def volatility_adjusted_shares(
     entry_price: float,
     stock_atr: float | None,
     risk_per_trade_pct: float = 0.10,
-) -> int:
+) -> float:
     """Calculate shares using ATR-based risk budgeting.
 
     Standard approach: fixed dollar risk per trade, scaled by volatility.
+    Returns fractional shares (rounded to 2 decimals) to support small accounts.
 
     If ATR is available:
       dollar_risk = portfolio_value * ATR_RISK_BUDGET
@@ -177,17 +178,23 @@ def volatility_adjusted_shares(
     """
     max_position_value = portfolio_value * risk_per_trade_pct
 
+    def _snap(raw: float) -> float:
+        """Use whole shares when possible, fractional only for small positions."""
+        if raw >= 1.0:
+            return float(int(raw))
+        return round(raw, 2)
+
     if stock_atr is None or stock_atr <= 0:
         # Fallback: fixed percentage
-        shares = int(max_position_value / entry_price) if entry_price > 0 else 0
-        return max(shares, 0)
+        shares = _snap(max_position_value / entry_price) if entry_price > 0 else 0.0
+        return max(shares, 0.0)
 
     # ATR-based: risk ATR_RISK_BUDGET of portfolio per 1-ATR move
     dollar_risk_budget = portfolio_value * ATR_RISK_BUDGET
-    atr_shares = int(dollar_risk_budget / stock_atr)
+    atr_shares = _snap(dollar_risk_budget / stock_atr)
 
     # Cap by the maximum position value (don't exceed 10% regardless)
-    max_shares = int(max_position_value / entry_price) if entry_price > 0 else 0
+    max_shares = _snap(max_position_value / entry_price) if entry_price > 0 else 0.0
 
     shares = min(atr_shares, max_shares)
     position_pct = (shares * entry_price / portfolio_value * 100) if portfolio_value > 0 else 0
@@ -197,7 +204,7 @@ def volatility_adjusted_shares(
         f"shares={shares} ({position_pct:.1f}% of portfolio)"
     )
 
-    return max(shares, 0)
+    return max(shares, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +375,7 @@ def pre_trade_check(
         _pass("cash_reserve", f"${investable:,.2f} available after reserve")
 
     # Gate 5: Position sizing (depends on gate 4 passing)
-    shares = 0
+    shares = 0.0
     if investable > 0 and entry_price > 0:
         shares = volatility_adjusted_shares(
             portfolio_value, entry_price, stock_atr, cfg.trading.risk_per_trade
@@ -377,7 +384,8 @@ def pre_trade_check(
 
         # Reduce if exceeding investable cash
         if position_value > investable:
-            shares = int(investable / entry_price)
+            raw = investable / entry_price
+            shares = float(int(raw)) if raw >= 1.0 else round(raw, 2)
             position_value = shares * entry_price
             result["flags"].append(f"Position reduced to {shares} shares (cash reserve)")
 

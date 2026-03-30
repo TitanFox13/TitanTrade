@@ -93,7 +93,12 @@ def cancel_all_orders_for_ticker(ticker: str, cfg: Config) -> int:
     return count
 
 
-def place_market_sell(ticker: str, qty: int, cfg: Config) -> dict[str, Any]:
+def _is_fractional(qty: float) -> bool:
+    """Return True if quantity has a fractional component."""
+    return qty != int(qty)
+
+
+def place_market_sell(ticker: str, qty: float, cfg: Config) -> dict[str, Any]:
     """Place an immediate market sell order."""
     url = f"{cfg.alpaca.base_url}/v2/orders"
     body = {
@@ -110,7 +115,7 @@ def place_market_sell(ticker: str, qty: int, cfg: Config) -> dict[str, Any]:
 
 def place_limit_buy(
     ticker: str,
-    qty: int,
+    qty: float,
     limit_price: float,
     cfg: Config,
     time_in_force: str = "gtc",
@@ -132,7 +137,7 @@ def place_limit_buy(
 
 def place_bracket_order(
     ticker: str,
-    qty: int,
+    qty: float,
     entry_limit_price: float,
     stop_loss_price: float,
     take_profit_price: float | None,
@@ -181,7 +186,7 @@ def place_bracket_order(
 
 def place_native_stop_loss(
     ticker: str,
-    qty: int,
+    qty: float,
     stop_price: float,
     cfg: Config,
 ) -> dict[str, Any]:
@@ -207,7 +212,7 @@ def place_native_stop_loss(
 
 def place_limit_sell(
     ticker: str,
-    qty: int,
+    qty: float,
     limit_price: float,
     cfg: Config,
     time_in_force: str = "day",
@@ -247,11 +252,11 @@ def calculate_shares(
     portfolio_value: float,
     entry_price: float,
     risk_fraction: float,
-) -> int:
-    """Return whole shares to buy within the risk fraction of portfolio."""
+) -> float:
+    """Return shares to buy within the risk fraction of portfolio."""
     budget = portfolio_value * risk_fraction
-    shares = int(budget / entry_price)
-    return max(shares, 0)
+    shares = round(budget / entry_price, 2)
+    return max(shares, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +366,7 @@ def _handle_abort(ticker: str, sentry: dict[str, Any], cfg: Config) -> dict[str,
         log.info(f"ABORT for {ticker}: no position to close")
         return None
 
-    qty = int(float(position.get("qty", 0)))
+    qty = float(position.get("qty", 0))
     if qty <= 0:
         return None
 
@@ -474,32 +479,59 @@ def _handle_bullish_entry(
 
     shares = check["shares"]
 
+    # Minimum notional check: Alpaca requires at least $1.00
+    if shares * entry_price < 1.0:
+        log.warning(f"Skipping {ticker}: notional ${shares * entry_price:.2f} below $1.00 minimum")
+        return None
+
     # Two-tranche entry: 60% at target, 40% at 1.5% discount
     # Improves average entry price on dips
-    tranche1_shares = max(int(shares * 0.6), 1)
-    tranche2_shares = shares - tranche1_shares
+    if _is_fractional(shares):
+        tranche1_shares = round(max(shares * 0.6, 0.01), 2)
+        tranche2_shares = round(shares - tranche1_shares, 2)
+    else:
+        tranche1_shares = float(max(int(shares * 0.6), 1))
+        tranche2_shares = shares - tranche1_shares
     tranche2_price = round(entry_price * 0.985, 2)
 
-    # Tranche 1: main bracket at target entry
-    place_bracket_order(
-        ticker=ticker,
-        qty=tranche1_shares,
-        entry_limit_price=entry_price,
-        stop_loss_price=stop_price,
-        take_profit_price=take_profit_price,
-        cfg=cfg,
-    )
-
-    # Tranche 2: reload bracket at discount (only if meaningful size)
-    if tranche2_shares > 0:
+    if _is_fractional(tranche1_shares):
+        # Fractional path: day-limit buy (no bracket support for fractional)
+        # No broker-native stop — sentry price checks provide the safety net
+        log.info(f"Fractional entry for {ticker}: {tranche1_shares} shares (no bracket)")
+        place_limit_buy(
+            ticker=ticker,
+            qty=tranche1_shares,
+            limit_price=entry_price,
+            cfg=cfg,
+            time_in_force="day",
+        )
+        if tranche2_shares >= 0.01:
+            place_limit_buy(
+                ticker=ticker,
+                qty=tranche2_shares,
+                limit_price=tranche2_price,
+                cfg=cfg,
+                time_in_force="day",
+            )
+    else:
+        # Whole shares path: bracket orders with broker-native stops
         place_bracket_order(
             ticker=ticker,
-            qty=tranche2_shares,
-            entry_limit_price=tranche2_price,
+            qty=tranche1_shares,
+            entry_limit_price=entry_price,
             stop_loss_price=stop_price,
             take_profit_price=take_profit_price,
             cfg=cfg,
         )
+        if tranche2_shares > 0:
+            place_bracket_order(
+                ticker=ticker,
+                qty=tranche2_shares,
+                entry_limit_price=tranche2_price,
+                stop_loss_price=stop_price,
+                take_profit_price=take_profit_price,
+                cfg=cfg,
+            )
 
     context = _build_trade_context(ticker, data_bundle, sentry)
 
@@ -512,7 +544,7 @@ def _handle_bullish_entry(
         reasoning=thesis.get("reasoning", ""),
         stop_loss_price=stop_price,
         take_profit_price=take_profit_price,
-        order_type="bracket_2tranche",
+        order_type="fractional_2tranche" if _is_fractional(tranche1_shares) else "bracket_2tranche",
         tranche1_shares=tranche1_shares,
         tranche2_shares=tranche2_shares,
         tranche2_price=tranche2_price,
@@ -741,7 +773,7 @@ def manage_trailing_stop(
     """
     current_price = float(position.get("current_price", 0))
     entry_price = float(position.get("avg_entry_price", 0))
-    qty = int(float(position.get("qty", 0)))
+    qty = float(position.get("qty", 0))
 
     if not current_price or not entry_price or qty <= 0:
         return
@@ -869,7 +901,7 @@ def close_orphaned_positions(cfg: Config) -> list[dict[str, Any]]:
 
     for pos in positions:
         ticker = pos.get("symbol", "")
-        qty = int(float(pos.get("qty", 0)))
+        qty = float(pos.get("qty", 0))
         if qty <= 0:
             continue
 
@@ -934,7 +966,7 @@ def check_gap_down_protection(cfg: Config) -> list[dict[str, Any]]:
     for pos in positions:
         ticker = pos.get("symbol", "")
         current_price = float(pos.get("current_price", 0))
-        qty = int(float(pos.get("qty", 0)))
+        qty = float(pos.get("qty", 0))
 
         if qty <= 0 or current_price <= 0:
             continue
@@ -1191,7 +1223,7 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                 cancel_all_orders_for_ticker(ticker, cfg)
                 position = get_position(ticker, cfg)
                 if position:
-                    qty = int(float(position.get("qty", 0)))
+                    qty = float(position.get("qty", 0))
                     close_position_at_market(ticker, cfg)
                     trade = _trade_record(
                         ticker=ticker,
@@ -1213,7 +1245,7 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
         if review_action == "ADJUST" and ticker in held_tickers:
             position = get_position(ticker, cfg)
             if position:
-                qty = int(float(position.get("qty", 0)))
+                qty = float(position.get("qty", 0))
                 new_stop = thesis.get("stop_loss_price")
                 new_tp = thesis.get("take_profit_price")
                 if new_stop and qty > 0:
@@ -1239,10 +1271,12 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                 for o in open_orders
             )
 
-            if not has_stop:
+            qty = float(position.get("qty", 0))
+            fractional = _is_fractional(qty)
+
+            if not has_stop and not fractional:
                 stop_price = thesis.get("stop_loss_price")
                 if stop_price:
-                    qty = int(float(position.get("qty", 0)))
                     log.warning(
                         f"No stop order found for {ticker} - placing native stop now"
                     )
@@ -1252,12 +1286,15 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                         open_orders = get_open_orders(ticker, cfg)
                     except Exception as exc:
                         log.error(f"Failed to place stop for {ticker}: {exc}")
+            elif not has_stop and fractional:
+                log.info(f"Fractional position {ticker} ({qty} shares) — no broker stop (sentry protects)")
 
-            # Trailing stop: ratchet the stop up as the position gains
-            try:
-                manage_trailing_stop(ticker, thesis, position, open_orders, cfg)
-            except Exception as exc:
-                log.error(f"Trailing stop management failed for {ticker}: {exc}")
+            # Trailing stop: ratchet the stop up as the position gains (whole shares only)
+            if not fractional:
+                try:
+                    manage_trailing_stop(ticker, thesis, position, open_orders, cfg)
+                except Exception as exc:
+                    log.error(f"Trailing stop management failed for {ticker}: {exc}")
 
     # Clean up trailing state for tickers no longer held
     try:

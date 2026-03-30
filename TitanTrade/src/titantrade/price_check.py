@@ -79,7 +79,7 @@ def run_price_check(cfg: Config) -> dict[str, Any]:
 
     for pos in positions:
         ticker = pos.get("symbol", "")
-        qty = int(float(pos.get("qty", 0)))
+        qty = float(pos.get("qty", 0))
         current_price = float(pos.get("current_price", 0))
 
         if qty <= 0 or current_price <= 0:

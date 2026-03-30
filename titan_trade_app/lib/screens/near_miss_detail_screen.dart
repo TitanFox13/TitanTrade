@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../providers/near_miss_provider.dart';
@@ -37,7 +38,7 @@ class NearMissDetailScreen extends ConsumerWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: () => context.canPop() ? context.pop() : context.go('/near-misses'),
                   icon: const Icon(Icons.arrow_back),
                   label: const Text('Back'),
                 ),

@@ -19,9 +19,13 @@ final portfolioProvider = StreamProvider<Portfolio>((ref) async* {
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         yield Portfolio.fromJson(json);
+      } else {
+        // 404 = no portfolio.json yet (first run, market not open)
+        yield Portfolio.empty;
       }
     } catch (_) {
-      // Network error — skip this cycle
+      // Network error — yield empty so UI isn't stuck on loading
+      yield Portfolio.empty;
     }
     await Future<void>.delayed(Duration(seconds: refreshSeconds));
   }

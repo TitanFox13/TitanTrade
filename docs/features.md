@@ -116,11 +116,20 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 ### Order Types
 | Scenario | Order Type | Details |
 |----------|-----------|---------|
-| Entry | Bracket (limit buy + stop + TP) | Atomic submission to Alpaca |
-| Stop-loss | Native stop-limit (GTC) | Broker-side, 1% slippage buffer |
+| Entry (whole shares) | Bracket (limit buy + stop + TP) | Atomic submission to Alpaca |
+| Entry (fractional) | Day limit buy | No bracket support for fractional; sentry provides safety net |
+| Stop-loss | Native stop-limit (GTC) | Broker-side, 1% slippage buffer (whole shares only) |
 | Take-profit | Native limit sell | Part of bracket or standalone |
 | ABORT exit | Market sell | Immediate, after cancelling all orders |
 | Bearish flip | Market sell | Exit position when thesis reverses |
+
+### Fractional Shares
+- Supported for accounts too small for whole shares (e.g., $500 starting balance)
+- Position sizing snaps to whole shares when >= 1, keeps fractional (2 decimals) when < 1
+- Fractional entries use day-limit buys (bracket orders don't support fractional on Alpaca)
+- Fractional positions rely on sentry + price checks for downside protection (no broker-native stops)
+- Minimum $1.00 notional per order (Alpaca requirement)
+- As the account grows, positions automatically shift back to bracket orders
 
 ### Safety Rails
 - Duplicate prevention: checks for existing orders before placing new ones
