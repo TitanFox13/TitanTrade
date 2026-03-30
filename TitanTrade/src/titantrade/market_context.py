@@ -113,8 +113,9 @@ def _fetch_bars(ticker: str, cfg: Config, days: int = 250) -> list[dict[str, Any
     today = datetime.now(timezone.utc).date()
     from_date = today - timedelta(days=int(days * 1.5))  # pad for weekends/holidays
 
-    url = f"{cfg.fmp.base_url}/stable/historical-price-eod-full/{ticker}"
+    url = "https://financialmodelingprep.com/stable/historical-price-eod/full"
     params = {
+        "symbol": ticker,
         "from": from_date.isoformat(),
         "to": today.isoformat(),
         "apikey": cfg.fmp.key,

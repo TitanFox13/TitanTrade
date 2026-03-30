@@ -31,8 +31,9 @@ def download_historical_data(
     from_date = today - timedelta(days=int(days * 1.5))
 
     for ticker in tickers + ["SPY"]:
-        url = f"https://financialmodelingprep.com/api/v3/stable/historical-price-eod-full/{ticker}"
+        url = "https://financialmodelingprep.com/stable/historical-price-eod/full"
         params = {
+            "symbol": ticker,
             "from": from_date.isoformat(),
             "to": today.isoformat(),
             "apikey": fmp_key,
