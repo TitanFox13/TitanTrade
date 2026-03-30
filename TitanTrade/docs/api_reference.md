@@ -145,6 +145,9 @@ The backend exposes these endpoints at `{base_url}/api/`:
 | `/api/actions/download-history` | POST | Download OHLCV data (background job) |
 | `/api/actions/backtest` | POST | Run backtest (background job) |
 | `/api/jobs/{job_id}` | GET | Poll background job status |
+| `/api/scheduler` | GET | List all scheduled jobs with status |
+| `/api/scheduler/{job_id}/trigger` | POST | Manually trigger a scheduled job |
+| `/api/scheduler/{job_id}/enabled` | PUT | Enable or disable a scheduled job |
 
 ## Internal Data Schemas
 

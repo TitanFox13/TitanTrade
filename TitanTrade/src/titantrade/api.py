@@ -7,9 +7,11 @@ Run with:
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import traceback
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,8 +21,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .config import DATA_DIR, STATE_DIR, live_keys_configured, save_trading_mode, save_watchlist
+from .scheduler import (
+    get_all_jobs,
+    get_job_history,
+    set_job_enabled,
+    start_scheduler,
+    stop_scheduler,
+    trigger_job,
+)
 
-app = FastAPI(title="TitanTrade API", version="1.0.0")
+log = logging.getLogger("titantrade.api")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_scheduler()
+    yield
+    stop_scheduler()
+
+
+app = FastAPI(title="TitanTrade API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -269,3 +289,39 @@ def backtest_results() -> dict:
     if not data:
         raise HTTPException(status_code=404, detail="No backtest results yet")
     return data
+
+
+# ---------------------------------------------------------------------------
+# Scheduler endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/scheduler")
+def scheduler_status() -> dict:
+    """List all scheduled jobs with next_run and last_run info."""
+    return {"jobs": get_all_jobs()}
+
+
+@app.get("/api/scheduler/{job_id}")
+def scheduler_job_detail(job_id: str) -> dict:
+    """Get run history for a specific scheduled job."""
+    return {"job_id": job_id, "history": get_job_history(job_id)}
+
+
+@app.post("/api/scheduler/{job_id}/trigger")
+def scheduler_trigger(job_id: str) -> dict:
+    """Manually trigger a scheduled job to run immediately."""
+    if not trigger_job(job_id):
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return {"job_id": job_id, "status": "triggered"}
+
+
+class JobEnabledUpdate(BaseModel):
+    enabled: bool
+
+
+@app.put("/api/scheduler/{job_id}/enabled")
+def scheduler_set_enabled(job_id: str, body: JobEnabledUpdate) -> dict:
+    """Enable or disable a scheduled job."""
+    if not set_job_enabled(job_id, body.enabled):
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return {"job_id": job_id, "enabled": body.enabled}

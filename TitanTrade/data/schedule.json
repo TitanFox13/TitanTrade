@@ -1,0 +1,47 @@
+{
+  "timezone": "UTC",
+  "jobs": [
+    {
+      "id": "sunday_full",
+      "name": "Weekly Full Pipeline",
+      "command": "full",
+      "cron": {"day_of_week": "sun", "hour": 20, "minute": 0},
+      "enabled": true
+    },
+    {
+      "id": "weekday_gapcheck",
+      "name": "Gap-Down Check",
+      "command": "gapcheck",
+      "cron": {"day_of_week": "mon-fri", "hour": 13, "minute": 35},
+      "enabled": true
+    },
+    {
+      "id": "weekday_sentry_morning",
+      "name": "Morning Sentry + Execute",
+      "command": "sentry_execute",
+      "cron": {"day_of_week": "mon-fri", "hour": 14, "minute": 15},
+      "enabled": true
+    },
+    {
+      "id": "weekday_pricecheck_midday",
+      "name": "Midday Price Check",
+      "command": "pricecheck",
+      "cron": {"day_of_week": "mon-fri", "hour": 16, "minute": 0},
+      "enabled": true
+    },
+    {
+      "id": "weekday_pricecheck_afternoon",
+      "name": "Afternoon Price Check",
+      "command": "pricecheck",
+      "cron": {"day_of_week": "mon-fri", "hour": 18, "minute": 0},
+      "enabled": true
+    },
+    {
+      "id": "weekday_sentry_preclose",
+      "name": "Pre-Close Sentry + Execute",
+      "command": "sentry_execute",
+      "cron": {"day_of_week": "mon-fri", "hour": 20, "minute": 30},
+      "enabled": true
+    }
+  ]
+}

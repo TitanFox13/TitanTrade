@@ -33,7 +33,7 @@ uv run python -m titantrade download-history [dir]  # Download OHLCV for backtes
 cd TitanTrade && uv run python -m pytest tests/ -v
 ```
 
-All 206 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens.
+All 224 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens.
 
 ### Flutter app (from titan_trade_app/)
 
@@ -69,6 +69,7 @@ docker compose run --rm titantrade <command>             # CLI commands
 | `src/titantrade/risk_manager.py` | 6 risk gates |
 | `src/titantrade/price_check.py` | Intraday price checks (no LLM) |
 | `src/titantrade/api.py` | FastAPI HTTP server |
+| `src/titantrade/scheduler.py` | Built-in APScheduler (cron jobs inside API process) |
 | `src/titantrade/indicators.py` | Pure Python RSI/MACD/Bollinger/ATR/SMA |
 
 ## Documentation Rules

@@ -360,3 +360,23 @@
 - Four env vars instead of two for Alpaca (small complexity increase)
 - Mode change requires the next CLI command to re-read config (not hot-reloaded mid-run)
 - Acceptable: CLI commands are short-lived processes that load config fresh each time
+
+## Decision 028: Built-in Scheduler (APScheduler in API Process)
+**Date**: 2026-03-30
+**Decision**: Run all trading cron jobs inside the always-on API container using APScheduler, instead of requiring host-level cron.
+**Reasoning**:
+- Host cron required manual setup on each server, error-prone, hard to monitor
+- APScheduler 3.x `BackgroundScheduler` runs in the same process as FastAPI
+- Jobs defined in `data/schedule.json` — editable, version-controlled
+- API endpoints (`GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`) let the Flutter app monitor and trigger jobs
+- `coalesce=True` + `max_instances=1` + `misfire_grace_time=300` handle restarts gracefully
+**Schedule**:
+- Sunday 20:00 UTC: full pipeline (fetch → analyze → sentry → execute)
+- Weekdays 13:35 UTC: gap-down check
+- Weekdays 14:15 UTC: morning sentry + execute
+- Weekdays 16:00, 18:00 UTC: price checks
+- Weekdays 20:30 UTC: pre-close sentry + execute
+**Trade-offs**:
+- Scheduler state is in-memory (job history lost on restart) — acceptable for v1
+- APScheduler 3.x is thread-based, not async — fine since trading jobs are I/O-bound and short-lived
+- No market holiday awareness yet — jobs run but complete quickly with no side effects on closed days

@@ -153,9 +153,11 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 
 ### Server Deployment (Docker) — Primary
 - Docker container with Python 3.12 and uv package manager
-- Server cron triggers: precise scheduling, no GitHub variance
-- State persists via bind-mounted volumes (`./state`, `./logs`)
-- Commands: `docker compose run --rm titantrade <command>`
+- **Built-in scheduler** (APScheduler): all cron jobs run inside the API container
+- No host-level cron required — schedule defined in `data/schedule.json`
+- State persists via bind-mounted volumes (`./data`, `./state`, `./logs`)
+- Scheduler screen in Flutter app: view status, enable/disable, manual trigger
+- CLI commands still available: `docker compose run --rm titantrade <command>`
 
 ### GitHub Actions Cron Jobs (Alternative)
 - Weekly analyst: Sunday 20:00 UTC
@@ -187,6 +189,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - **Watchlist**: Add/remove tracked tickers (writes to data/watchlist.json)
 - **Statistics**: Net P&L, realized P&L (BUY->SELL round-trips), unrealized P&L (open positions), operational costs per AI service
 - **Settings**: Server URL, refresh interval, paper/live trading mode toggle with confirmation dialog
+- **Scheduler**: View all cron jobs, status, next/last run, enable/disable toggle, manual trigger button
 
 ## Operational Cost Tracking
 

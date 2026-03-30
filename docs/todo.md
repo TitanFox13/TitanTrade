@@ -67,6 +67,10 @@
 - [x] Trading mode API endpoints (`GET /api/settings`, `PUT /api/settings/mode`)
 - [x] Trading mode toggle in Flutter settings (SwitchListTile with confirmation dialog)
 - [x] Backward compatibility for legacy `ALPACA_KEY`/`ALPACA_SECRET` env vars
+- [x] Built-in APScheduler (all cron jobs run inside API container)
+- [x] Schedule config in `data/schedule.json` (editable, version-controlled)
+- [x] Scheduler API endpoints (list, trigger, enable/disable)
+- [x] Scheduler screen in Flutter app (status, toggle, manual trigger)
 
 ## Phase 1.10: Position Protection & Monitoring
 - [x] Trailing stop mechanism (5% trigger, 3% trail below HWM)

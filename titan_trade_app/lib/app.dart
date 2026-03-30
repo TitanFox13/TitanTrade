@@ -14,6 +14,7 @@ import 'screens/theses_screen.dart';
 import 'screens/thesis_detail_screen.dart';
 import 'screens/trade_detail_screen.dart';
 import 'screens/trade_history_screen.dart';
+import 'screens/scheduler_screen.dart';
 import 'screens/watchlist_screen.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -50,6 +51,7 @@ final appRouter = GoRouter(
         GoRoute(path: '/watchlist', builder: (context, state) => const WatchlistScreen()),
         GoRoute(path: '/statistics', builder: (context, state) => const StatisticsScreen()),
         GoRoute(path: '/backtest', builder: (context, state) => const BacktestScreen()),
+        GoRoute(path: '/scheduler', builder: (context, state) => const SchedulerScreen()),
         GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
       ],
     ),
@@ -69,10 +71,11 @@ class AppShell extends ConsumerWidget {
     NavigationRailDestination(icon: Icon(Icons.list_alt), label: Text('Watchlist')),
     NavigationRailDestination(icon: Icon(Icons.bar_chart), label: Text('Statistics')),
     NavigationRailDestination(icon: Icon(Icons.science), label: Text('Backtest')),
+    NavigationRailDestination(icon: Icon(Icons.schedule), label: Text('Scheduler')),
     NavigationRailDestination(icon: Icon(Icons.settings), label: Text('Settings')),
   ];
 
-  static const _routes = ['/', '/theses', '/trades', '/near-misses', '/watchlist', '/statistics', '/backtest', '/settings'];
+  static const _routes = ['/', '/theses', '/trades', '/near-misses', '/watchlist', '/statistics', '/backtest', '/scheduler', '/settings'];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
