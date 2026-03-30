@@ -63,6 +63,10 @@
 - [x] Bracket resubmission tests (valid/invalid/already holding scenarios)
 - [x] Settings screen in Flutter app (change data path, configurable refresh interval)
 - [x] Dynamic refresh interval across all 7 providers (10s/15s/30s/60s/120s)
+- [x] Dual Alpaca credentials (separate paper and live key pairs in .env)
+- [x] Trading mode API endpoints (`GET /api/settings`, `PUT /api/settings/mode`)
+- [x] Trading mode toggle in Flutter settings (SwitchListTile with confirmation dialog)
+- [x] Backward compatibility for legacy `ALPACA_KEY`/`ALPACA_SECRET` env vars
 
 ## Phase 1.10: Position Protection & Monitoring
 - [x] Trailing stop mechanism (5% trigger, 3% trail below HWM)

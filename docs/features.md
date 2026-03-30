@@ -142,7 +142,9 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - Filing descriptions for AI analysis
 
 ### Alpaca Markets
-- Paper and live trading
+- Dual credential support: separate paper and live API key pairs
+- Trading mode toggle via API (`GET/PUT /api/settings/mode`) and Flutter app
+- Paper mode uses `paper-api.alpaca.markets`, live mode uses `api.alpaca.markets`
 - Account info (portfolio value, buying power, cash)
 - Position management
 - Full order lifecycle (bracket, stop, limit, market)
@@ -184,6 +186,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - **Near Miss Detail**: Gate checklist, thesis, market context at time of near-miss
 - **Watchlist**: Add/remove tracked tickers (writes to data/watchlist.json)
 - **Statistics**: Net P&L, realized P&L (BUY->SELL round-trips), unrealized P&L (open positions), operational costs per AI service
+- **Settings**: Server URL, refresh interval, paper/live trading mode toggle with confirmation dialog
 
 ## Operational Cost Tracking
 

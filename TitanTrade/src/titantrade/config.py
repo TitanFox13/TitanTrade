@@ -101,6 +101,21 @@ def load_watchlist() -> TradingSettings:
     )
 
 
+def save_trading_mode(mode: str) -> None:
+    """Update the trading_mode in watchlist.json, preserving everything else."""
+    if mode not in ("paper", "live"):
+        raise ValueError(f"Invalid trading mode: {mode!r} (must be 'paper' or 'live')")
+    path = DATA_DIR / "watchlist.json"
+    if path.exists():
+        with open(path) as f:
+            data = json.load(f)
+    else:
+        data = {"watchlist": TradingSettings().watchlist, "settings": {}}
+    data.setdefault("settings", {})["trading_mode"] = mode
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
 def save_watchlist(tickers: list[str]) -> None:
     """Update the watchlist tickers in watchlist.json, preserving settings."""
     path = DATA_DIR / "watchlist.json"
@@ -118,9 +133,45 @@ REQUIRED_KEYS = {
     "FMP_KEY": "Financial Modeling Prep (data source)",
     "CLAUDE_KEY": "Anthropic Claude (weekly analysis)",
     "GEMINI_KEY": "Google Gemini (daily sentry)",
-    "ALPACA_KEY": "Alpaca Markets (trade execution)",
-    "ALPACA_SECRET": "Alpaca Markets (trade execution)",
 }
+
+
+def _resolve_alpaca_keys() -> dict[str, str]:
+    """Resolve Alpaca paper and live credentials.
+
+    Paper keys are required (falls back to legacy ALPACA_KEY/ALPACA_SECRET).
+    Live keys are optional — live trading is only available when they're set.
+    """
+    paper_key = os.environ.get("ALPACA_PAPER_KEY", "").strip()
+    paper_secret = os.environ.get("ALPACA_PAPER_SECRET", "").strip()
+
+    # Backward compat: fall back to legacy single-credential env vars
+    if not paper_key:
+        paper_key = os.environ.get("ALPACA_KEY", "").strip()
+    if not paper_secret:
+        paper_secret = os.environ.get("ALPACA_SECRET", "").strip()
+
+    if not paper_key or not paper_secret:
+        raise ValueError(
+            "Missing Alpaca paper trading credentials.\n"
+            "Set ALPACA_PAPER_KEY and ALPACA_PAPER_SECRET in your .env file.\n"
+            "(Legacy ALPACA_KEY / ALPACA_SECRET are also accepted.)"
+        )
+
+    return {
+        "ALPACA_PAPER_KEY": paper_key,
+        "ALPACA_PAPER_SECRET": paper_secret,
+        "ALPACA_LIVE_KEY": os.environ.get("ALPACA_LIVE_KEY", "").strip(),
+        "ALPACA_LIVE_SECRET": os.environ.get("ALPACA_LIVE_SECRET", "").strip(),
+    }
+
+
+def live_keys_configured() -> bool:
+    """Return True if live Alpaca credentials are present in the environment."""
+    return bool(
+        os.environ.get("ALPACA_LIVE_KEY", "").strip()
+        and os.environ.get("ALPACA_LIVE_SECRET", "").strip()
+    )
 
 
 def validate_api_keys() -> dict[str, str]:
@@ -144,6 +195,8 @@ def validate_api_keys() -> dict[str, str]:
             + "\n\nCopy .env.example to .env and fill in your keys."
         )
 
+    # Merge in Alpaca keys (has its own validation)
+    keys.update(_resolve_alpaca_keys())
     return keys
 
 
@@ -151,9 +204,22 @@ def load_config() -> Config:
     """Build the full configuration from env vars and watchlist.json.
 
     Validates all API keys are present before returning.
+    Selects paper or live Alpaca credentials based on trading_mode.
     """
     keys = validate_api_keys()
     trading = load_watchlist()
+
+    if trading.trading_mode == "live":
+        if not keys["ALPACA_LIVE_KEY"] or not keys["ALPACA_LIVE_SECRET"]:
+            raise ValueError(
+                "Live trading mode is enabled but ALPACA_LIVE_KEY / "
+                "ALPACA_LIVE_SECRET are not set in .env."
+            )
+        alpaca_key = keys["ALPACA_LIVE_KEY"]
+        alpaca_secret = keys["ALPACA_LIVE_SECRET"]
+    else:
+        alpaca_key = keys["ALPACA_PAPER_KEY"]
+        alpaca_secret = keys["ALPACA_PAPER_SECRET"]
 
     base_url = os.environ.get("ALPACA_BASE_URL")
     if base_url is None:
@@ -165,8 +231,8 @@ def load_config() -> Config:
 
     return Config(
         alpaca=AlpacaConfig(
-            key=keys["ALPACA_KEY"],
-            secret=keys["ALPACA_SECRET"],
+            key=alpaca_key,
+            secret=alpaca_secret,
             base_url=base_url,
         ),
         fmp=FMPConfig(

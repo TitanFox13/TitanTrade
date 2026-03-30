@@ -121,6 +121,31 @@ POST /v2/orders
 
 ---
 
+## TitanTrade Internal API (FastAPI)
+
+The backend exposes these endpoints at `{base_url}/api/`:
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/health` | GET | Health check (returns `{"status": "ok"}`) |
+| `/api/portfolio` | GET | Current portfolio holdings |
+| `/api/trades` | GET | Trade history log |
+| `/api/theses` | GET | Weekly analysis theses |
+| `/api/sentry` | GET | Daily sentry signals |
+| `/api/near-misses` | GET | Trades blocked by 1-2 risk gates |
+| `/api/costs` | GET | API call costs and token usage |
+| `/api/trailing-stops` | GET | Trailing stop state |
+| `/api/pricecheck` | GET | Intraday price check signals |
+| `/api/backtest-results` | GET | Latest backtest results |
+| `/api/watchlist` | GET | Current watchlist |
+| `/api/watchlist` | PUT | Update watchlist tickers |
+| `/api/settings` | GET | Trading mode + whether live keys are configured |
+| `/api/settings/mode` | PUT | Switch between `paper` and `live` trading |
+| `/api/actions/analyze` | POST | Trigger weekly analysis (background job) |
+| `/api/actions/download-history` | POST | Download OHLCV data (background job) |
+| `/api/actions/backtest` | POST | Run backtest (background job) |
+| `/api/jobs/{job_id}` | GET | Poll background job status |
+
 ## Internal Data Schemas
 
 See `docs/data_schemas.md` for JSON schema definitions of all internal data structures.

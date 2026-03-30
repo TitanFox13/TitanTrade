@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/app_config.dart';
 import '../providers/config_provider.dart';
+import '../providers/trading_mode_provider.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -59,6 +60,91 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
   }
 
+  Future<void> _toggleTradingMode(bool enableLive) async {
+    if (enableLive) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Enable Live Trading?'),
+          content: const Text(
+            'This will execute real trades with real money. '
+            'Make sure you understand the risks before proceeding.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Enable Live Trading'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    await ref
+        .read(tradingModeProvider.notifier)
+        .setMode(enableLive ? 'live' : 'paper');
+  }
+
+  Widget _buildTradingModeSection(ThemeData theme) {
+    final modeAsync = ref.watch(tradingModeProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Trading Mode', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 4),
+        Text(
+          'Switch between paper (simulated) and live (real money) trading.',
+          style: theme.textTheme.bodySmall,
+        ),
+        const SizedBox(height: 12),
+        modeAsync.when(
+          loading: () => const SizedBox(
+            height: 48,
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          ),
+          error: (_, __) => Text(
+            'Could not load trading mode from server.',
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+          ),
+          data: (modeState) {
+            final canToggle = modeState.liveKeysConfigured;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    modeState.isLive ? 'LIVE TRADING' : 'Paper Trading',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: modeState.isLive ? Colors.red : null,
+                    ),
+                  ),
+                  subtitle: Text(
+                    canToggle
+                        ? (modeState.isLive
+                            ? 'Trading with real money via Alpaca'
+                            : 'Using simulated paper account')
+                        : 'Live keys not configured in .env',
+                  ),
+                  value: modeState.isLive,
+                  onChanged: canToggle ? _toggleTradingMode : null,
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -111,6 +197,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             const SizedBox(height: 8),
             Text('Current: $currentUrl', style: theme.textTheme.bodySmall),
           ],
+          const SizedBox(height: 32),
+
+          // ---- Trading Mode ----
+          _buildTradingModeSection(theme),
           const SizedBox(height: 32),
 
           // ---- Refresh Interval ----

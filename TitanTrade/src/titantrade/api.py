@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .config import DATA_DIR, STATE_DIR, save_watchlist
+from .config import DATA_DIR, STATE_DIR, live_keys_configured, save_trading_mode, save_watchlist
 
 app = FastAPI(title="TitanTrade API", version="1.0.0")
 
@@ -113,6 +113,39 @@ def trailing_stops() -> dict:
 @app.get("/api/pricecheck")
 def pricecheck() -> dict:
     return _read_state("pricecheck_signals.json")
+
+
+# ---------------------------------------------------------------------------
+# Settings (trading mode)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/settings")
+def get_settings() -> dict:
+    """Return current trading settings and whether live keys are configured."""
+    data = _read_data("watchlist.json")
+    settings = data.get("settings", {})
+    return {
+        "trading_mode": settings.get("trading_mode", "paper"),
+        "live_keys_configured": live_keys_configured(),
+    }
+
+
+class TradingModeUpdate(BaseModel):
+    trading_mode: str
+
+
+@app.put("/api/settings/mode")
+def put_trading_mode(body: TradingModeUpdate) -> dict:
+    """Switch between paper and live trading mode."""
+    if body.trading_mode not in ("paper", "live"):
+        raise HTTPException(status_code=400, detail="trading_mode must be 'paper' or 'live'")
+    if body.trading_mode == "live" and not live_keys_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot enable live trading: ALPACA_LIVE_KEY and ALPACA_LIVE_SECRET not configured",
+        )
+    save_trading_mode(body.trading_mode)
+    return {"trading_mode": body.trading_mode}
 
 
 # ---------------------------------------------------------------------------

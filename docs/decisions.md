@@ -341,3 +341,22 @@
 **Trade-offs**:
 - Market sell after a gap-down means selling at a potentially much worse price than the intended stop
 - But the alternative is holding an unprotected position that could fall further
+
+## Decision 027: Dual Alpaca Credentials with App-Toggled Trading Mode
+**Date**: 2026-03-30
+**Decision**: Store separate paper and live Alpaca credentials in `.env`. Trading mode is toggled via the Flutter app (or API), not via environment variables.
+**Reasoning**:
+- Users need both paper and live accounts configured simultaneously for easy switching
+- Previously, switching required editing `.env` and restarting — error-prone and slow
+- The API endpoint (`PUT /api/settings/mode`) persists the mode to `watchlist.json`
+- `load_config()` selects the correct key pair and Alpaca endpoint based on mode
+- Live keys are optional — system works paper-only if they're not set
+- Legacy `ALPACA_KEY`/`ALPACA_SECRET` env vars are accepted as paper-key fallback
+**Safety**:
+- API refuses to enable live mode if `ALPACA_LIVE_KEY`/`ALPACA_LIVE_SECRET` are missing
+- Flutter app shows a red confirmation dialog before enabling live trading
+- Default state is always paper (toggle off)
+**Trade-offs**:
+- Four env vars instead of two for Alpaca (small complexity increase)
+- Mode change requires the next CLI command to re-read config (not hot-reloaded mid-run)
+- Acceptable: CLI commands are short-lived processes that load config fresh each time
