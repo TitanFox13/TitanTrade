@@ -123,9 +123,9 @@
 - [ ] Test earnings blackout with real FMP data
 
 ## Phase 3: Monitoring & Alerts
-- [ ] Slack/Discord webhook notifications on ABORT signals
-- [ ] Daily portfolio summary notifications
-- [ ] Error alerting (failed runs, API outages)
+- [x] Discord webhook notifications on job completion/failure
+- [x] Daily portfolio summary notifications (weekday 21:00 UTC)
+- [x] Error alerting (failed runs notify via Discord)
 - [ ] Performance tracking dashboard (Streamlit or Grafana)
 - [ ] Weekly P&L report generation
 

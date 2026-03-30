@@ -42,6 +42,13 @@
       "command": "sentry_execute",
       "cron": {"day_of_week": "mon-fri", "hour": 20, "minute": 30},
       "enabled": true
+    },
+    {
+      "id": "daily_summary",
+      "name": "Daily Portfolio Summary",
+      "command": "daily_summary",
+      "cron": {"day_of_week": "mon-fri", "hour": 21, "minute": 0},
+      "enabled": true
     }
   ]
 }

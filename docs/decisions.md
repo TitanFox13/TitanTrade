@@ -380,3 +380,21 @@
 - Scheduler state is in-memory (job history lost on restart) — acceptable for v1
 - APScheduler 3.x is thread-based, not async — fine since trading jobs are I/O-bound and short-lived
 - No market holiday awareness yet — jobs run but complete quickly with no side effects on closed days
+
+## Decision 020: Discord Webhook Notifications
+**Date**: 2026-03-30
+**Decision**: Add Discord webhook notifications for job completion/failure and daily portfolio summaries.
+**Reasoning**:
+- Without notifications, job failures go unnoticed until the user manually checks the Flutter app
+- Discord webhooks are free, simple (single HTTP POST), and push to the user's phone
+- Two notification types: per-job alerts (green/red embeds) and a daily portfolio digest
+**Implementation**:
+- New `notifier.py` module using `httpx` (already a dependency) to POST Discord embeds
+- Hooked into `scheduler.py:_execute_job()` so every job gets automatic notifications
+- `daily_summary` registered as a new scheduled command (weekdays 21:00 UTC)
+- `DISCORD_WEBHOOK_URL` env var is optional — if unset, all notifications are no-ops
+- Notification failures are logged but never crash the underlying job
+**Trade-offs**:
+- Discord-specific (not a generic notification system) — simple and sufficient for v1
+- Daily summary reads state files which may be stale if the last sentry failed
+- No rate limiting on webhook calls — acceptable since jobs run at most ~8 times/day

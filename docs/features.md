@@ -191,6 +191,25 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - **Settings**: Server URL, refresh interval, paper/live trading mode toggle with confirmation dialog
 - **Scheduler**: View all cron jobs, status, next/last run, enable/disable toggle, manual trigger button
 
+## Discord Notifications
+
+### Job Alerts
+- Every scheduled job sends a Discord embed on completion (green) or failure (red)
+- Includes job name, result summary, and duration
+- Error messages included in failure notifications (truncated to 1000 chars)
+- Notification failures never crash the underlying job
+
+### Daily Portfolio Summary
+- Sent weekdays at 21:00 UTC (4 PM EST) after the last sentry run
+- Includes: portfolio value, cash, open positions with P&L, trailing stop status
+- Shows today's sentry signals (CONTINUE/ABORT counts) and any trades executed
+- Displays current trading mode (PAPER/LIVE)
+
+### Configuration
+- Single env var: `DISCORD_WEBHOOK_URL` (optional)
+- If unset, all notifications are silently skipped — no crashes, no errors
+- Uses Discord embed format with color-coded status (green/red/blue)
+
 ## Operational Cost Tracking
 
 ### Per-Call AI Cost Logging
@@ -224,6 +243,7 @@ AI and broker interactions are mocked via `unittest.mock.patch`.
 - **Orphan Close** (7 tests): Expired thesis, missing ticker, zero-qty positions, empty state
 - **Dynamic Entry** (13 tests): Price adjustment, chase limit, invalidated thesis, risk ratio preservation
 - **Strategy Features** (19 tests): Relative strength, correlation, macro blackout, correlation limit, two-tranche split
+- **Notifier** (15 tests): Discord embed formatting, no-op without webhook, job success/failure content, daily summary state parsing, error resilience
 
 ### Running Tests
 ```bash

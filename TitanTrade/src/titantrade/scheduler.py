@@ -108,6 +108,11 @@ def _run_resubmit() -> str:
     return f"{len(trades)} brackets resubmitted"
 
 
+def _run_daily_summary() -> str:
+    from .notifier import send_daily_summary
+    return send_daily_summary()
+
+
 COMMANDS: dict[str, callable] = {
     "full": _run_full,
     "sentry": _run_sentry,
@@ -116,6 +121,7 @@ COMMANDS: dict[str, callable] = {
     "pricecheck": _run_pricecheck,
     "gapcheck": _run_gapcheck,
     "resubmit": _run_resubmit,
+    "daily_summary": _run_daily_summary,
 }
 
 
@@ -138,7 +144,15 @@ def _execute_job(job_id: str, command: str) -> None:
         # Trim history
         _job_history[job_id] = _job_history[job_id][:MAX_HISTORY]
 
+    # Resolve human-readable name for notifications
+    job_name = job_id
+    for job_def in _job_config:
+        if job_def["id"] == job_id:
+            job_name = job_def.get("name", job_id)
+            break
+
     log.info(f"Scheduler: starting job {job_id} (command={command})")
+    started = datetime.now(timezone.utc)
 
     try:
         fn = COMMANDS[command]
@@ -152,6 +166,17 @@ def _execute_job(job_id: str, command: str) -> None:
         log.exception(f"Scheduler: job {job_id} failed")
     finally:
         run["finished_at"] = datetime.now(timezone.utc).isoformat()
+        duration = (datetime.now(timezone.utc) - started).total_seconds()
+
+        # Send Discord notification (never crash the job)
+        try:
+            from .notifier import notify_job_completed, notify_job_failed
+            if run["status"] == "completed":
+                notify_job_completed(job_name, run["result"], duration)
+            elif run["status"] == "failed":
+                notify_job_failed(job_name, run["error"] or "unknown error", duration)
+        except Exception:
+            log.exception("Failed to send Discord notification")
 
 
 # ---------------------------------------------------------------------------

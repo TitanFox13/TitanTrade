@@ -71,6 +71,7 @@ docker compose run --rm titantrade <command>             # CLI commands
 | `src/titantrade/api.py` | FastAPI HTTP server |
 | `src/titantrade/scheduler.py` | Built-in APScheduler (cron jobs inside API process) |
 | `src/titantrade/indicators.py` | Pure Python RSI/MACD/Bollinger/ATR/SMA |
+| `src/titantrade/notifier.py` | Discord webhook notifications (job alerts + daily summary) |
 
 ## Documentation Rules
 
