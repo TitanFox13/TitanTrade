@@ -71,6 +71,64 @@ def extract_json(text: str) -> str:
     return text
 
 
+def _repair_truncated_json(text: str) -> str:
+    """Attempt to repair JSON truncated mid-string (common with Gemini output limits).
+
+    Gemini sometimes hits maxOutputTokens and cuts off mid-response, leaving
+    unterminated strings. This closes open strings and brackets to salvage
+    the parseable fields.
+    """
+    # Close any unterminated string by finding the last unescaped quote state
+    in_string = False
+    escape_next = False
+    last_quote_pos = -1
+
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            last_quote_pos = i
+
+    # If we ended inside a string, close it
+    if in_string:
+        text = text + '"'
+
+    # Now close any open brackets/braces
+    stack: list[str] = []
+    in_str = False
+    esc = False
+    for ch in text:
+        if esc:
+            esc = False
+            continue
+        if ch == "\\":
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch in ("{", "["):
+            stack.append("}" if ch == "{" else "]")
+        elif ch in ("}", "]"):
+            if stack:
+                stack.pop()
+
+    # Remove any trailing comma before we close brackets
+    text = re.sub(r",\s*$", "", text)
+
+    # Close remaining open brackets
+    text += "".join(reversed(stack))
+
+    return text
+
+
 def parse_ai_json(
     text: str,
     context: str = "AI response",
@@ -83,16 +141,26 @@ def parse_ai_json(
 
     try:
         return json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        # Log the raw response for debugging
-        log.error(
-            f"Failed to parse JSON from {context}. "
-            f"Error: {exc}. "
-            f"Raw text (first 500 chars): {text[:500]}"
-        )
-        raise ValueError(
-            f"AI returned invalid JSON ({context}): {exc}"
-        ) from exc
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt repair (Gemini often truncates mid-string at token limit)
+    try:
+        repaired = _repair_truncated_json(cleaned)
+        result = json.loads(repaired)
+        log.warning(f"Repaired truncated JSON from {context}")
+        return result
+    except json.JSONDecodeError:
+        pass
+
+    # Both attempts failed
+    log.error(
+        f"Failed to parse JSON from {context}. "
+        f"Raw text (first 500 chars): {text[:500]}"
+    )
+    raise ValueError(
+        f"AI returned invalid JSON ({context})"
+    )
 
 
 # ---------------------------------------------------------------------------

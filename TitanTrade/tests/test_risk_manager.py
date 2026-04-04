@@ -20,6 +20,7 @@ from titantrade.risk_manager import (
     MIN_CONFIDENCE,
     check_drawdown_circuit_breaker,
     check_sector_limit,
+    confidence_scaled_risk,
     max_investable_amount,
     passes_confidence_threshold,
     pre_trade_check,
@@ -333,3 +334,76 @@ class TestPreTradeCheck:
         assert "cash_reserve" in result["failed_gates"]
         pos_detail = result["gate_results"]["position_size"]["detail"]
         assert "cash reserve" in pos_detail.lower()
+
+
+# ---------------------------------------------------------------------------
+# Confidence-Scaled Risk
+# ---------------------------------------------------------------------------
+
+class TestConfidenceScaledRisk:
+    def test_minimum_confidence(self):
+        # 0.70 -> multiplier 0.7 -> 10% * 0.7 = 7%
+        assert confidence_scaled_risk(0.10, 0.70) == pytest.approx(0.07, abs=0.001)
+
+    def test_baseline_confidence(self):
+        # 0.85 -> multiplier 1.0 -> 10% * 1.0 = 10%
+        assert confidence_scaled_risk(0.10, 0.85) == pytest.approx(0.10, abs=0.001)
+
+    def test_maximum_confidence(self):
+        # 1.00 -> multiplier 1.3 -> 10% * 1.3 = 13%
+        assert confidence_scaled_risk(0.10, 1.00) == pytest.approx(0.13, abs=0.001)
+
+    def test_mid_range(self):
+        # 0.775 -> multiplier = 0.7 + 0.075 * 2.0 = 0.85 -> 8.5%
+        assert confidence_scaled_risk(0.10, 0.775) == pytest.approx(0.085, abs=0.001)
+
+    def test_clamped_below_min(self):
+        # Below min should clamp to min -> same as 0.70
+        assert confidence_scaled_risk(0.10, 0.50) == pytest.approx(0.07, abs=0.001)
+
+    def test_clamped_above_max(self):
+        # Above 1.0 should clamp to 1.0 -> same as 1.00
+        assert confidence_scaled_risk(0.10, 1.50) == pytest.approx(0.13, abs=0.001)
+
+
+class TestConfidenceAwareSizing:
+    def test_no_confidence_unchanged(self):
+        """Without confidence param, sizing is identical to pre-existing behavior."""
+        shares = volatility_adjusted_shares(100_000, 50.0, 2.0, 0.10)
+        assert shares == 200  # Same as TestPositionSizing.test_atr_based_sizing
+
+    def test_high_confidence_more_shares(self):
+        """confidence=0.95 should produce more shares than baseline (no confidence)."""
+        baseline = volatility_adjusted_shares(100_000, 50.0, 2.0, 0.10)
+        high_conf = volatility_adjusted_shares(100_000, 50.0, 2.0, 0.10, confidence=0.95)
+        assert high_conf > baseline
+
+    def test_low_confidence_fewer_shares(self):
+        """confidence=0.70 should produce fewer shares than baseline (no confidence)."""
+        baseline = volatility_adjusted_shares(100_000, 50.0, 2.0, 0.10)
+        low_conf = volatility_adjusted_shares(100_000, 50.0, 2.0, 0.10, confidence=0.70)
+        assert low_conf < baseline
+
+    def test_confidence_flows_through_pre_trade_check(
+        self, monkeypatch, tmp_state_dir, fake_config, bullish_thesis, sample_positions
+    ):
+        """Higher confidence should result in more shares through pre_trade_check."""
+        monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: "Technology")
+
+        bullish_thesis["confidence"] = 0.72
+        result_low = pre_trade_check(
+            ticker="AAPL", thesis=bullish_thesis, portfolio_value=100_000,
+            cash_balance=50_000, positions=sample_positions, stock_atr=3.0,
+            earnings_blocked=False, cfg=fake_config,
+        )
+
+        bullish_thesis["confidence"] = 0.95
+        result_high = pre_trade_check(
+            ticker="AAPL", thesis=bullish_thesis, portfolio_value=100_000,
+            cash_balance=50_000, positions=sample_positions, stock_atr=3.0,
+            earnings_blocked=False, cfg=fake_config,
+        )
+
+        assert result_low["allowed"] is True
+        assert result_high["allowed"] is True
+        assert result_high["shares"] > result_low["shares"]

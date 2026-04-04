@@ -244,6 +244,10 @@ CURRENT POSITION:
   Days held: {days_held}
   Current hold horizon: {hold_horizon}
 
+CURRENT MARKET REGIME: {current_regime}
+
+{regime_warning}
+
 UPDATED MARKET CONTEXT:
 {market_context}
 
@@ -260,9 +264,13 @@ ANALYST RATINGS:
 
 INSTRUCTIONS:
 1. Evaluate whether the original thesis is still valid.
-2. Check if the risk/reward has changed (e.g., price near take-profit, stop too far).
-3. Consider whether the hold horizon should change (short_term / medium_term / long_term).
-4. Decide:
+2. REGIME CHECK: If a regime warning is present above, weigh it heavily.
+   Holding an inverse ETF in a bullish/neutral regime is a strategic
+   contradiction. Default to CLOSE unless there is an exceptional
+   short-term catalyst for continued market decline.
+3. Check if the risk/reward has changed (e.g., price near take-profit, stop too far).
+4. Consider whether the hold horizon should change (short_term / medium_term / long_term).
+5. Decide:
    - CONTINUE: thesis intact, keep holding with current levels
    - ADJUST: thesis intact but stop-loss or take-profit should be updated
    - CLOSE: thesis invalidated, or target reached, or risk/reward no longer favorable
@@ -447,6 +455,16 @@ def review_position(
         except (ValueError, TypeError):
             pass
 
+    regime = market_ctx.get("market_regime", "neutral")
+    is_hedge = ticker in cfg.trading.hedge_instruments
+    regime_warning = ""
+    if is_hedge and regime not in ("bearish", "strong_bearish", "crisis"):
+        regime_warning = (
+            f"WARNING: {ticker} is an INVERSE ETF (hedge instrument) that profits "
+            f"from market declines. The current market regime is '{regime}', which "
+            f"does NOT support holding inverse positions. Consider CLOSING."
+        )
+
     prompt = REVIEW_USER_TEMPLATE.format(
         ticker=ticker,
         sector=sector,
@@ -456,6 +474,8 @@ def review_position(
         pnl_pct=f"{pnl_pct:+.2f}",
         days_held=days_held,
         hold_horizon=existing_thesis.get("hold_horizon", "short_term"),
+        current_regime=regime,
+        regime_warning=regime_warning,
         market_context=json.dumps(market_ctx, indent=2),
         indicators_json=json.dumps(stock_data.get("technical_indicators", {}), indent=2),
         news_json=json.dumps(stock_data.get("news", [])[:15], indent=2),

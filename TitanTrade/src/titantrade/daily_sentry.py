@@ -66,8 +66,10 @@ OUTPUT FORMAT (strict JSON, no other text):
   "conflicting_headlines": [],
   "price_concern": false,
   "market_concern": false,
-  "reasoning": "Explanation here..."
+  "reasoning": "Brief explanation (2-3 sentences max)"
 }}
+
+IMPORTANT: Keep reasoning under 3 sentences. Do NOT summarize all headlines.
 """
 
 
@@ -109,14 +111,27 @@ def _fetch_current_price(ticker: str, cfg: Config) -> float | None:
 
 
 def _fetch_spy_quote(cfg: Config) -> float | None:
-    """Fetch SPY's daily change percentage via quote endpoint."""
+    """Fetch SPY's daily change percentage via quote endpoint.
+
+    FMP stable/quote returns ``changePercentage`` (no trailing "s").
+    Falls back to computing from price/previousClose if the field is missing.
+    """
     url = "https://financialmodelingprep.com/stable/quote"
     params = {"symbol": "SPY", "apikey": cfg.fmp.key}
     try:
         resp = fetch_with_retry("GET", url, params=params)
         data = resp.json()
         if data and isinstance(data, list):
-            return float(data[0].get("changesPercentage", 0))
+            quote = data[0]
+            # FMP stable API field is "changePercentage" (verified 2026-04-05)
+            change_pct = quote.get("changePercentage")
+            if change_pct is not None:
+                return round(float(change_pct), 2)
+            # Fallback: compute from price and previousClose
+            price = quote.get("price", 0)
+            prev_close = quote.get("previousClose", 0)
+            if price and prev_close:
+                return round((float(price) - float(prev_close)) / float(prev_close) * 100, 2)
     except Exception as exc:
         log.warning(f"SPY quote fetch failed: {exc}")
     return None

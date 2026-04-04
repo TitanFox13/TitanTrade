@@ -399,6 +399,70 @@
 - Daily summary reads state files which may be stale if the last sentry failed
 - No rate limiting on webhook calls — acceptable since jobs run at most ~8 times/day
 
+## Decision 032: Confidence-Proportional Position Sizing
+**Date**: 2026-04-05
+**Decision**: Scale position size proportionally to confidence using a linear multiplier (0.7x at 0.70 confidence to 1.3x at 1.00 confidence).
+**Reasoning**:
+- Previously confidence was binary: blocked trades below 0.70, did nothing above
+- A 0.71 and 0.95 confidence trade both got identical 10% position sizing
+- Information from the AI's conviction assessment was wasted
+- Higher confidence = more capital deployed; lower confidence = smaller bet
+- Baseline (10% risk) is at 0.85 confidence; 0.70 gets 7%, 1.00 gets 13%
+**Implementation**:
+- `confidence_scaled_risk()` in `risk_manager.py`: linear interpolation
+- Formula: `multiplier = 0.7 + (confidence - 0.70) * 2.0`
+- Applied inside `volatility_adjusted_shares()` when confidence is provided
+- Backward compatible: `confidence=None` gives identical pre-existing behavior
+**Trade-offs**:
+- Higher exposure on high-confidence trades increases tail risk if confidence calibration is poor
+- Mitigated by existing performance feedback loop that calibrates confidence over time
+- ATR cap still limits any single position to ~13% max (even at confidence=1.0)
+
+## Decision 033: Hedge Instrument Regime Awareness in Weekly Review
+**Date**: 2026-04-05
+**Decision**: Add market regime context and explicit warnings to the weekly review prompt for inverse ETF positions.
+**Reasoning**:
+- SDS (2x inverse S&P 500) was held through a +3.4% market rally, losing 7.81%
+- The review prompt never told Claude about the current market regime
+- Claude only saw individual position P&L and technicals, not the strategic contradiction
+- Without regime context, Claude defaulted to CONTINUE since the thesis was technically intact
+**Implementation**:
+- `REVIEW_USER_TEMPLATE` now includes `{current_regime}` and `{regime_warning}`
+- For hedge instruments in non-bearish regimes, a warning is injected:
+  "WARNING: {ticker} is an INVERSE ETF... current regime is '{regime}'... Consider CLOSING."
+- New instruction: "REGIME CHECK: If a regime warning is present, weigh it heavily"
+**Trade-offs**:
+- May cause premature exits during temporary rallies within a broader bearish trend
+- Acceptable because inverse ETFs are intended as short-term hedges, not long-term holds
+
+## Decision 029: Gemini Truncated JSON Repair
+**Date**: 2026-04-04
+**Decision**: Add a JSON repair layer in `ai_parsing.py` to salvage truncated Gemini responses.
+**Reasoning**:
+- Gemini Flash frequently hits `maxOutputTokens` and cuts off mid-JSON string (especially in the `reasoning` field)
+- This was causing ~8 parse failures per week, losing sentry signal quality
+- The repair closes unterminated strings and brackets to recover the parseable fields
+- Also added prompt instruction to keep reasoning under 3 sentences to reduce truncation frequency
+**Trade-offs**:
+- Repaired JSON may have a truncated `reasoning` field — acceptable since the `signal` field is the actionable output
+
+## Decision 030: Live Portfolio API Endpoint
+**Date**: 2026-04-04
+**Decision**: The `/api/portfolio` endpoint now fetches live data from Alpaca instead of reading a static JSON file.
+**Reasoning**:
+- The static `portfolio.json` was never updated, causing persistent 404 errors
+- The Flutter app needs real-time portfolio data (positions, P&L, buying power)
+- Falls back to static file if Alpaca API is unreachable
+
+## Decision 031: Sector Cache Initialization in Executor
+**Date**: 2026-04-04
+**Decision**: Call `load_stock_sectors()` at the start of `execute_trades()` to populate the in-memory sector cache.
+**Reasoning**:
+- The sector cache was only populated during `build_data_bundle()` (the fetch command)
+- The executor runs as a separate process/invocation and had an empty cache
+- All tickers mapped to "Unknown" sector, causing the 40% sector limit gate to block all entries in that phantom sector
+- Now the executor loads the persistent `sector_cache.json` (or fetches from FMP if missing) before risk gate checks
+
 ## Decision 021: Fractional Shares for Small Accounts
 **Date**: 2026-03-30
 **Decision**: Support fractional share trading for accounts too small for whole shares.

@@ -14,6 +14,9 @@
 - **Layer 2 - Price-based**: 3% adverse move triggers hard ABORT override
 - **Layer 3 - News-based**: Gemini Flash checks headlines vs thesis breach conditions
 - Conservative default: when in doubt, ABORT (capital preservation > opportunity)
+- Truncated JSON repair: salvages Gemini responses that hit token limits mid-output
+- SPY change computed from price/previousClose fallback when API field missing
+- Regime-aware reviews: inverse ETF positions get explicit warnings in non-bearish regimes
 
 ### Performance Feedback Loop
 - Win/loss rate tracking per ticker and overall
@@ -68,7 +71,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 2. **Earnings blackout**: No entry within 5 days of earnings
 3. **Drawdown circuit breaker**: Halts at 8% portfolio drawdown from peak
 4. **Cash reserve**: Maintains 20% minimum cash at all times
-5. **Volatility-adjusted sizing**: ATR-based, targeting 2% risk per position
+5. **Volatility-adjusted sizing**: ATR-based, targeting 2% risk per position, scaled by confidence (0.7x at 0.70 to 1.3x at 1.00)
 6. **Sector exposure limit**: Max 40% of portfolio in any single sector
 
 ### Broker-Native Stop-Losses

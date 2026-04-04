@@ -155,6 +155,28 @@ def check_sector_limit(
 
 
 # ---------------------------------------------------------------------------
+# Confidence-scaled risk
+# ---------------------------------------------------------------------------
+
+def confidence_scaled_risk(
+    base_risk_pct: float,
+    confidence: float,
+    min_confidence: float = MIN_CONFIDENCE,
+) -> float:
+    """Scale risk_per_trade by confidence using linear interpolation.
+
+    confidence=0.70 (minimum) → multiplier 0.7 → 7% risk
+    confidence=0.85            → multiplier 1.0 → 10% risk (baseline)
+    confidence=1.00            → multiplier 1.3 → 13% risk
+
+    Formula: multiplier = 0.7 + (confidence - min_confidence) * 2.0
+    """
+    clamped = max(min(confidence, 1.0), min_confidence)
+    multiplier = 0.7 + (clamped - min_confidence) * (0.6 / (1.0 - min_confidence))
+    return round(base_risk_pct * multiplier, 4)
+
+
+# ---------------------------------------------------------------------------
 # Volatility-adjusted position sizing
 # ---------------------------------------------------------------------------
 
@@ -163,6 +185,7 @@ def volatility_adjusted_shares(
     entry_price: float,
     stock_atr: float | None,
     risk_per_trade_pct: float = 0.10,
+    confidence: float | None = None,
 ) -> float:
     """Calculate shares using ATR-based risk budgeting.
 
@@ -175,7 +198,12 @@ def volatility_adjusted_shares(
       But cap at risk_per_trade_pct * portfolio_value (the old fixed limit)
 
     If ATR is unavailable, fall back to fixed percentage sizing.
+
+    If confidence is provided, scales risk_per_trade proportionally:
+    low confidence (0.70) → smaller position, high confidence (1.0) → larger position.
     """
+    if confidence is not None:
+        risk_per_trade_pct = confidence_scaled_risk(risk_per_trade_pct, confidence)
     max_position_value = portfolio_value * risk_per_trade_pct
 
     def _snap(raw: float) -> float:
@@ -378,7 +406,8 @@ def pre_trade_check(
     shares = 0.0
     if investable > 0 and entry_price > 0:
         shares = volatility_adjusted_shares(
-            portfolio_value, entry_price, stock_atr, cfg.trading.risk_per_trade
+            portfolio_value, entry_price, stock_atr, cfg.trading.risk_per_trade,
+            confidence=confidence,
         )
         position_value = shares * entry_price
 

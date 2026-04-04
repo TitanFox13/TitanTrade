@@ -112,6 +112,23 @@
 - [x] Slippage-aware limit exits for non-urgent ABORT signals
 - [x] Limit sell function for executor (reduces market order slippage)
 
+## Phase 1.15: Capital Deployment Improvements (2026-04-05)
+- [x] Confidence-proportional position sizing (linear 0.7x-1.3x scaling)
+- [x] `confidence_scaled_risk()` helper in risk_manager.py
+- [x] Confidence param added to `volatility_adjusted_shares()` (backward compatible)
+- [x] Hedge instrument regime awareness in weekly review prompt
+- [x] Inverse ETF warning injected for non-bearish regimes
+- [x] Tests for confidence scaling (unit + integration, 10 new tests)
+- [x] ADR documentation for both changes
+
+## Phase 1.14: Production Hardening (2026-04-04)
+- [x] Gemini truncated JSON repair in ai_parsing.py (closes unterminated strings/brackets)
+- [x] Sentry prompt brevity instruction (reasoning under 3 sentences)
+- [x] Stop-loss order fallback: stop-limit → plain stop on 403 rejection
+- [x] Sector cache initialization in executor (load_stock_sectors at startup)
+- [x] SPY change fallback: compute from price/previousClose when changesPercentage missing
+- [x] Live portfolio API endpoint (fetches from Alpaca instead of stale static file)
+
 ## Phase 2: Testing & Validation
 - [x] Unit tests for indicators (known-good RSI/MACD values)
 - [x] Unit tests for risk manager gates

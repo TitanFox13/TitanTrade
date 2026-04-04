@@ -85,10 +85,40 @@ def health() -> dict:
 
 @app.get("/api/portfolio")
 def portfolio() -> dict:
-    data = _read_state("portfolio.json")
-    if not data:
-        raise HTTPException(status_code=404, detail="portfolio.json not found")
-    return data
+    """Return live portfolio data from Alpaca (account + positions)."""
+    try:
+        from .config import load_config
+        from .executor import get_account, get_positions
+
+        cfg = load_config()
+        account = get_account(cfg)
+        positions = get_positions(cfg)
+        return {
+            "portfolio_value": float(account.get("portfolio_value", 0)),
+            "cash": float(account.get("cash", 0)),
+            "buying_power": float(account.get("buying_power", 0)),
+            "equity": float(account.get("equity", 0)),
+            "positions": [
+                {
+                    "ticker": p.get("symbol", ""),
+                    "qty": float(p.get("qty", 0)),
+                    "market_value": float(p.get("market_value", 0)),
+                    "avg_entry_price": float(p.get("avg_entry_price", 0)),
+                    "current_price": float(p.get("current_price", 0)),
+                    "unrealized_pl": float(p.get("unrealized_pl", 0)),
+                    "unrealized_plpc": float(p.get("unrealized_plpc", 0)),
+                    "side": p.get("side", ""),
+                }
+                for p in positions
+            ],
+        }
+    except Exception as exc:
+        log.error(f"Failed to fetch live portfolio: {exc}")
+        # Fall back to static file
+        data = _read_state("portfolio.json")
+        if not data:
+            raise HTTPException(status_code=503, detail=f"Portfolio unavailable: {exc}")
+        return data
 
 
 @app.get("/api/trades")

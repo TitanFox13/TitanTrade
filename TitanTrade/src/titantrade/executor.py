@@ -21,6 +21,7 @@ from typing import Any
 
 from titantrade.config import Config, STATE_DIR, load_config
 from titantrade.logger import get_logger, log_decision
+from titantrade.market_context import load_stock_sectors
 from titantrade.retry import fetch_with_retry
 from titantrade.risk_manager import pre_trade_check
 
@@ -193,7 +194,8 @@ def place_native_stop_loss(
     """Place a standalone stop-loss sell order on an existing position.
 
     Used when we enter via a filled limit buy and need to add the stop separately.
-    Uses stop-limit with 1% buffer to avoid catastrophic slippage.
+    Tries stop-limit first (1% buffer for slippage protection), falls back to
+    plain stop order if the broker rejects the stop-limit (403 on paper accounts).
     """
     url = f"{cfg.alpaca.base_url}/v2/orders"
     body = {
@@ -206,6 +208,22 @@ def place_native_stop_loss(
         "time_in_force": "gtc",
     }
     log.info(f"Stop-limit SELL: {qty} {ticker} stop=${stop_price}")
+    try:
+        resp = fetch_with_retry("POST", url, headers=_headers(cfg), json_body=body)
+        return resp.json()
+    except Exception as exc:
+        log.warning(f"Stop-limit rejected for {ticker}: {exc} — falling back to plain stop")
+
+    # Fallback: plain stop order (market sell when stop triggers)
+    body = {
+        "symbol": ticker,
+        "qty": str(qty),
+        "side": "sell",
+        "type": "stop",
+        "stop_price": str(round(stop_price, 2)),
+        "time_in_force": "gtc",
+    }
+    log.info(f"Stop SELL (fallback): {qty} {ticker} stop=${stop_price}")
     resp = fetch_with_retry("POST", url, headers=_headers(cfg), json_body=body)
     return resp.json()
 
@@ -1090,6 +1108,12 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
       7. Pass 2 selection filter (only trade analyst-selected stocks)
     """
     log.info("Starting trade execution")
+
+    # Ensure sector cache is populated for risk gate checks
+    try:
+        load_stock_sectors(cfg.trading.watchlist, cfg)
+    except Exception as exc:
+        log.warning(f"Sector cache load failed: {exc}")
 
     # --- Pre-flight safety checks (run before any thesis-based logic) ---
 
