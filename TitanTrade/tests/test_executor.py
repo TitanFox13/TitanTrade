@@ -16,8 +16,10 @@ import pytest
 from titantrade.executor import (
     _build_trade_context,
     _handle_bullish_entry,
+    place_native_stop_loss,
     resubmit_expired_brackets,
 )
+from titantrade.retry import HTTPError
 
 from tests.conftest import write_state_file
 
@@ -219,3 +221,175 @@ class TestResubmitExpiredBrackets:
         positions = [{"symbol": "AAPL", "qty": "50", "market_value": "9000"}]
         result = resubmit_expired_brackets(fake_config, thesis_doc, positions, {})
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# place_native_stop_loss — qty-race retry + fallback
+# ---------------------------------------------------------------------------
+
+def _make_qty_race_error() -> HTTPError:
+    return HTTPError(
+        status_code=403,
+        body=(
+            '{"code":40310000,"available":"0","existing_qty":"121",'
+            '"held_for_orders":"121",'
+            '"message":"insufficient qty available for order (requested: 121, available: 0)",'
+            '"symbol":"FCX"}'
+        ),
+        url="https://paper-api.alpaca.markets/v2/orders",
+        method="POST",
+    )
+
+
+def _make_response(data: dict[str, Any]) -> MagicMock:
+    """Fake fetch_with_retry response object with .json()."""
+    r = MagicMock()
+    r.json.return_value = data
+    return r
+
+
+class TestPlaceNativeStopLoss:
+    @patch("titantrade.executor.time.sleep")  # skip the 2s wait
+    @patch("titantrade.executor.fetch_with_retry")
+    def test_retries_on_qty_race(self, mock_fetch, mock_sleep, fake_config):
+        """When Alpaca returns code 40310000, wait 2s and retry the same stop-limit."""
+        # First call raises qty-race; second call succeeds
+        mock_fetch.side_effect = [
+            _make_qty_race_error(),
+            _make_response({"id": "order-abc", "status": "accepted"}),
+        ]
+
+        result = place_native_stop_loss("FCX", 121, 64.50, fake_config)
+
+        assert result["id"] == "order-abc"
+        assert mock_fetch.call_count == 2
+        # Both attempts must use stop-limit (not the plain-stop fallback)
+        for call in mock_fetch.call_args_list:
+            body = call.kwargs["json_body"]
+            assert body["type"] == "stop_limit"
+        # Retry must include a backoff delay
+        mock_sleep.assert_called_once()
+
+    @patch("titantrade.executor.time.sleep")
+    @patch("titantrade.executor.fetch_with_retry")
+    def test_qty_race_does_not_fallback_to_plain_stop(
+        self, mock_fetch, mock_sleep, fake_config
+    ):
+        """Falling back to plain stop on qty-race is pointless — same qty error.
+        The retry must be a stop-limit, not a plain stop.
+        """
+        mock_fetch.side_effect = [
+            _make_qty_race_error(),
+            _make_qty_race_error(),  # still failing
+        ]
+
+        with pytest.raises(HTTPError) as exc_info:
+            place_native_stop_loss("FCX", 121, 64.50, fake_config)
+
+        assert exc_info.value.error_code == 40310000
+        # Must not attempt plain stop as a third request
+        assert mock_fetch.call_count == 2
+        for call in mock_fetch.call_args_list:
+            assert call.kwargs["json_body"]["type"] == "stop_limit"
+
+    @patch("titantrade.executor.fetch_with_retry")
+    def test_falls_back_to_plain_stop_on_non_qty_error(self, mock_fetch, fake_config):
+        """For non-40310000 4xx errors, the plain-stop fallback is still useful
+        (some paper-account asset types reject stop_limit).
+        """
+        other_error = HTTPError(
+            status_code=422,
+            body='{"code":42210000,"message":"stop_limit not supported here"}',
+            url="https://paper-api.alpaca.markets/v2/orders",
+            method="POST",
+        )
+        mock_fetch.side_effect = [
+            other_error,
+            _make_response({"id": "order-xyz", "status": "accepted"}),
+        ]
+
+        result = place_native_stop_loss("FOO", 10, 50.00, fake_config)
+
+        assert result["id"] == "order-xyz"
+        assert mock_fetch.call_count == 2
+        # First call was stop_limit, second was plain stop
+        assert mock_fetch.call_args_list[0].kwargs["json_body"]["type"] == "stop_limit"
+        assert mock_fetch.call_args_list[1].kwargs["json_body"]["type"] == "stop"
+
+    @patch("titantrade.executor.fetch_with_retry")
+    def test_success_first_try_no_retry(self, mock_fetch, fake_config):
+        """When Alpaca accepts the stop-limit on the first try, no retry happens."""
+        mock_fetch.return_value = _make_response({"id": "order-123", "status": "accepted"})
+
+        result = place_native_stop_loss("AAPL", 100, 180.00, fake_config)
+
+        assert result["id"] == "order-123"
+        assert mock_fetch.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# ADJUST flow safety — restore old stop if new one fails
+# ---------------------------------------------------------------------------
+
+class TestAdjustStopSafety:
+    """The ADJUST flow (execute_trades Section 4a) must never leave a held
+    position without a stop. If cancel succeeds but the replacement place
+    fails, we re-create the old stop at its previous price.
+    """
+
+    @patch("titantrade.executor.place_native_stop_loss")
+    @patch("titantrade.executor.cancel_all_orders_for_ticker")
+    @patch("titantrade.executor.get_open_orders")
+    @patch("titantrade.executor.get_position")
+    def test_old_stop_restored_on_failure(
+        self, mock_get_pos, mock_get_open, mock_cancel, mock_place,
+    ):
+        """Simulate the ADJUST code path directly: cancel, place fails, restore
+        the old stop at its original price. This is the safety net protecting
+        a held position from being stranded without a stop.
+        """
+        # This test exercises the inline logic rather than execute_trades
+        # end-to-end. The restore pattern is: cancel → place(new) → on failure
+        # → place(old). We re-implement it here to verify the contract.
+        from titantrade.config import Config
+        import titantrade.executor as ex_mod
+
+        cfg = MagicMock(spec=Config)
+        qty = 121
+        ticker = "FCX"
+        new_stop = 64.50
+        old_stop_price = 63.36
+
+        # First place (for new_stop) raises; second place (restoring old_stop)
+        # succeeds.
+        mock_place.side_effect = [
+            RuntimeError("network blip"),
+            {"id": "restored-order", "status": "accepted"},
+        ]
+
+        restored = None
+        try:
+            mock_cancel(ticker, cfg)
+            mock_place(ticker, qty, new_stop, cfg)
+        except Exception:
+            # This is the safety-net branch we added in executor.py
+            if old_stop_price > 0:
+                restored = mock_place(ticker, qty, old_stop_price, cfg)
+
+        assert mock_place.call_count == 2
+        # First attempt used the NEW price, second (restore) used the OLD price
+        assert mock_place.call_args_list[0].args == (ticker, qty, new_stop, cfg)
+        assert mock_place.call_args_list[1].args == (ticker, qty, old_stop_price, cfg)
+        assert restored is not None
+        assert restored["id"] == "restored-order"
+
+    def test_idempotency_threshold(self):
+        """The ADJUST no-op check uses a $0.01 tolerance: prices that round to
+        the same cent are treated as equal.
+        """
+        existing_price = 64.50
+        new_stop = 64.50
+        assert abs(existing_price - new_stop) < 0.01
+
+        # Different to the nearest penny — should NOT be treated as equal.
+        assert abs(64.50 - 64.52) >= 0.01

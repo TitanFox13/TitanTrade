@@ -19,11 +19,18 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+import time
+
 from titantrade.config import Config, STATE_DIR, load_config
 from titantrade.logger import get_logger, log_decision
 from titantrade.market_context import load_stock_sectors
-from titantrade.retry import fetch_with_retry
+from titantrade.retry import HTTPError, fetch_with_retry
 from titantrade.risk_manager import pre_trade_check
+
+# Alpaca error code: "insufficient qty available for order" — typically means
+# a prior cancel on the same position hasn't propagated yet (qty_available
+# lags a few hundred milliseconds). Retry once after a short delay.
+ALPACA_INSUFFICIENT_QTY = 40310000
 
 log = get_logger("executor")
 
@@ -193,12 +200,17 @@ def place_native_stop_loss(
 ) -> dict[str, Any]:
     """Place a standalone stop-loss sell order on an existing position.
 
-    Used when we enter via a filled limit buy and need to add the stop separately.
-    Tries stop-limit first (1% buffer for slippage protection), falls back to
-    plain stop order if the broker rejects the stop-limit (403 on paper accounts).
+    Uses a stop-limit with a 1% buffer below the stop for slippage protection.
+
+    Error handling:
+      - On Alpaca 40310000 ("insufficient qty available"), we wait 2s and
+        retry once. This error usually means a just-cancelled order is still
+        holding the qty (``qty_available`` lags a few hundred ms).
+      - On any other 4xx we fall back to a plain stop order — historically
+        Alpaca paper accounts have rejected stop-limit for some asset types.
     """
     url = f"{cfg.alpaca.base_url}/v2/orders"
-    body = {
+    stop_limit_body = {
         "symbol": ticker,
         "qty": str(qty),
         "side": "sell",
@@ -208,14 +220,43 @@ def place_native_stop_loss(
         "time_in_force": "gtc",
     }
     log.info(f"Stop-limit SELL: {qty} {ticker} stop=${stop_price}")
-    try:
-        resp = fetch_with_retry("POST", url, headers=_headers(cfg), json_body=body)
-        return resp.json()
-    except Exception as exc:
-        log.warning(f"Stop-limit rejected for {ticker}: {exc} — falling back to plain stop")
 
-    # Fallback: plain stop order (market sell when stop triggers)
-    body = {
+    try:
+        resp = fetch_with_retry(
+            "POST", url, headers=_headers(cfg), json_body=stop_limit_body
+        )
+        return resp.json()
+    except HTTPError as exc:
+        if exc.error_code == ALPACA_INSUFFICIENT_QTY:
+            # Qty race — a recent cancel hasn't settled yet. Wait and retry
+            # the same stop-limit. Falling back to a plain stop here would
+            # fail with the same error since both need qty_available.
+            log.warning(
+                f"Qty race for {ticker} (code 40310000): {exc.error_message} "
+                f"— waiting 2s and retrying the stop-limit"
+            )
+            time.sleep(2.0)
+            try:
+                resp = fetch_with_retry(
+                    "POST", url, headers=_headers(cfg), json_body=stop_limit_body
+                )
+                log.info(f"Stop-limit for {ticker} succeeded on qty-race retry")
+                return resp.json()
+            except HTTPError as exc2:
+                log.error(
+                    f"Stop-limit for {ticker} still failing after qty-race retry: "
+                    f"code={exc2.error_code} msg={exc2.error_message}"
+                )
+                raise
+
+        # Any other 4xx: fall through to the plain-stop fallback below.
+        log.warning(
+            f"Stop-limit rejected for {ticker} "
+            f"(code={exc.error_code}, msg={exc.error_message}) — falling back to plain stop"
+        )
+
+    # Fallback: plain stop order (market sell when stop triggers).
+    plain_stop_body = {
         "symbol": ticker,
         "qty": str(qty),
         "side": "sell",
@@ -224,7 +265,9 @@ def place_native_stop_loss(
         "time_in_force": "gtc",
     }
     log.info(f"Stop SELL (fallback): {qty} {ticker} stop=${stop_price}")
-    resp = fetch_with_retry("POST", url, headers=_headers(cfg), json_body=body)
+    resp = fetch_with_retry(
+        "POST", url, headers=_headers(cfg), json_body=plain_stop_body
+    )
     return resp.json()
 
 
@@ -950,8 +993,21 @@ def close_orphaned_positions(cfg: Config) -> list[dict[str, Any]]:
             _append_trade(trade)
             closed.append(trade)
             log_decision(log, "executor", ticker, "SELL (ORPHAN)", reason)
+        except HTTPError as exc:
+            # Surface broker diagnostics (e.g. Alpaca error code + message)
+            # so the root cause is visible in logs — the next executor run
+            # will retry this orphan close automatically.
+            log.error(
+                f"Failed to close orphaned position {ticker}: "
+                f"HTTP {exc.status_code} code={exc.error_code} "
+                f"msg={exc.error_message or exc.body[:200]} "
+                f"— will retry on next run"
+            )
         except Exception as exc:
-            log.error(f"Failed to close orphaned position {ticker}: {exc}")
+            log.error(
+                f"Failed to close orphaned position {ticker}: {exc} "
+                f"— will retry on next run"
+            )
 
     if closed:
         # Clean up trailing state for closed tickers
@@ -1273,12 +1329,55 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                 new_stop = thesis.get("stop_loss_price")
                 new_tp = thesis.get("take_profit_price")
                 if new_stop and qty > 0:
+                    # Idempotency: if an existing stop is already at the target
+                    # price, don't cancel+replace. Running cancel→place on every
+                    # executor tick churns the broker and hits qty-race 403s
+                    # (Alpaca's qty_available lags a few hundred ms after cancel).
+                    open_orders = get_open_orders(ticker, cfg)
+                    existing_stop = next(
+                        (
+                            o for o in open_orders
+                            if o.get("type") in ("stop", "stop_limit")
+                            and o.get("side") == "sell"
+                        ),
+                        None,
+                    )
+                    if existing_stop:
+                        existing_price = float(existing_stop.get("stop_price", 0))
+                        if abs(existing_price - new_stop) < 0.01:
+                            log.info(
+                                f"ADJUST {ticker}: stop already at ${new_stop:.2f} "
+                                f"— skipping cancel+replace"
+                            )
+                            continue
+
+                    # Remember the old stop price so we can restore it if the
+                    # cancel+replace half-fails (cancel succeeded, place failed).
+                    # Without this safety net, ADJUST could strand a position
+                    # with no stop-loss at all.
+                    old_stop_price = (
+                        float(existing_stop.get("stop_price", 0))
+                        if existing_stop else 0.0
+                    )
+
                     log.info(f"ADJUST: Replacing stop for {ticker} to ${new_stop:.2f}")
                     try:
                         cancel_all_orders_for_ticker(ticker, cfg)
                         place_native_stop_loss(ticker, qty, new_stop, cfg)
                     except Exception as exc:
                         log.error(f"Failed to adjust stop for {ticker}: {exc}")
+                        if old_stop_price > 0:
+                            log.warning(
+                                f"ADJUST {ticker}: restoring old stop @ ${old_stop_price:.2f} "
+                                f"so position is not left unprotected"
+                            )
+                            try:
+                                place_native_stop_loss(ticker, qty, old_stop_price, cfg)
+                            except Exception as restore_exc:
+                                log.error(
+                                    f"CRITICAL: {ticker} has no stop-loss order — "
+                                    f"old-stop restore also failed: {restore_exc}"
+                                )
             continue
 
         # ------------------------------------------------------------------

@@ -151,6 +151,56 @@ class TestValidateThesis:
         assert result["target_entry_price"] is None
 
 
+class TestValidateThesisReviewMode:
+    """is_review=True is used when Claude reviews a held position. In that
+    mode there is no pending entry price because we already own the shares,
+    so the validator must NOT downgrade BULLISH to NEUTRAL or auto-fill a
+    stop-loss from an entry price we don't have.
+    """
+
+    def test_review_bullish_no_entry_stays_bullish(self):
+        raw = {
+            "ticker": "JPM",
+            "thesis": "BULLISH",
+            "confidence": 0.82,
+            "review_action": "CONTINUE",
+        }
+        result = validate_thesis(raw, "JPM", is_review=True)
+        assert result["thesis"] == "BULLISH"
+        assert result["target_entry_price"] is None  # not fabricated
+
+    def test_review_bullish_no_entry_no_stop_autofill(self):
+        """Auto-fill of stop_loss depends on target_entry_price; without it
+        we must leave stop_loss as None for the caller to carry forward.
+        """
+        raw = {
+            "ticker": "JPM",
+            "thesis": "BULLISH",
+            "confidence": 0.8,
+            "review_action": "CONTINUE",
+        }
+        result = validate_thesis(raw, "JPM", is_review=True)
+        assert result["stop_loss_price"] is None
+
+    def test_review_mode_still_clamps_confidence(self):
+        raw = {"ticker": "JPM", "thesis": "BULLISH", "confidence": 1.5}
+        result = validate_thesis(raw, "JPM", is_review=True)
+        assert result["confidence"] == 1.0
+
+    def test_review_mode_still_normalizes_direction(self):
+        raw = {"ticker": "JPM", "thesis": "long"}
+        result = validate_thesis(raw, "JPM", is_review=True)
+        # "long" isn't a valid direction — still becomes NEUTRAL, just not for
+        # the missing-entry-price reason.
+        assert result["thesis"] == "NEUTRAL"
+
+    def test_new_candidate_mode_unchanged(self):
+        """Existing callers that don't pass is_review must get the old behaviour."""
+        raw = {"ticker": "AAPL", "thesis": "BULLISH", "confidence": 0.8}
+        result = validate_thesis(raw, "AAPL")  # default is_review=False
+        assert result["thesis"] == "NEUTRAL"
+
+
 # ---------------------------------------------------------------------------
 # validate_sentry_signal
 # ---------------------------------------------------------------------------

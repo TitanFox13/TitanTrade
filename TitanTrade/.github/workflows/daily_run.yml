@@ -32,7 +32,7 @@ jobs:
           ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
           ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
           FMP_KEY: ${{ secrets.FMP_KEY }}
-          SEC_API_KEY: ${{ secrets.SEC_API_KEY }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           CLAUDE_KEY: ${{ secrets.CLAUDE_KEY }}
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
         run: uv run python -m titantrade.daily_sentry

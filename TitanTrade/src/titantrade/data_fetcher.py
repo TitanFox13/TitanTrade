@@ -1,10 +1,10 @@
-"""Module A: Data fetcher for FMP (prices + news) and SEC-API (filings).
+"""Module A: Data fetcher for FMP (prices + news) and SEC EDGAR (filings).
 
 Produces a clean JSON "Data Bundle" that includes:
   - OHLCV price data (250 days for indicator calculation, last 5 sent to Claude)
   - Technical indicators (RSI, MACD, Bollinger, ATR, SMA analysis)
   - News headlines and snippets (last 7 days)
-  - SEC filings (8-K, 10-Q, 10-K from last 24 hours)
+  - SEC filings (8-K, 10-Q, 10-K from last 24 hours) — free EDGAR API
   - Market context (SPY, VIX, sector rotation)
   - Earnings calendar (upcoming dates + blackout flags)
 """
@@ -23,6 +23,7 @@ from titantrade.logger import get_logger
 from titantrade.market_context import load_stock_sectors
 from titantrade.market_context import build_market_context
 from titantrade.retry import fetch_with_retry
+from titantrade.sec_edgar import fetch_insider_filings, fetch_recent_filings
 
 log = get_logger("data_fetcher")
 
@@ -98,48 +99,15 @@ def fetch_news(ticker: str, cfg: Config, limit: int = 50) -> list[dict[str, Any]
     return results
 
 
-def fetch_sec_filings(ticker: str, cfg: Config) -> list[dict[str, Any]]:
-    """Check for recent SEC filings (8-K, 10-Q, 10-K) from SEC-API.io."""
-    url = cfg.sec_api.base_url
-    params = {"token": cfg.sec_api.key}
-
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime(
-        "%Y-%m-%dT%H:%M:%S"
-    )
-
-    query_body = {
-        "query": {
-            "query_string": {
-                "query": (
-                    f'ticker:"{ticker}" AND '
-                    f'(formType:"8-K" OR formType:"10-Q" OR formType:"10-K") AND '
-                    f'filedAt:{{{yesterday} TO *}}'
-                )
-            }
-        },
-        "from": "0",
-        "size": "10",
-        "sort": [{"filedAt": {"order": "desc"}}],
-    }
-
+def fetch_sec_filings(ticker: str) -> list[dict[str, Any]]:
+    """Recent SEC filings (8-K, 10-Q, 10-K) from the free SEC EDGAR API."""
     log.info(f"Fetching SEC filings for {ticker}")
-    try:
-        resp = fetch_with_retry("POST", url, params=params, json_body=query_body)
-        data = resp.json()
-    except Exception as exc:
-        log.warning(f"SEC-API failed for {ticker}: {exc}")
-        return []
-
-    filings = data.get("filings", [])
-    return [
-        {
-            "form_type": f.get("formType", ""),
-            "filed_at": f.get("filedAt", ""),
-            "description": f.get("description", ""),
-            "url": f.get("linkToHtml", ""),
-        }
-        for f in filings
-    ]
+    return fetch_recent_filings(
+        ticker,
+        form_types=("8-K", "10-Q", "10-K"),
+        days_back=1,
+        limit=10,
+    )
 
 
 def fetch_analyst_ratings(ticker: str, cfg: Config) -> dict[str, Any]:
@@ -186,53 +154,15 @@ def fetch_analyst_ratings(ticker: str, cfg: Config) -> dict[str, Any]:
     return result
 
 
-def fetch_insider_trades(ticker: str, cfg: Config) -> list[dict[str, Any]]:
-    """Fetch recent Form 4 insider trades via SEC-API.
+def fetch_insider_trades(ticker: str) -> list[dict[str, Any]]:
+    """Recent Form 4 insider filings from the free SEC EDGAR API.
 
-    Returns structured list of insider buys/sells from the last 30 days.
+    Returns the last 30 days of Form 4 filings. Note that the free submissions
+    endpoint does not include reporting-owner names without parsing each filing's
+    XML — the `insider_name` field is left blank. The weekly analyst primarily
+    uses the *count* and *timing* of insider activity as a signal.
     """
-    if not cfg.sec_api.key:
-        return []
-
-    url = cfg.sec_api.base_url
-    params = {"token": cfg.sec_api.key}
-
-    from_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
-        "%Y-%m-%dT%H:%M:%S"
-    )
-
-    query_body = {
-        "query": {
-            "query_string": {
-                "query": (
-                    f'ticker:"{ticker}" AND formType:"4" AND '
-                    f'filedAt:{{{from_date} TO *}}'
-                )
-            }
-        },
-        "from": "0",
-        "size": "10",
-        "sort": [{"filedAt": {"order": "desc"}}],
-    }
-
-    try:
-        resp = fetch_with_retry("POST", url, params=params, json_body=query_body)
-        data = resp.json()
-    except Exception as exc:
-        log.warning(f"SEC-API Form 4 fetch failed for {ticker}: {exc}")
-        return []
-
-    filings = data.get("filings", [])
-    results = []
-    for f in filings:
-        results.append({
-            "filed_at": f.get("filedAt", ""),
-            "insider_name": f.get("reportingOwner", {}).get("name", "") if isinstance(f.get("reportingOwner"), dict) else "",
-            "description": f.get("description", ""),
-            "url": f.get("linkToHtml", ""),
-        })
-
-    return results
+    return fetch_insider_filings(ticker, days_back=30, limit=10)
 
 
 def fetch_economic_calendar(cfg: Config, days_ahead: int = 7) -> list[dict[str, Any]]:
@@ -303,8 +233,8 @@ def build_stock_data(ticker: str, cfg: Config) -> dict[str, Any]:
         "technical_indicators": indicators,
         "atr_14": stock_atr,
         "news": fetch_news(ticker, cfg),
-        "sec_filings": fetch_sec_filings(ticker, cfg),
-        "insider_trades": fetch_insider_trades(ticker, cfg),
+        "sec_filings": fetch_sec_filings(ticker),
+        "insider_trades": fetch_insider_trades(ticker),
         "analyst_ratings": fetch_analyst_ratings(ticker, cfg),
     }
 

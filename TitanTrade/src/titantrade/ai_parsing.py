@@ -205,10 +205,27 @@ RANKING_DEFAULTS = {
 }
 
 
-def validate_thesis(raw: dict[str, Any], ticker: str) -> dict[str, Any]:
+def validate_thesis(
+    raw: dict[str, Any],
+    ticker: str,
+    is_review: bool = False,
+) -> dict[str, Any]:
     """Validate and normalize a thesis response from Claude.
 
     Fills missing fields with defaults, corrects invalid values.
+
+    When ``is_review=True`` the input is interpreted as a review of a position
+    we already hold. In that mode:
+      - ``target_entry_price`` is not required (the entry has already happened),
+        so a BULLISH thesis with no entry price is kept as BULLISH rather than
+        being silently downgraded to NEUTRAL.
+      - Missing stop-loss levels are NOT auto-filled from an entry price we
+        don't have; the caller is expected to carry forward the prior level.
+
+    When ``is_review=False`` (the default, for Pass-1 new-candidate analysis)
+    the legacy behaviour is preserved: BULLISH theses without an entry price
+    are downgraded to NEUTRAL because we have nowhere to place the buy, and
+    missing stop-loss levels are filled at 5% below the entry.
     """
     result = {**THESIS_DEFAULTS, **raw}
 
@@ -242,19 +259,24 @@ def validate_thesis(raw: dict[str, Any], ticker: str) -> dict[str, Any]:
             except (ValueError, TypeError):
                 result[field] = None
 
-    # If BULLISH but missing entry price, downgrade to NEUTRAL
-    if result["thesis"] == "BULLISH" and result["target_entry_price"] is None:
-        log.warning(f"BULLISH thesis for {ticker} has no entry price - downgrading to NEUTRAL")
-        result["thesis"] = "NEUTRAL"
+    # Entry-price enforcement only applies to NEW candidates. For reviews of
+    # held positions, we already own the shares — there is no pending entry
+    # to price, and the review_position() caller is responsible for carrying
+    # the original entry level forward.
+    if not is_review:
+        if result["thesis"] == "BULLISH" and result["target_entry_price"] is None:
+            log.warning(
+                f"BULLISH thesis for {ticker} has no entry price - downgrading to NEUTRAL"
+            )
+            result["thesis"] = "NEUTRAL"
 
-    # If BULLISH but missing stop-loss, calculate from entry
-    if (
-        result["thesis"] == "BULLISH"
-        and result["target_entry_price"] is not None
-        and result["stop_loss_price"] is None
-    ):
-        result["stop_loss_price"] = round(result["target_entry_price"] * 0.95, 2)
-        log.warning(f"Missing stop-loss for {ticker} - defaulting to 5% below entry")
+        if (
+            result["thesis"] == "BULLISH"
+            and result["target_entry_price"] is not None
+            and result["stop_loss_price"] is None
+        ):
+            result["stop_loss_price"] = round(result["target_entry_price"] * 0.95, 2)
+            log.warning(f"Missing stop-loss for {ticker} - defaulting to 5% below entry")
 
     # Validate hold_horizon
     horizon = str(result.get("hold_horizon", "short_term")).lower().strip()

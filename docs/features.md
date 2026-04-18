@@ -17,6 +17,17 @@
 - Truncated JSON repair: salvages Gemini responses that hit token limits mid-output
 - SPY change computed from price/previousClose fallback when API field missing
 - Regime-aware reviews: inverse ETF positions get explicit warnings in non-bearish regimes
+- Hardened retry policy: 5 attempts, jitter, 429 + `Retry-After` support, 60s timeout for AI endpoints
+- Free SEC EDGAR for 8-K/10-Q/10-K/Form 4 filings (replaces paid SEC-API.io)
+- `HTTPError` exception preserves broker response bodies (e.g. Alpaca error codes) for diagnostics
+- Stop-loss placement is idempotent and survives Alpaca `qty_available` races
+  (auto-retries on error code 40310000)
+- Sentry skips tickers that aren't selected for trading — no API calls for closed positions
+- Sentry records fallback ratio and fires a Discord alert when Gemini coverage degrades (>30% of checks fall back)
+- Flutter dashboard shows sentry health badge (green healthy / orange degraded) from the same signal
+- ADJUST flow restores the previous stop on failure so held positions are never unprotected
+- Gemini structured output (`responseMimeType: application/json` + schema) + thinking disabled — valid JSON guaranteed, ~10× fewer tokens per sentry check
+- Backtest A/B runner (`python -m titantrade backtest-ab`) to empirically validate confidence-scaling against the flat baseline
 
 ### Performance Feedback Loop
 - Win/loss rate tracking per ticker and overall

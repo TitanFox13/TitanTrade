@@ -73,6 +73,58 @@ class DashboardScreen extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // Warning banner when Gemini coverage is degraded.
+                          // Mirrors the Discord alert fired server-side when
+                          // fallback_ratio > 30%.
+                          if (bundle.failures?.isDegraded == true) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withOpacity(0.12),
+                                border: Border.all(color: Colors.orange),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.warning_amber_rounded,
+                                      color: Colors.orange, size: 20),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Sentry degraded: '
+                                      '${bundle.failures!.fallbackCount}/${bundle.failures!.checksRun} '
+                                      'checks fell back to heuristic defaults '
+                                      '(${(bundle.failures!.fallbackRatio * 100).toStringAsFixed(0)}%). '
+                                      'News-based ABORT protection is partially offline.',
+                                      style: theme.textTheme.bodySmall?.copyWith(
+                                        color: Colors.orange.shade900,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ] else if (bundle.failures != null &&
+                              bundle.failures!.checksRun > 0) ...[
+                            // Healthy: small green pill showing coverage
+                            Row(
+                              children: [
+                                const Icon(Icons.check_circle_outline,
+                                    color: Colors.green, size: 16),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Sentry healthy — '
+                                  '${bundle.failures!.checksRun - bundle.failures!.fallbackCount}/${bundle.failures!.checksRun} '
+                                  'news-based checks OK',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: Colors.green.shade700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                           Text('Run: ${bundle.runType}', style: theme.textTheme.bodySmall),
                           const SizedBox(height: 8),
                           ...bundle.signals.map(

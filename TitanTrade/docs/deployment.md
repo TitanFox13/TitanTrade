@@ -153,7 +153,7 @@ Add these secrets in GitHub Settings > Secrets and variables > Actions:
 | `ALPACA_KEY` | Alpaca API Key ID |
 | `ALPACA_SECRET` | Alpaca API Secret Key |
 | `FMP_KEY` | Financial Modeling Prep API Key |
-| `SEC_API_KEY` | SEC-API.io API Token |
+| `SEC_USER_AGENT` | User-Agent string for SEC EDGAR (with contact email) |
 | `CLAUDE_KEY` | Anthropic Claude API Key |
 | `GEMINI_KEY` | Google Gemini API Key |
 
@@ -190,7 +190,7 @@ After each run, GitHub Actions commits updated state files back to the repo:
 | `ALPACA_SECRET` | Yes | Alpaca API Secret Key |
 | `ALPACA_BASE_URL` | No | Override API base URL (default: paper) |
 | `FMP_KEY` | Yes | Financial Modeling Prep API Key |
-| `SEC_API_KEY` | Yes | SEC-API.io API Token |
+| `SEC_USER_AGENT` | No | User-Agent for SEC EDGAR (e.g. `TitanTrade/1.0 (you@example.com)`) |
 | `CLAUDE_KEY` | Yes | Anthropic Claude API Key |
 | `CLAUDE_MODEL` | No | Model override (default: claude-sonnet-4-6-20250514) |
 | `GEMINI_KEY` | Yes | Google Gemini API Key |

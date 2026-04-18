@@ -19,6 +19,7 @@ from titantrade.config import Config, STATE_DIR, load_config
 from titantrade.cost_logger import log_cost
 from titantrade.data_fetcher import fetch_news
 from titantrade.logger import get_logger, log_decision
+from titantrade.notifier import notify_sentry_degraded
 from titantrade.retry import fetch_with_retry
 
 log = get_logger("sentry")
@@ -59,17 +60,14 @@ INSTRUCTIONS:
 6. Be conservative: when in doubt about material impact, lean toward ABORT.
    Preserving capital is more important than catching every move.
 
-OUTPUT FORMAT (strict JSON, no other text):
-{{
-  "ticker": "{ticker}",
-  "signal": "CONTINUE",
-  "conflicting_headlines": [],
-  "price_concern": false,
-  "market_concern": false,
-  "reasoning": "Brief explanation (2-3 sentences max)"
-}}
-
-IMPORTANT: Keep reasoning under 3 sentences. Do NOT summarize all headlines.
+OUTPUT FORMAT: a JSON object with the following fields (the Gemini API will
+enforce the schema; do not emit markdown fences):
+  - ticker: the stock symbol you are analyzing
+  - signal: "CONTINUE" or "ABORT"
+  - conflicting_headlines: array of headline strings that contradict the thesis (empty if none)
+  - price_concern: true if an adverse price move is a factor in your decision
+  - market_concern: true if a broad-market stress is a factor in your decision
+  - reasoning: a concise (2-3 sentence) explanation of your decision
 """
 
 
@@ -197,8 +195,36 @@ def _check_market_wide(cfg: Config) -> dict[str, Any]:
     }
 
 
+# JSON schema that Gemini's structured-output mode will enforce. This
+# guarantees the response is a valid JSON object with exactly these fields —
+# eliminating the truncated-string parse failures we used to repair
+# post-hoc. The schema shape matches ``SENTRY_DEFAULTS`` in ai_parsing.py.
+_SENTRY_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "ticker": {"type": "STRING"},
+        "signal": {"type": "STRING", "enum": ["CONTINUE", "ABORT"]},
+        "conflicting_headlines": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "price_concern": {"type": "BOOLEAN"},
+        "market_concern": {"type": "BOOLEAN"},
+        "reasoning": {"type": "STRING"},
+    },
+    "required": [
+        "ticker", "signal", "conflicting_headlines",
+        "price_concern", "market_concern", "reasoning",
+    ],
+}
+
+
 def _call_gemini(prompt: str, cfg: Config, cost_label: str = "") -> str:
-    """Make a Gemini Flash API call, log token usage, and return the raw response text."""
+    """Make a Gemini Flash API call, log token usage, and return the raw response text.
+
+    Uses Gemini's structured-output mode (``responseMimeType=application/json``
+    plus a ``responseSchema``) so the response is guaranteed valid JSON with
+    the sentry fields we expect. Also disables ``thinking`` tokens, which
+    on gemini-2.5-flash otherwise burn hundreds of tokens for a trivial
+    classification task.
+    """
     url = (
         f"https://generativelanguage.googleapis.com/v1beta"
         f"/models/{cfg.gemini.model}:generateContent"
@@ -209,6 +235,12 @@ def _call_gemini(prompt: str, cfg: Config, cost_label: str = "") -> str:
         "generationConfig": {
             "temperature": cfg.gemini.temperature,
             "maxOutputTokens": cfg.gemini.max_tokens,
+            "responseMimeType": "application/json",
+            "responseSchema": _SENTRY_SCHEMA,
+            # thinkingBudget=0 disables chain-of-thought token usage.
+            # gemini-2.5-flash defaults to "thinking" which can consume
+            # hundreds of hidden tokens before producing any output.
+            "thinkingConfig": {"thinkingBudget": 0},
         },
     }
 
@@ -357,6 +389,22 @@ def run_daily_sentry(cfg: Config) -> dict[str, Any]:
             })
             continue
 
+        # Skip tickers we're not actively trading. This covers two cases:
+        #   1. Pass-2 portfolio ranking didn't select this candidate.
+        #   2. A prior weekly review set review_action=CLOSE and the position
+        #      was already closed by orphan_close — we don't want the sentry
+        #      to keep generating ghost ABORTs for a ticker we don't hold.
+        if not thesis.get("selected_for_trading", True):
+            signals.append({
+                "ticker": ticker,
+                "signal": "CONTINUE",
+                "conflicting_headlines": [],
+                "price_concern": False,
+                "market_concern": False,
+                "reasoning": "Not selected for trading — sentry check skipped",
+            })
+            continue
+
         # Layer 2: Price-based check
         log.info(f"Layer 2: Price check for {ticker}")
         price_check = _check_price_move(ticker, thesis, cfg)
@@ -385,11 +433,34 @@ def run_daily_sentry(cfg: Config) -> dict[str, Any]:
     hour = now.hour
     run_type = "pre_market" if hour < 16 else "pre_close"
 
+    # Count fallback signals: sentry calls that failed and defaulted via the
+    # exception path. These leave a tell-tale string in `reasoning`.
+    fallback_count = sum(
+        1 for s in signals
+        if "Sentry check failed" in str(s.get("reasoning", ""))
+    )
+    # Sentry checks that actually ran Gemini (skipped NEUTRAL/non-selected
+    # tickers produce synthetic CONTINUE signals but no LLM call). The simplest
+    # proxy is "not a skip-placeholder reasoning".
+    ran_count = sum(
+        1 for s in signals
+        if s.get("reasoning") not in (
+            "Thesis is NEUTRAL - no action needed",
+            "Not selected for trading — sentry check skipped",
+        )
+    )
+    fallback_ratio = (fallback_count / ran_count) if ran_count else 0.0
+
     result = {
         "generated_at": now.isoformat(),
         "run_type": run_type,
         "market_health": market_check,
         "signals": signals,
+        "failures": {
+            "fallback_count": fallback_count,
+            "checks_run": ran_count,
+            "fallback_ratio": round(fallback_ratio, 3),
+        },
     }
 
     # Save
@@ -402,6 +473,21 @@ def run_daily_sentry(cfg: Config) -> dict[str, Any]:
         f"Sentry complete: {len(signals)} checked, {abort_count} ABORT signals | "
         f"Market: SPY {market_check.get('spy_change_pct', 0):+.1f}%"
     )
+
+    # Alert on degraded sentry coverage: if Gemini is down we silently fall
+    # back to CONTINUE for most tickers, which removes the news-based safety
+    # layer. Warn loudly (and Discord-alert) when >30% of checks fail.
+    if fallback_ratio > 0.30 and ran_count >= 3:
+        msg = (
+            f"Sentry DEGRADED: {fallback_count}/{ran_count} checks fell back "
+            f"to heuristic defaults ({fallback_ratio:.0%}). News-based "
+            f"ABORT detection is partially offline."
+        )
+        log.warning(msg)
+        try:
+            notify_sentry_degraded(fallback_count, ran_count, run_type)
+        except Exception as exc:
+            log.warning(f"Discord alert failed: {exc}")
 
     return result
 

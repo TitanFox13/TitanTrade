@@ -35,6 +35,7 @@ def main() -> None:
         print("  resubmit         Resubmit expired bracket orders")
         print("  full             Full pipeline (fetch -> analyze -> sentry -> execute)")
         print("  backtest [dir]   Run backtest on historical data (default: data/historical)")
+        print("  backtest-ab [dir]  A/B compare baseline vs confidence-scaled sizing")
         print("  download-history [dir]  Download OHLCV from FMP for backtesting")
         sys.exit(0)
 
@@ -44,8 +45,40 @@ def main() -> None:
         from titantrade.backtest.engine import run_backtest, print_summary
 
         data_dir = sys.argv[2] if len(sys.argv) > 2 else "data/historical"
-        result = run_backtest(data_dir=data_dir)
+        # Accept an optional --confidence-scaling flag
+        use_scaling = "--confidence-scaling" in sys.argv
+        result = run_backtest(data_dir=data_dir, use_confidence_scaling=use_scaling)
         print_summary(result)
+        return
+
+    if command == "backtest-ab":
+        import json as _json
+        from titantrade.backtest.engine import run_ab_comparison
+
+        data_dir = sys.argv[2] if len(sys.argv) > 2 else "data/historical"
+        result = run_ab_comparison(data_dir=data_dir)
+        cmp = result["comparison"]
+        print("=" * 70)
+        print("  Backtest A/B: flat risk_per_trade  vs  confidence-scaled")
+        print("=" * 70)
+        for metric, row in cmp.items():
+            if metric == "trade_count":
+                print(f"  {metric:20s}  baseline={row['baseline']}  scaled={row['scaled']}")
+            else:
+                b = row.get("baseline")
+                s = row.get("scaled")
+                d = row.get("delta")
+                if d is None:
+                    print(f"  {metric:20s}  baseline={b!r}  scaled={s!r}")
+                else:
+                    arrow = "▲" if d > 0 else ("▼" if d < 0 else "=")
+                    print(f"  {metric:20s}  baseline={b:>8.2f}  scaled={s:>8.2f}  Δ={d:+.2f} {arrow}")
+        print("=" * 70)
+        # Also dump the full JSON for programmatic consumption
+        out_path = "state/backtest_ab.json"
+        with open(out_path, "w") as f:
+            _json.dump(result, f, indent=2, default=str)
+        print(f"\nFull results saved to {out_path}")
         return
 
     if command == "download-history":

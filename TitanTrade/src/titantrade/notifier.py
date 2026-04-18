@@ -86,6 +86,31 @@ def notify_job_failed(job_name: str, error: str, duration_seconds: float) -> Non
     )
 
 
+def notify_sentry_degraded(fallback_count: int, total: int, run_type: str) -> None:
+    """Alert when Gemini is down and the sentry's news-based layer is offline.
+
+    ``fallback_count`` is the number of tickers whose sentry check threw an
+    exception and defaulted to a heuristic CONTINUE/ABORT. When this ratio is
+    high the operator should know — otherwise a bad-news event could slip past
+    the sentry unnoticed.
+    """
+    ratio = (fallback_count / total) if total else 0.0
+    send_discord(
+        title="Sentry degraded — news-based layer offline",
+        description=(
+            f"{fallback_count}/{total} sentry checks fell back to heuristic "
+            f"defaults ({ratio:.0%}). Gemini may be rate-limited or down. "
+            f"Price-based ABORT protection still active."
+        ),
+        color=COLOR_FAILURE,
+        fields=[
+            {"name": "Run", "value": run_type, "inline": True},
+            {"name": "Failed / Total", "value": f"{fallback_count} / {total}", "inline": True},
+            {"name": "Fallback rate", "value": f"{ratio:.0%}", "inline": True},
+        ],
+    )
+
+
 def _load_state(filename: str) -> Any:
     """Load a state JSON file, returning None if missing."""
     path = STATE_DIR / filename

@@ -36,26 +36,33 @@ Response: `[{ "symbol": "AAPL", "title": "...", "text": "...", "publishedDate": 
 
 ---
 
-### 2. SEC-API.io
-**Purpose**: Real-time SEC filing monitoring (8-K, 10-Q, 10-K)
-**Base URL**: `https://efts.sec-api.io`
-**Auth**: API key as query parameter `?token={SEC_API_KEY}`
+### 2. SEC EDGAR (free)
+**Purpose**: SEC filing monitoring (8-K, 10-Q, 10-K, Form 4)
+**Base URLs**:
+  - `https://www.sec.gov/files/company_tickers.json` — ticker→CIK lookup
+  - `https://data.sec.gov/submissions/CIK{cik}.json` — per-company filings
+**Auth**: None. A descriptive `User-Agent` header with contact email is required
+(set `SEC_USER_AGENT` env var). Rate limit: 10 req/sec globally.
 
 #### Endpoints Used
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/v1/filings` | Full-text search of SEC filings |
+| `/files/company_tickers.json` | Map ~10k US-listed tickers to CIKs (cached locally) |
+| `/submissions/CIK{cik}.json` | All recent filings for a company, newest-first |
 
-#### Example: Recent 8-K Filings
+#### Example: Fetch GS filings
 ```
-POST https://efts.sec-api.io/v1/filings?token=xxx
-Body: {
-  "query": { "query_string": { "query": "ticker:AAPL AND formType:\"8-K\"" } },
-  "from": "0",
-  "size": "10",
-  "sort": [{ "filedAt": { "order": "desc" } }]
-}
+GET https://data.sec.gov/submissions/CIK0000886982.json
+Headers: User-Agent: TitanTrade/1.0 (contact@example.com)
+
+Response includes filings.recent with parallel arrays:
+  form, filingDate, accessionNumber, primaryDocument, primaryDocDescription
+```
+
+#### Filing URL Construction
+```
+https://www.sec.gov/Archives/edgar/data/{cik_unpadded}/{accession_no_no_dashes}/{primary_doc}
 ```
 
 ---

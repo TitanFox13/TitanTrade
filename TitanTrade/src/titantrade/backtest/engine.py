@@ -40,6 +40,7 @@ def run_backtest(
     start_date: str | None = None,
     end_date: str | None = None,
     thesis_interval_days: int = 7,
+    use_confidence_scaling: bool = False,
 ) -> dict[str, Any]:
     """Run a full backtest simulation.
 
@@ -50,6 +51,9 @@ def run_backtest(
         start_date: Backtest start (YYYY-MM-DD)
         end_date: Backtest end (YYYY-MM-DD)
         thesis_interval_days: How often to generate new thesis (default: weekly)
+        use_confidence_scaling: If True, scale position size by confidence
+            (0.7x at 0.70 confidence to 1.3x at 1.00). Defaults to False so
+            pre-existing backtest calls behave identically.
     """
     if tickers is None:
         tickers = list(SECTOR_MAP.keys())[:15]
@@ -81,7 +85,10 @@ def run_backtest(
     spy_by_date: dict[str, dict] = {b["date"]: b for b in spy_bars}
 
     # Simulator
-    sim = PortfolioSimulator(initial_capital=initial_capital)
+    sim = PortfolioSimulator(
+        initial_capital=initial_capital,
+        use_confidence_scaling=use_confidence_scaling,
+    )
 
     # Track thesis generation schedule
     last_thesis_date = ""
@@ -130,6 +137,7 @@ def run_backtest(
             "end_date": sorted_dates[-1] if sorted_dates else None,
             "trading_days": len(sorted_dates),
             "thesis_interval_days": thesis_interval_days,
+            "use_confidence_scaling": use_confidence_scaling,
         },
         "metrics": metrics,
         "trade_count": len(sim.trade_log),
@@ -137,6 +145,65 @@ def run_backtest(
     }
 
     return result
+
+
+def run_ab_comparison(
+    data_dir: str,
+    tickers: list[str] | None = None,
+    initial_capital: float = 100_000.0,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    thesis_interval_days: int = 7,
+) -> dict[str, Any]:
+    """Run the backtest twice — once with flat risk-per-trade, once with
+    confidence-scaled sizing — and return a side-by-side comparison.
+
+    This lets you empirically validate whether the 0.7x-1.3x confidence curve
+    beats the flat 10% baseline on your historical data.
+    """
+    baseline = run_backtest(
+        data_dir, tickers, initial_capital, start_date, end_date,
+        thesis_interval_days, use_confidence_scaling=False,
+    )
+    scaled = run_backtest(
+        data_dir, tickers, initial_capital, start_date, end_date,
+        thesis_interval_days, use_confidence_scaling=True,
+    )
+
+    bm = baseline.get("metrics", {})
+    sm = scaled.get("metrics", {})
+
+    def _diff(key: str) -> dict[str, Any]:
+        b = bm.get(key)
+        s = sm.get(key)
+        if b is None or s is None:
+            return {"baseline": b, "scaled": s, "delta": None}
+        try:
+            return {
+                "baseline": round(float(b), 4),
+                "scaled": round(float(s), 4),
+                "delta": round(float(s) - float(b), 4),
+            }
+        except (TypeError, ValueError):
+            return {"baseline": b, "scaled": s, "delta": None}
+
+    return {
+        "baseline": baseline,
+        "scaled": scaled,
+        "comparison": {
+            "total_return_pct": _diff("total_return_pct"),
+            "alpha_vs_spy_pct": _diff("alpha_vs_spy_pct"),
+            "sharpe_ratio": _diff("sharpe_ratio"),
+            "sortino_ratio": _diff("sortino_ratio"),
+            "max_drawdown_pct": _diff("max_drawdown_pct"),
+            "win_rate_pct": _diff("win_rate_pct"),
+            "profit_factor": _diff("profit_factor"),
+            "trade_count": {
+                "baseline": baseline.get("trade_count"),
+                "scaled": scaled.get("trade_count"),
+            },
+        },
+    }
 
 
 def print_summary(result: dict[str, Any]) -> None:

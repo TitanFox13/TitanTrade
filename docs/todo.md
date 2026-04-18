@@ -112,6 +112,36 @@
 - [x] Slippage-aware limit exits for non-urgent ABORT signals
 - [x] Limit sell function for executor (reduces market order slippage)
 
+## Phase 1.16: Reliability & Cost Reduction (2026-04-18)
+- [x] Hardened retry policy: 5 attempts, 30s cap per delay, 60s timeout, full jitter
+- [x] 429 rate-limit handling with `Retry-After` header support
+- [x] `max_retries` now a per-call parameter (fail-fast path available)
+- [x] Replaced paid SEC-API.io with free SEC EDGAR (`sec_edgar.py`)
+- [x] CIK cache at `state/cik_cache.json` (one-time ~10k entry fetch)
+- [x] Removed all SEC-API references (`SECAPIConfig` class, `SEC_API_KEY` env, workflow secrets, docs)
+- [x] Unit tests for retry (17 tests) and EDGAR client (19 tests)
+- [x] Fixed review-mode thesis validation: held positions no longer get silently
+      downgraded from BULLISH to NEUTRAL for missing `target_entry_price`
+- [x] Fixed Alpaca 403 on stop placement (three-layer fix):
+      idempotency check in ADJUST flow, `HTTPError` class capturing response
+      bodies, and qty-race retry (code 40310000 → wait 2s and retry stop-limit)
+- [x] Sentry skips tickers where `selected_for_trading=False` (no more DXCM
+      ghost ABORTs, fewer wasted Gemini calls)
+- [x] Sentry records fallback ratio in state; Discord alert when >30% of
+      checks fall back to heuristic defaults (Gemini outage visibility)
+- [x] ADJUST flow restores the old stop if the replacement fails, so a
+      held position is never left without a stop-loss
+- [x] Orphan-close surfaces Alpaca error codes + messages in logs with a
+      "will retry on next run" note
+- [x] Gemini structured output mode (`responseMimeType: application/json`
+      + `responseSchema`) with thinking disabled — valid JSON guaranteed,
+      ~10× fewer output tokens per sentry check
+- [x] Backtest A/B comparison: `run_ab_comparison()` and
+      `python -m titantrade backtest-ab [dir]` to empirically validate the
+      confidence-scaling curve against the flat baseline
+- [x] Flutter sentry health badge: degraded state visible on the dashboard
+      when fallback_ratio > 30%; green "healthy" pill otherwise
+
 ## Phase 1.15: Capital Deployment Improvements (2026-04-05)
 - [x] Confidence-proportional position sizing (linear 0.7x-1.3x scaling)
 - [x] `confidence_scaled_risk()` helper in risk_manager.py

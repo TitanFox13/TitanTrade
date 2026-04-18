@@ -19,7 +19,6 @@ from titantrade.config import (
     Config,
     FMPConfig,
     GeminiConfig,
-    SECAPIConfig,
     TradingSettings,
 )
 
@@ -30,7 +29,6 @@ def fake_config() -> Config:
     return Config(
         alpaca=AlpacaConfig(key="test-key", secret="test-secret", base_url="https://paper-api.alpaca.markets"),
         fmp=FMPConfig(key="test-fmp-key"),
-        sec_api=SECAPIConfig(key="test-sec-key"),
         claude=ClaudeConfig(key="test-claude-key", model="claude-sonnet-4-6-20250514"),
         gemini=GeminiConfig(key="test-gemini-key", model="gemini-2.0-flash"),
         trading=TradingSettings(
@@ -44,12 +42,18 @@ def fake_config() -> Config:
 
 @pytest.fixture
 def tmp_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect STATE_DIR to a temp directory so tests don't pollute real state."""
+    """Redirect STATE_DIR to a temp directory so tests don't pollute real state.
+
+    Each consumer that imports STATE_DIR by name (``from titantrade.config
+    import STATE_DIR``) gets its own module-level binding, so we have to
+    patch each one.
+    """
     state = tmp_path / "state"
     state.mkdir()
     monkeypatch.setattr("titantrade.config.STATE_DIR", state)
     monkeypatch.setattr("titantrade.risk_manager.STATE_DIR", state)
     monkeypatch.setattr("titantrade.executor.STATE_DIR", state)
+    monkeypatch.setattr("titantrade.daily_sentry.STATE_DIR", state)
     return state
 
 

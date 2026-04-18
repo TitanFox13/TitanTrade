@@ -171,3 +171,49 @@ class TestBacktestIntegration:
         assert isinstance(m["total_return_pct"], (int, float))
         assert isinstance(m["sharpe_ratio"], (int, float))
         assert isinstance(m["max_drawdown_pct"], (int, float))
+
+
+class TestConfidenceScalingInBacktest:
+    """A/B comparison: confidence scaling should change position sizes when
+    thesis confidence is above or below the 0.85 baseline, which should in
+    turn change the total return (direction depends on which trades win).
+    """
+
+    def _write_fixture(self, tmp_path: Path) -> str:
+        """Create 260 bars for 2 tickers + SPY."""
+        (tmp_path / "TEST1.json").write_text(json.dumps(_make_bars(260, 100.0, 0.15)))
+        (tmp_path / "TEST2.json").write_text(json.dumps(_make_bars(260, 50.0, 0.08)))
+        (tmp_path / "SPY.json").write_text(json.dumps(_make_bars(260, 450.0, 0.12)))
+        return str(tmp_path)
+
+    def test_flag_toggles_config_field(self, tmp_path):
+        data = self._write_fixture(tmp_path)
+        r_off = run_backtest(data_dir=data, tickers=["TEST1", "TEST2"],
+                             use_confidence_scaling=False)
+        r_on = run_backtest(data_dir=data, tickers=["TEST1", "TEST2"],
+                            use_confidence_scaling=True)
+        assert r_off["config"]["use_confidence_scaling"] is False
+        assert r_on["config"]["use_confidence_scaling"] is True
+
+    def test_ab_comparison_structure(self, tmp_path):
+        from titantrade.backtest.engine import run_ab_comparison
+
+        data = self._write_fixture(tmp_path)
+        result = run_ab_comparison(data_dir=data, tickers=["TEST1", "TEST2"])
+
+        # Both arms produced results
+        assert "baseline" in result
+        assert "scaled" in result
+        assert result["baseline"]["config"]["use_confidence_scaling"] is False
+        assert result["scaled"]["config"]["use_confidence_scaling"] is True
+
+        # Comparison table is populated with the expected metrics
+        cmp = result["comparison"]
+        assert "total_return_pct" in cmp
+        assert "sharpe_ratio" in cmp
+        assert "max_drawdown_pct" in cmp
+        assert "trade_count" in cmp
+        # Each metric (except trade_count) has baseline/scaled/delta keys
+        for key in ("total_return_pct", "sharpe_ratio", "max_drawdown_pct"):
+            row = cmp[key]
+            assert "baseline" in row and "scaled" in row and "delta" in row

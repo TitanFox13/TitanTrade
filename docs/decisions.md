@@ -399,6 +399,127 @@
 - Daily summary reads state files which may be stale if the last sentry failed
 - No rate limiting on webhook calls — acceptable since jobs run at most ~8 times/day
 
+## Decision 039: Gemini Structured Output + Thinking Disabled
+**Date**: 2026-04-18
+**Decision**: Switch `_call_gemini` to use Gemini's structured-output mode with a `responseSchema`, and explicitly disable the thinking-token budget on gemini-2.5-flash.
+**Reasoning**:
+- Gemini 2.5 Flash defaults to `thinking` mode, which consumes 500-2000 hidden tokens before producing any output. On a classification task (CONTINUE vs ABORT), this is pure cost and latency with no benefit.
+- Without structured output, Gemini occasionally emits markdown-fenced JSON, prose prefixes ("Here is the result: ..."), or truncates mid-string when the token budget runs out. We had to ship a JSON-repair module to cope.
+- With `responseMimeType=application/json` + `responseSchema`, Gemini enforces a valid JSON shape matching our `SENTRY_SCHEMA`. The repair path becomes a belt-and-suspenders fallback rather than a daily necessity.
+**Implementation** (`src/titantrade/daily_sentry.py`):
+- Added `_SENTRY_SCHEMA` constant matching the sentry signal shape (ticker, signal, conflicting_headlines, price_concern, market_concern, reasoning — all required, with signal enum-constrained to CONTINUE/ABORT).
+- `generationConfig` now includes `responseMimeType: "application/json"`, `responseSchema: _SENTRY_SCHEMA`, and `thinkingConfig: {thinkingBudget: 0}`.
+- Simplified the prompt's OUTPUT FORMAT section — the schema does the enforcement, so we can drop the brevity instructions that were previously fighting truncation.
+**Verification**: live Gemini call on NVDA returned perfectly-valid JSON in 78 candidate tokens (vs hundreds with thinking enabled) in 1.77 s.
+**Trade-offs**:
+- Schema is strictly typed: `conflicting_headlines` is `array<string>`. If we ever want headline objects (title+snippet), the schema needs to change. For the current use case, strings are sufficient.
+- The JSON-repair code path (`_repair_truncated_json` in `ai_parsing.py`) stays as a defensive fallback for the rare case where the schema-constrained response is somehow still malformed.
+
+## Decision 040: Backtest A/B Comparison — Confidence Scaling On vs Off
+**Date**: 2026-04-18
+**Decision**: Expose the confidence-scaling logic as an opt-in flag in the backtest engine and add an A/B runner for empirical validation.
+**Reasoning**: The confidence-proportional position-sizing change (ADR 032) was deployed to the live executor but never backtested. Without a way to compare the two regimes on historical data, we can't tell whether the 0.7×–1.3× curve actually improves risk-adjusted returns or just adds complexity.
+**Implementation**:
+- `src/titantrade/backtest/simulator.py`: `PortfolioSimulator` now accepts `use_confidence_scaling: bool = False`. When True, `_process_entries` calls `risk_manager.confidence_scaled_risk(self.risk_per_trade, thesis.confidence)` instead of using the flat risk fraction.
+- `src/titantrade/backtest/engine.py`: `run_backtest()` accepts a matching flag, and a new `run_ab_comparison()` runs both variants back-to-back and returns a side-by-side metric table (return, alpha, Sharpe, Sortino, drawdown, win rate, profit factor, trade count).
+- `src/titantrade/__main__.py`: new CLI command `backtest-ab [dir]` produces a formatted console table and writes the full result JSON to `state/backtest_ab.json`.
+- Tests added to `tests/test_backtest.py` verify the flag toggles the config field and that the comparison structure is well-formed.
+
+## Decision 041: Flutter Sentry Health Badge
+**Date**: 2026-04-18
+**Decision**: Surface the sentry's `failures.fallback_ratio` on the dashboard so the Gemini-degraded state is visible without digging through logs or waiting for Discord alerts.
+**Implementation**:
+- `titan_trade_app/lib/models/sentry_signal.dart`: new `SentryFailures` class with `fallbackCount`, `checksRun`, `fallbackRatio`, and a convenience `isDegraded` getter (mirrors server-side 30% threshold).
+- `SentryBundle.fromJson` now parses an optional `failures` block.
+- `titan_trade_app/lib/screens/dashboard_screen.dart`: when `failures.isDegraded`, the sentry card shows an orange warning banner with fallback counts. When healthy, a small green pill shows coverage ("Sentry healthy — 14/15 news-based checks OK").
+
+## Decision 038: Sentry Coverage — Skip Non-Selected Tickers + Failure Observability + ADJUST Safety Net
+**Date**: 2026-04-18
+**Decision**: A bundle of three small correctness and observability fixes.
+**Problem 1 — Ghost ABORTs for closed positions**: After a weekly review marked DXCM as CLOSE (`selected_for_trading=False`) and the orphan-close sold the position, the daily sentry kept calling Gemini for DXCM on every run because the sentry loop only filtered out NEUTRAL theses. Occasional ABORTs would fire, then the executor would log `ABORT for DXCM: no position to close` as harmless noise — but the Gemini tokens and the log spam were both wasted.
+**Problem 2 — No observability when Gemini is down**: When Gemini returns 503 for all sentry calls (common during API-side outages), our code silently falls back to CONTINUE for every ticker. The news-based ABORT layer is effectively offline, but there's no alert. The operator has to spot it in log files.
+**Problem 3 — ADJUST could strand a position without a stop**: The ADJUST flow `cancel_all_orders_for_ticker` → `place_native_stop_loss` has a failure window where the cancel succeeds but the new stop placement fails (e.g. network blip after the qty-race retry exhausts). The position is then held with NO stop-loss.
+**Fix 1 (`daily_sentry.py`)**: skip the ticker entirely if `selected_for_trading=False`. Append a synthetic CONTINUE signal with `reasoning="Not selected for trading — sentry check skipped"` so state files remain consistent. No Gemini call, no ghost ABORT.
+**Fix 2 (`daily_sentry.py` + `notifier.py`)**: at the end of each sentry run, count signals whose `reasoning` contains `"Sentry check failed"` (the exception-path fallback marker). Record `{fallback_count, checks_run, fallback_ratio}` in the state file and, when the ratio exceeds 30%, log a WARNING and fire a Discord alert via new `notify_sentry_degraded()` helper.
+**Fix 3 (`executor.py` ADJUST flow)**: before cancelling the old stop, capture its `stop_price`. If the new-stop placement raises, re-create the old stop at its original price. Mirrors the pattern already in use by `manage_trailing_stop`.
+**Fix 4 (`executor.py` orphan close)**: on failure, log the Alpaca error code + message (via the new `HTTPError` properties) and explicitly say "will retry on next run" so operators don't assume the position is stuck permanently.
+**Tests**: 3 new sentry tests (`TestNonSelectedSkip`, `TestSentryObservability`), 2 new executor tests (`TestAdjustStopSafety`), all with mocked Gemini/Alpaca.
+**Trade-offs**:
+- The 30% fallback-alert threshold is a judgement call. Too low produces noisy alerts during brief Gemini hiccups; too high hides real outages. 30% balances these — the threshold is a constant and can be tuned later.
+- The ADJUST restore doesn't cover the case where the original stop price is itself invalid. If we somehow had no prior stop, restore is a no-op (logged as CRITICAL).
+
+## Decision 037: Alpaca 403 on Stop Placement — Idempotency + Qty-Race Retry + Error-Body Capture
+**Date**: 2026-04-18
+**Decision**: Three-layer fix for the recurring `403 Forbidden` Alpaca errors seen when placing/replacing stop-loss orders.
+**Problem** (diagnosed by reproducing the error with the live Alpaca paper API):
+1. The `ADJUST` review flow in `executor.py` was unconditionally cancelling and re-placing stops on every executor run (twice daily), even when the existing stop was already at the target price. Alpaca's historic order log showed 28 back-to-back "cancel→re-place at the same $64.50" cycles on FCX alone over 14 days — every one of which was a wasted request and a chance to hit a qty race.
+2. Between cancel and re-place, Alpaca's `qty_available` can lag ~100-1000 ms. When we POST the new stop in that window, Alpaca returns 403 with `code:40310000` and the message `"insufficient qty available for order (requested: 121, available: 0)"`.
+3. `retry.py` discarded the response body via `raise_for_status()`, so our logs just said `403 Forbidden` with no diagnostic detail.
+4. The stop-limit → plain-stop fallback in `place_native_stop_loss` sent the same qty for both order types. Since the qty constraint is position-level (not order-type-level), the fallback was guaranteed to fail whenever the stop-limit failed with 40310000.
+**Fix — Layer 1 (`executor.py:1269`)**: idempotency check before cancel+replace. If an existing stop for the ticker is already at (within $0.01 of) the target `stop_loss_price`, skip the entire cancel+replace sequence.
+**Fix — Layer 2 (`retry.py`)**: new `HTTPError` exception class that carries the status code, raw body, parsed JSON, and convenience properties `error_code` / `error_message`. The 4xx branch now raises this instead of `httpx.HTTPStatusError`, preserving diagnostic info like Alpaca's error code.
+**Fix — Layer 3 (`executor.py: place_native_stop_loss`)**: when `HTTPError.error_code == 40310000` (Alpaca insufficient qty), wait 2 s and retry the stop-limit *once*. Do not fall back to a plain stop in this case — both order types share the same qty constraint. For any other 4xx, the plain-stop fallback is retained (paper accounts occasionally reject stop-limit for specific asset types).
+**Tests**: 4 new executor tests (`TestPlaceNativeStopLoss`) + 3 new retry tests (`TestHTTPErrorBodyCapture`) covering qty-race retry, body capture, and the unchanged plain-stop fallback for other errors.
+**Verification**: reproduced the 403 with live API call to `POST /v2/orders` on FCX with 121 shares already held by an existing stop, confirmed Alpaca's response body matches the error-code handling, and confirmed `DELETE /v2/orders/{id}` typically releases `qty_available` within ~600 ms.
+**Trade-offs**:
+- Layer 1 reduces Alpaca request volume by ~28× per held position per 2-week window.
+- Layer 3 adds up to one 2-second delay per stop placement in the race case. Acceptable — better than a failed placement leaving the position unprotected.
+- `HTTPError` is a new exception type. Existing callers that catch `Exception` still work (it's still an `Exception`), but any code that specifically caught `httpx.HTTPStatusError` would break. None existed in the codebase.
+
+## Decision 036: Review-Mode Thesis Validation
+**Date**: 2026-04-18
+**Decision**: `validate_thesis()` now distinguishes "new candidate" from "review of held position" via an `is_review` flag.
+**Problem**: The validator blindly downgraded any BULLISH thesis without a `target_entry_price` to NEUTRAL. When Claude *reviewed* a held position, it correctly omitted the entry price (we already own the shares — there's no pending buy to price), but the validator interpreted that as "no way to buy" and downgraded the thesis to NEUTRAL. This produced the recurring log line `BULLISH thesis for JPM/LLY/FCX/EQIX has no entry price - downgrading to NEUTRAL` on every weekly analysis, and caused held positions to lose their BULLISH status in state, confusing downstream selection logic.
+**Fix** (`src/titantrade/ai_parsing.py:208`):
+- Added optional `is_review: bool = False` parameter to `validate_thesis()`
+- When `is_review=True`: skip the "no entry price → NEUTRAL" downgrade, and skip the auto-fill of stop-loss from entry price (the caller carries the prior stop forward)
+- When `is_review=False` (default): legacy behaviour preserved for new candidates
+- Updated both `validate_thesis()` call sites inside `review_position()` in `weekly_analyst.py` to pass `is_review=True`
+- Pass-1 new-candidate path in `analyze_stock()` unchanged (still needs entry price to know where to buy)
+- Added 5 regression tests (`TestValidateThesisReviewMode`) locking in the new behaviour
+**Trade-offs**:
+- New flag is opt-in with a safe default. All existing callers that don't pass it continue to get the old behaviour, so this change is fully backward compatible.
+
+## Decision 034: Hardened HTTP Retry Policy
+**Date**: 2026-04-18
+**Decision**: Rewrite `retry.py` with longer backoff, jitter, 429 handling, and per-call timeout tuning.
+**Reasoning**:
+- Gemini Flash frequently returns 503 (overloaded). Previous retry gave up after ~6 s of total wait — far too short for Google's load-shedding windows.
+- All 15 sentry tickers retrying in lockstep created a thundering-herd effect that amplified Gemini outages.
+- 429 rate-limit responses were treated as immediate failures instead of retry-with-backoff, so SEC-API rate limits (now obsolete) and any future rate-limited endpoint would fail fast.
+- Over a 14-day operation window, **up to 11 of 15 sentry checks silently failed** in a single run, degrading the news-analysis safety layer without operator awareness.
+**Implementation** (`src/titantrade/retry.py`):
+- `MAX_RETRIES` raised 3 → 5
+- Per-attempt delay capped at `MAX_DELAY = 30 s` (was unbounded 2^attempt)
+- Full-jitter exponential backoff: `delay = uniform(0, min(BASE_DELAY * 2^(attempt-1), MAX_DELAY))`
+- `DEFAULT_TIMEOUT` raised 30 s → 60 s (Gemini 2.5-flash can take 30–45 s under load)
+- 429 responses retried and honour the `Retry-After` header
+- `RETRYABLE_STATUS = {429, 500, 502, 503, 504, 529}` (529 for Anthropic overload)
+- `max_retries` now a per-call parameter, so latency-sensitive Alpaca paths can fail faster if needed
+- New unit tests in `tests/test_retry.py` (17 tests) covering jitter bounds, Retry-After parsing, 4xx fail-fast, 5xx retry-then-succeed, and network-error retry
+**Trade-offs**:
+- Worst-case retry time rises from ~6 s to ~75 s. Acceptable for AI/data endpoints but could delay Alpaca order placement if the broker itself returns 5xx. Callers that need fail-fast should pass `max_retries=1`.
+- More API usage during backoff windows (5 attempts vs 3).
+
+## Decision 035: Replace Paid SEC-API.io with Free SEC EDGAR
+**Date**: 2026-04-18
+**Decision**: Switch SEC filings and Form 4 insider data from api.sec-api.io to the free SEC EDGAR public API.
+**Reasoning**:
+- SEC-API.io credits were exhausted and the service is expensive.
+- Independent evaluation (see ADR context) rated SEC filings as ~20/100 criticality — 1 of ~11 data inputs to Claude's weekly analysis.
+- SEC EDGAR provides the same underlying data (8-K, 10-Q, 10-K, Form 4 metadata) for free, with a 10 req/sec global rate limit that our sequential workflow stays well under.
+**Implementation** (`src/titantrade/sec_edgar.py`):
+- New module with `get_cik()`, `fetch_recent_filings()`, `fetch_insider_filings()`
+- Uses `https://www.sec.gov/files/company_tickers.json` for ticker→CIK lookup (full ~10k-entry map cached at `state/cik_cache.json`, fetched at most once per process)
+- Uses `https://data.sec.gov/submissions/CIK{cik}.json` for each company's filings
+- SEC requires a `User-Agent` with a contact email — configurable via `SEC_USER_AGENT` env var, defaults to `TitanTrade/1.0 (contact@titantrade.local)`
+- `data_fetcher.fetch_sec_filings()` and `fetch_insider_trades()` keep their signatures; the `cfg` argument is now a no-op placeholder for backward compatibility
+- `SECAPIConfig` marked deprecated in `config.py` (retained only for test fixtures)
+- New unit tests in `tests/test_sec_edgar.py` (19 tests) covering CIK caching, URL construction, form-type filtering, limit enforcement, unknown-ticker handling, and error paths
+**Trade-offs**:
+- Form 4 reporting-owner (insider) names are no longer returned — they require parsing each Form 4 XML filing (one extra request each). For weekly analysis, the *timing and count* of insider activity is the primary signal, so we leave `insider_name` blank.
+- Filing descriptions are simpler (EDGAR returns `primaryDocDescription` like "8-K" or "FORM 4" rather than detailed summaries). Claude can still see form type, filing date, and a direct URL.
+
 ## Decision 032: Confidence-Proportional Position Sizing
 **Date**: 2026-04-05
 **Decision**: Scale position size proportionally to confidence using a linear multiplier (0.7x at 0.70 confidence to 1.3x at 1.00 confidence).

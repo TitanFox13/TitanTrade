@@ -89,3 +89,124 @@ class TestCheckStock:
         with patch("titantrade.daily_sentry._call_gemini", return_value="broken"):
             result = check_stock("AAPL", thesis, [], price_check_adverse, market_check_ok, fake_config)
         assert result["signal"] == "ABORT"
+
+
+# ---------------------------------------------------------------------------
+# run_daily_sentry — skip non-selected tickers + fallback observability
+# ---------------------------------------------------------------------------
+
+from titantrade.daily_sentry import run_daily_sentry
+from tests.conftest import write_state_file
+
+
+def _thesis_doc(entries: list[dict]) -> dict:
+    return {
+        "generated_at": "2026-04-18T00:00:00+00:00",
+        "next_review_at": "2026-04-25T00:00:00+00:00",
+        "market_regime": "bullish",
+        "theses": entries,
+    }
+
+
+def _full_thesis(ticker: str, **overrides):
+    base = {
+        "ticker": ticker,
+        "thesis": "BULLISH",
+        "confidence": 0.80,
+        "target_entry_price": 100.0,
+        "thesis_breach_condition": "breach",
+        "reasoning": "rationale",
+        "selected_for_trading": True,
+    }
+    base.update(overrides)
+    return base
+
+
+class TestNonSelectedSkip:
+    @patch("titantrade.daily_sentry._call_gemini", return_value=CONTINUE_JSON)
+    @patch("titantrade.daily_sentry.fetch_news", return_value=[])
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=100.0)
+    @patch("titantrade.daily_sentry._fetch_spy_quote", return_value=0.3)
+    def test_skips_when_not_selected(
+        self, mock_spy, mock_price, mock_news, mock_gemini,
+        fake_config, tmp_state_dir,
+    ):
+        """Positions closed by the weekly review have selected_for_trading=False
+        and must be skipped by the sentry — no Gemini call, no ghost ABORT."""
+        # Limit the watchlist so the rest of the test doesn't iterate 15 tickers.
+        fake_config.trading.watchlist.clear()
+        fake_config.trading.watchlist.extend(["AAPL", "DXCM"])
+
+        thesis_doc = _thesis_doc([
+            _full_thesis("AAPL", selected_for_trading=True),
+            # DXCM: Claude said CLOSE in the weekly review, position already gone.
+            _full_thesis("DXCM", selected_for_trading=False, review_action="CLOSE"),
+        ])
+        write_state_file(tmp_state_dir, "weekly_thesis.json", thesis_doc)
+
+        result = run_daily_sentry(fake_config)
+
+        signals_by_ticker = {s["ticker"]: s for s in result["signals"]}
+        assert signals_by_ticker["DXCM"]["signal"] == "CONTINUE"
+        assert "skipped" in signals_by_ticker["DXCM"]["reasoning"].lower()
+
+        # AAPL went through the real Gemini path, DXCM did not.
+        # _call_gemini is called once per sentry check. We skipped DXCM via the
+        # selected_for_trading gate BEFORE invoking Gemini, so exactly one call
+        # should have been made (for AAPL).
+        assert mock_gemini.call_count == 1
+
+
+class TestSentryObservability:
+    @patch("titantrade.daily_sentry.notify_sentry_degraded")
+    @patch("titantrade.daily_sentry.fetch_news", return_value=[])
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=100.0)
+    @patch("titantrade.daily_sentry._fetch_spy_quote", return_value=0.3)
+    @patch("titantrade.daily_sentry._call_gemini")
+    def test_alerts_when_fallback_ratio_above_30pct(
+        self, mock_gemini, mock_spy, mock_price, mock_news, mock_notify,
+        fake_config, tmp_state_dir,
+    ):
+        """Simulate 3/4 Gemini calls failing → fallback ratio 75% → Discord alert fires."""
+        fake_config.trading.watchlist.clear()
+        fake_config.trading.watchlist.extend(["AAPL", "NVDA", "TSLA", "MSFT"])
+
+        # First 3 calls raise, last one succeeds
+        mock_gemini.side_effect = [
+            RuntimeError("Gemini 503"),
+            RuntimeError("Gemini 503"),
+            RuntimeError("Gemini 503"),
+            CONTINUE_JSON,
+        ]
+
+        thesis_doc = _thesis_doc([
+            _full_thesis(t) for t in ("AAPL", "NVDA", "TSLA", "MSFT")
+        ])
+        write_state_file(tmp_state_dir, "weekly_thesis.json", thesis_doc)
+
+        result = run_daily_sentry(fake_config)
+
+        assert result["failures"]["fallback_count"] == 3
+        assert result["failures"]["checks_run"] == 4
+        assert result["failures"]["fallback_ratio"] == 0.75
+        mock_notify.assert_called_once()
+
+    @patch("titantrade.daily_sentry.notify_sentry_degraded")
+    @patch("titantrade.daily_sentry.fetch_news", return_value=[])
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=100.0)
+    @patch("titantrade.daily_sentry._fetch_spy_quote", return_value=0.3)
+    @patch("titantrade.daily_sentry._call_gemini", return_value=CONTINUE_JSON)
+    def test_no_alert_when_all_succeed(
+        self, mock_gemini, mock_spy, mock_price, mock_news, mock_notify,
+        fake_config, tmp_state_dir,
+    ):
+        fake_config.trading.watchlist.clear()
+        fake_config.trading.watchlist.extend(["AAPL", "NVDA"])
+
+        thesis_doc = _thesis_doc([_full_thesis(t) for t in ("AAPL", "NVDA")])
+        write_state_file(tmp_state_dir, "weekly_thesis.json", thesis_doc)
+
+        result = run_daily_sentry(fake_config)
+
+        assert result["failures"]["fallback_count"] == 0
+        mock_notify.assert_not_called()

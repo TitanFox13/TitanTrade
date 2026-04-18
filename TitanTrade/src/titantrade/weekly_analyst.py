@@ -490,13 +490,13 @@ def review_position(
         parsed = parse_ai_json(raw, context=f"Position review for {ticker}")
         if not isinstance(parsed, dict):
             raise ValueError(f"Expected dict, got {type(parsed).__name__}")
-        thesis = validate_thesis(parsed, ticker)
+        thesis = validate_thesis(parsed, ticker, is_review=True)
     except (ValueError, TypeError) as exc:
         log.error(f"Position review parse failed for {ticker}: {exc}")
         thesis = validate_thesis({
             "ticker": ticker, "thesis": "BULLISH", "review_action": "CONTINUE",
             "hold_horizon": existing_thesis.get("hold_horizon", "short_term"),
-        }, ticker)
+        }, ticker, is_review=True)
         thesis["reasoning"] = f"Review parse failed: {exc} — defaulting to CONTINUE"
 
     # Carry forward original levels if not adjusted

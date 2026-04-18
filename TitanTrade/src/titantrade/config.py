@@ -34,12 +34,6 @@ class FMPConfig:
 
 
 @dataclass(frozen=True)
-class SECAPIConfig:
-    key: str = ""
-    base_url: str = "https://api.sec-api.io"
-
-
-@dataclass(frozen=True)
 class ClaudeConfig:
     key: str = ""
     model: str = "claude-sonnet-4-20250514"
@@ -78,7 +72,6 @@ class TradingSettings:
 class Config:
     alpaca: AlpacaConfig
     fmp: FMPConfig
-    sec_api: SECAPIConfig
     claude: ClaudeConfig
     gemini: GeminiConfig
     trading: TradingSettings
@@ -237,9 +230,6 @@ def load_config() -> Config:
         ),
         fmp=FMPConfig(
             key=keys["FMP_KEY"],
-        ),
-        sec_api=SECAPIConfig(
-            key=os.environ.get("SEC_API_KEY", ""),  # optional - degrades gracefully
         ),
         claude=ClaudeConfig(
             key=keys["CLAUDE_KEY"],

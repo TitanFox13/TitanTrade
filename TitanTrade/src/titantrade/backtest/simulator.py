@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from titantrade.risk_manager import confidence_scaled_risk
+
 
 @dataclass
 class SimPosition:
@@ -43,7 +45,9 @@ class PortfolioSimulator:
         max_sector_pct: float = 40.0,
         min_confidence: float = 0.70,
         slippage_pct: float = 0.0015,  # 0.15% realistic slippage per fill
+        use_confidence_scaling: bool = False,
     ):
+        self.use_confidence_scaling = use_confidence_scaling
         self.slippage_pct = slippage_pct
         self.initial_capital = initial_capital
         self.cash = initial_capital
@@ -236,8 +240,16 @@ class PortfolioSimulator:
             if not entry or not stop:
                 continue
 
-            # Position sizing
-            budget = min(pv * self.risk_per_trade, self.cash - min_cash)
+            # Position sizing. When confidence scaling is enabled, the risk
+            # fraction is multiplied by 0.7x (at confidence 0.70) to 1.3x
+            # (at confidence 1.00) — see risk_manager.confidence_scaled_risk.
+            if self.use_confidence_scaling:
+                effective_risk = confidence_scaled_risk(
+                    self.risk_per_trade, float(thesis.get("confidence", 0.85))
+                )
+            else:
+                effective_risk = self.risk_per_trade
+            budget = min(pv * effective_risk, self.cash - min_cash)
             if budget <= 0:
                 continue
             shares = int(budget / entry)
