@@ -21,7 +21,8 @@
 - Free SEC EDGAR for 8-K/10-Q/10-K/Form 4 filings (replaces paid SEC-API.io)
 - `HTTPError` exception preserves broker response bodies (e.g. Alpaca error codes) for diagnostics
 - Stop-loss placement is idempotent and survives Alpaca `qty_available` races
-  (auto-retries on error code 40310000)
+  (polls `qty_available` up to 30 s after a cancel before retrying, eliminating
+  the unprotected-position window that a fixed-sleep retry couldn't cover)
 - Sentry skips tickers that aren't selected for trading — no API calls for closed positions
 - Sentry records fallback ratio and fires a Discord alert when Gemini coverage degrades (>30% of checks fall back)
 - Flutter dashboard shows sentry health badge (green healthy / orange degraded) from the same signal

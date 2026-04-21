@@ -399,6 +399,26 @@
 - Daily summary reads state files which may be stale if the last sentry failed
 - No rate limiting on webhook calls — acceptable since jobs run at most ~8 times/day
 
+## Decision 042: Poll qty_available Instead of Fixed-Sleep Retry
+**Date**: 2026-04-21
+**Decision**: Replace the 2-second blind sleep in `place_native_stop_loss`'s qty-race retry with an explicit poll of Alpaca's `qty_available`, waiting up to 30 seconds for the cancel to settle.
+**Problem** (observed in production over 3 days of the previous fix):
+- First executor run after a fresh weekly thesis fires ADJUST on 5-6 positions simultaneously.
+- Several hit the qty-race retry path. The 2-second sleep was sometimes too short — Alpaca's `pending_cancel` state lasted 5-15 seconds in production despite completing in ~600 ms in isolated tests.
+- Result: GS, URI, DECK, LLY, and DASH were all left **without a stop-loss** until the next executor run (~6 hours later). Logs showed `CRITICAL: {ticker} has no stop-loss order — old-stop restore also failed` for each.
+- The self-heal on Run 2 was good (stops were placed), but a 6-hour unprotected window is an unacceptable risk if one of those stocks crashes overnight.
+**Fix** (`executor.py`):
+- New `_wait_for_qty_available(ticker, required_qty, cfg, timeout_seconds=30)` helper that polls `get_position()` every 500 ms until `qty_available >= required_qty`, or the timeout elapses.
+- `place_native_stop_loss` qty-race handler now calls this poll before retrying. It gives up only after 30 s of no release — log line: `Qty for {ticker} never released within 30s — giving up on stop placement`.
+- On success: `Qty for {ticker} released after {X}s — retrying stop-limit` followed by `Stop-limit for {ticker} succeeded after qty settled ({X}s)`.
+- Two constants added: `QTY_SETTLE_TIMEOUT_SECONDS = 30.0`, `QTY_SETTLE_POLL_INTERVAL = 0.5`.
+**Verification**:
+- Unit tests updated (`TestPlaceNativeStopLoss.test_retries_on_qty_race_after_polling`, `test_qty_race_times_out_if_never_released`).
+- Live test on the Alpaca paper account: `cancel_order()` followed immediately by `place_native_stop_loss()` succeeded in ~1.5 s when no race hit, and within the timeout window when a race did hit.
+**Trade-offs**:
+- Worst case (qty genuinely stuck, e.g. settlement problem at broker) is a 30 s wait per stop placement — up from 2 s previously. Acceptable: the previous behaviour silently gave up and left the position unprotected; we'd rather block for 30 s and log loudly if we ultimately fail.
+- On happy-path (no race), there is zero additional latency — we only enter the poll on a 40310000 error.
+
 ## Decision 039: Gemini Structured Output + Thinking Disabled
 **Date**: 2026-04-18
 **Decision**: Switch `_call_gemini` to use Gemini's structured-output mode with a `responseSchema`, and explicitly disable the thinking-token budget on gemini-2.5-flash.

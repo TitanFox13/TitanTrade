@@ -249,48 +249,56 @@ def _make_response(data: dict[str, Any]) -> MagicMock:
 
 
 class TestPlaceNativeStopLoss:
-    @patch("titantrade.executor.time.sleep")  # skip the 2s wait
+    @patch("titantrade.executor.time.sleep")  # skip real sleeps in poll loop
+    @patch("titantrade.executor.get_position")
     @patch("titantrade.executor.fetch_with_retry")
-    def test_retries_on_qty_race(self, mock_fetch, mock_sleep, fake_config):
-        """When Alpaca returns code 40310000, wait 2s and retry the same stop-limit."""
-        # First call raises qty-race; second call succeeds
+    def test_retries_on_qty_race_after_polling(
+        self, mock_fetch, mock_get_pos, mock_sleep, fake_config,
+    ):
+        """When Alpaca returns 40310000, poll until qty_available releases,
+        then retry the stop-limit with the same qty."""
+        # Fetch: first raises qty-race, second succeeds
         mock_fetch.side_effect = [
             _make_qty_race_error(),
             _make_response({"id": "order-abc", "status": "accepted"}),
+        ]
+        # Poll returns: qty_available=0 twice, then =121 (settled)
+        mock_get_pos.side_effect = [
+            {"qty": "121", "qty_available": "0"},
+            {"qty": "121", "qty_available": "0"},
+            {"qty": "121", "qty_available": "121"},
         ]
 
         result = place_native_stop_loss("FCX", 121, 64.50, fake_config)
 
         assert result["id"] == "order-abc"
         assert mock_fetch.call_count == 2
-        # Both attempts must use stop-limit (not the plain-stop fallback)
         for call in mock_fetch.call_args_list:
-            body = call.kwargs["json_body"]
-            assert body["type"] == "stop_limit"
-        # Retry must include a backoff delay
-        mock_sleep.assert_called_once()
+            assert call.kwargs["json_body"]["type"] == "stop_limit"
+        # We polled position state at least twice before qty released
+        assert mock_get_pos.call_count >= 2
 
+    @patch("titantrade.executor.time.time")  # drive the timeout deterministically
     @patch("titantrade.executor.time.sleep")
+    @patch("titantrade.executor.get_position")
     @patch("titantrade.executor.fetch_with_retry")
-    def test_qty_race_does_not_fallback_to_plain_stop(
-        self, mock_fetch, mock_sleep, fake_config
+    def test_qty_race_times_out_if_never_released(
+        self, mock_fetch, mock_get_pos, mock_sleep, mock_time, fake_config,
     ):
-        """Falling back to plain stop on qty-race is pointless — same qty error.
-        The retry must be a stop-limit, not a plain stop.
+        """If qty_available never reaches the required amount within the
+        timeout, we raise instead of retrying forever.
         """
-        mock_fetch.side_effect = [
-            _make_qty_race_error(),
-            _make_qty_race_error(),  # still failing
-        ]
+        mock_fetch.side_effect = [_make_qty_race_error()]
+        # qty_available stays at 0 forever
+        mock_get_pos.return_value = {"qty": "121", "qty_available": "0"}
+        # time.time() advances from 0 → past the deadline on each call
+        mock_time.side_effect = [0.0, 0.0, 31.0, 31.0, 31.0, 31.0]
 
         with pytest.raises(HTTPError) as exc_info:
             place_native_stop_loss("FCX", 121, 64.50, fake_config)
 
         assert exc_info.value.error_code == 40310000
-        # Must not attempt plain stop as a third request
-        assert mock_fetch.call_count == 2
-        for call in mock_fetch.call_args_list:
-            assert call.kwargs["json_body"]["type"] == "stop_limit"
+        assert mock_fetch.call_count == 1  # one initial attempt; gave up polling
 
     @patch("titantrade.executor.fetch_with_retry")
     def test_falls_back_to_plain_stop_on_non_qty_error(self, mock_fetch, fake_config):

@@ -141,6 +141,10 @@
       confidence-scaling curve against the flat baseline
 - [x] Flutter sentry health badge: degraded state visible on the dashboard
       when fallback_ratio > 30%; green "healthy" pill otherwise
+- [x] Qty-race retry now polls `qty_available` for up to 30 s instead of
+      sleeping a fixed 2 s — eliminates the ~6-hour unprotected-position
+      window observed in production when Alpaca's `pending_cancel` took
+      longer than expected to settle
 
 ## Phase 1.15: Capital Deployment Improvements (2026-04-05)
 - [x] Confidence-proportional position sizing (linear 0.7x-1.3x scaling)

@@ -192,6 +192,44 @@ def place_bracket_order(
     return resp.json()
 
 
+# How long to wait for Alpaca's ``qty_available`` to release after a cancel
+# before giving up. In production we've observed the ``pending_cancel``
+# window lasting 5-15 s; 30 s gives ample margin while still failing fast
+# enough to surface a genuine broker problem.
+QTY_SETTLE_TIMEOUT_SECONDS = 30.0
+QTY_SETTLE_POLL_INTERVAL = 0.5
+
+
+def _wait_for_qty_available(
+    ticker: str,
+    required_qty: float,
+    cfg: Config,
+    timeout_seconds: float = QTY_SETTLE_TIMEOUT_SECONDS,
+) -> bool:
+    """Poll Alpaca until the ticker's ``qty_available`` meets ``required_qty``.
+
+    Used after a cancel that should have released qty, to deterministically
+    wait for the broker-side state to settle instead of sleeping a fixed
+    timeout and hoping. Returns True if the qty is available within
+    ``timeout_seconds``, False otherwise.
+    """
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            pos = get_position(ticker, cfg)
+            if pos is None:
+                # Position closed while we were waiting — caller must handle.
+                log.warning(f"Position for {ticker} disappeared while waiting for qty")
+                return False
+            available = float(pos.get("qty_available", 0))
+            if available >= required_qty:
+                return True
+        except Exception as exc:  # noqa: BLE001 — transient fetch errors OK
+            log.debug(f"Position fetch during qty-wait failed for {ticker}: {exc}")
+        time.sleep(QTY_SETTLE_POLL_INTERVAL)
+    return False
+
+
 def place_native_stop_loss(
     ticker: str,
     qty: float,
@@ -203,9 +241,12 @@ def place_native_stop_loss(
     Uses a stop-limit with a 1% buffer below the stop for slippage protection.
 
     Error handling:
-      - On Alpaca 40310000 ("insufficient qty available"), we wait 2s and
-        retry once. This error usually means a just-cancelled order is still
-        holding the qty (``qty_available`` lags a few hundred ms).
+      - On Alpaca 40310000 ("insufficient qty available"), we POLL
+        ``qty_available`` until it meets ``qty`` (up to 30 s), then retry
+        the same stop-limit. This replaces an older 2-second blind sleep
+        that sometimes wasn't long enough in production — leaving held
+        positions without a stop for a ~6-hour window until the next
+        executor run.
       - On any other 4xx we fall back to a plain stop order — historically
         Alpaca paper accounts have rejected stop-limit for some asset types.
     """
@@ -228,23 +269,36 @@ def place_native_stop_loss(
         return resp.json()
     except HTTPError as exc:
         if exc.error_code == ALPACA_INSUFFICIENT_QTY:
-            # Qty race — a recent cancel hasn't settled yet. Wait and retry
-            # the same stop-limit. Falling back to a plain stop here would
-            # fail with the same error since both need qty_available.
+            # Qty race — a recent cancel hasn't settled. Poll for it.
             log.warning(
                 f"Qty race for {ticker} (code 40310000): {exc.error_message} "
-                f"— waiting 2s and retrying the stop-limit"
+                f"— polling for qty_available to release "
+                f"(up to {QTY_SETTLE_TIMEOUT_SECONDS:.0f}s)"
             )
-            time.sleep(2.0)
+            t0 = time.time()
+            settled = _wait_for_qty_available(ticker, qty, cfg)
+            waited = time.time() - t0
+            if not settled:
+                log.error(
+                    f"Qty for {ticker} never released within "
+                    f"{QTY_SETTLE_TIMEOUT_SECONDS:.0f}s — giving up on stop placement"
+                )
+                raise
+
+            log.info(
+                f"Qty for {ticker} released after {waited:.1f}s — retrying stop-limit"
+            )
             try:
                 resp = fetch_with_retry(
                     "POST", url, headers=_headers(cfg), json_body=stop_limit_body
                 )
-                log.info(f"Stop-limit for {ticker} succeeded on qty-race retry")
+                log.info(
+                    f"Stop-limit for {ticker} succeeded after qty settled ({waited:.1f}s)"
+                )
                 return resp.json()
             except HTTPError as exc2:
                 log.error(
-                    f"Stop-limit for {ticker} still failing after qty-race retry: "
+                    f"Stop-limit for {ticker} failed after qty_available released: "
                     f"code={exc2.error_code} msg={exc2.error_message}"
                 )
                 raise
