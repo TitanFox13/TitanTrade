@@ -20,9 +20,33 @@
 - Hardened retry policy: 5 attempts, jitter, 429 + `Retry-After` support, 60s timeout for AI endpoints
 - Free SEC EDGAR for 8-K/10-Q/10-K/Form 4 filings (replaces paid SEC-API.io)
 - `HTTPError` exception preserves broker response bodies (e.g. Alpaca error codes) for diagnostics
-- Stop-loss placement is idempotent and survives Alpaca `qty_available` races
-  (polls `qty_available` up to 30 s after a cancel before retrying, eliminating
-  the unprotected-position window that a fixed-sleep retry couldn't cover)
+- Stop-loss placement is idempotent and survives Alpaca cancel races by
+  polling the specific blocking order's `status` (from `related_orders`)
+  until terminal — deterministic, replaces the lossy `qty_available` poll
+- Market-hours-aware execution: ADJUST, orphan-close, and trailing-stop
+  adjustments defer to the next market-open run rather than getting stuck
+  in `pending_cancel` for hours
+- Bracket math sanity check refuses invalid (stop >= entry) brackets before
+  the broker rejects them — happens when ADJUSTed thesis is reused for a
+  new entry
+- Graduated price-ABORT severity: 3-5% needs Gemini news confirmation,
+  >=5% always aborts. Reduces noise-driven churn in normal volatility.
+- 72-hour re-entry cooldown after every ABORT — prevents the "sell low,
+  buy higher" cycles previously observed in production
+- High-impact-only macro blackout (FOMC, NFP, CPI, core PCE, GDP); 6h
+  window instead of 24h; minor indicators no longer block trading
+- Pass 2 target trade count scales with market regime (6 in strong_bullish
+  down to 1 in crisis); the confidence-scaled sizing now correctly uses
+  Pass-2's `adjusted_confidence`
+- Bracket resubmission gives up after 5 chasing attempts on the same
+  ticker; resumes only after the next weekly thesis refresh
+- Sentry price-move check references the actual broker
+  `avg_entry_price` for held positions, not the stale thesis target
+- Narrower 2-day earnings blackout (was 5 days)
+- Append-only state files auto-archive to `state/archive/` when they grow
+  past 500 trades / 200 near-misses
+- Discord alerts for "stuck in cash >70% for 3+ days" and
+  "ticker round-tripped 2+ times in 7 days"
 - Sentry skips tickers that aren't selected for trading — no API calls for closed positions
 - Sentry records fallback ratio and fires a Discord alert when Gemini coverage degrades (>30% of checks fall back)
 - Flutter dashboard shows sentry health badge (green healthy / orange degraded) from the same signal

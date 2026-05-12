@@ -86,6 +86,51 @@ def notify_job_failed(job_name: str, error: str, duration_seconds: float) -> Non
     )
 
 
+def notify_stuck_in_cash(cash_pct: float, days: int, equity: float) -> None:
+    """Alert when the bot has been mostly in cash for an extended period.
+
+    A bot that's >70% cash for >3 days is either correct (genuine bear
+    market) or broken (entries failing, theses missing, macro blackouts).
+    Either way, the operator should know.
+    """
+    send_discord(
+        title=f"Stuck in cash — {cash_pct:.0f}% for {days}+ days",
+        description=(
+            "The bot has been heavily in cash without redeploying. Either the "
+            "market regime is genuinely defensive, or new entries are being "
+            "blocked (macro blackout, low confidence, qty races, etc.). "
+            "Check the latest executor logs."
+        ),
+        color=COLOR_FAILURE,
+        fields=[
+            {"name": "Cash %", "value": f"{cash_pct:.1f}%", "inline": True},
+            {"name": "Days stuck", "value": str(days), "inline": True},
+            {"name": "Equity", "value": f"${equity:,.0f}", "inline": True},
+        ],
+    )
+
+
+def notify_ticker_churn(ticker: str, round_trips: int, window_days: int) -> None:
+    """Alert when a ticker has round-tripped (buy→sell) more than expected
+    within a short window. Indicates whipsaw — either the sentry is too
+    sensitive or the thesis is wrong.
+    """
+    send_discord(
+        title=f"Ticker churn — {ticker} round-tripped {round_trips}x",
+        description=(
+            f"In the last {window_days} days we have bought and exited "
+            f"{ticker} {round_trips} times. This is the 'sell low, buy higher' "
+            f"pattern. The cooldown should suppress this — investigate."
+        ),
+        color=COLOR_FAILURE,
+        fields=[
+            {"name": "Ticker", "value": ticker, "inline": True},
+            {"name": "Round trips", "value": str(round_trips), "inline": True},
+            {"name": "Window", "value": f"{window_days} days", "inline": True},
+        ],
+    )
+
+
 def notify_sentry_degraded(fallback_count: int, total: int, run_type: str) -> None:
     """Alert when Gemini is down and the sentry's news-based layer is offline.
 

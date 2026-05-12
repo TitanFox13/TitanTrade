@@ -52,7 +52,14 @@ def price_check_ok():
 
 @pytest.fixture
 def price_check_adverse():
+    """Moderate adverse move: 3-5% — should NOT auto-ABORT unless news confirms."""
     return {"adverse_move": True, "move_pct": -4.2, "current_price": 177.7, "alert": "ADVERSE"}
+
+
+@pytest.fixture
+def price_check_catastrophic():
+    """Catastrophic move: >5% — should ALWAYS ABORT regardless of news."""
+    return {"adverse_move": True, "move_pct": -6.5, "current_price": 173.5, "alert": "CATASTROPHIC"}
 
 
 @pytest.fixture
@@ -72,23 +79,113 @@ class TestCheckStock:
         assert result["signal"] == "ABORT"
         assert len(result["conflicting_headlines"]) > 0
 
-    def test_price_override_forces_abort(self, fake_config, thesis, price_check_adverse, market_check_ok):
-        """Even if Gemini says CONTINUE, adverse price move forces ABORT."""
+    def test_moderate_price_move_without_news_does_NOT_abort(
+        self, fake_config, thesis, price_check_adverse, market_check_ok,
+    ):
+        """A 3-5% adverse move with no Gemini news concerns is treated as
+        likely noise — broker-side stop will catch a real breakdown.
+        This is the production fix for excessive ABORT churn.
+        """
         with patch("titantrade.daily_sentry._call_gemini", return_value=CONTINUE_JSON):
             result = check_stock("AAPL", thesis, [], price_check_adverse, market_check_ok, fake_config)
-        assert result["signal"] == "ABORT"
+        assert result["signal"] == "CONTINUE"
+        # We still flag the concern in the signal payload for visibility
         assert result["price_concern"] is True
+        assert "no news corroboration" in result["reasoning"].lower()
+
+    def test_moderate_price_move_WITH_news_concerns_aborts(
+        self, fake_config, thesis, price_check_adverse, market_check_ok,
+    ):
+        """3-5% adverse + Gemini found conflicting headlines = confirmed ABORT."""
+        with patch("titantrade.daily_sentry._call_gemini", return_value=ABORT_JSON):
+            result = check_stock("AAPL", thesis, [], price_check_adverse, market_check_ok, fake_config)
+        # Gemini already returned ABORT; doesn't matter whether the override
+        # also fires.
+        assert result["signal"] == "ABORT"
+
+    def test_moderate_price_with_continue_but_headlines_aborts(
+        self, fake_config, thesis, price_check_adverse, market_check_ok,
+    ):
+        """Edge case: Gemini returns CONTINUE but flagged headlines —
+        the price-move override should still confirm ABORT."""
+        custom = json.dumps({
+            "ticker": "AAPL",
+            "signal": "CONTINUE",
+            "conflicting_headlines": ["Apple recalls iPhone 16"],
+            "price_concern": False,
+            "market_concern": False,
+            "reasoning": "Concerning but not decisive",
+        })
+        with patch("titantrade.daily_sentry._call_gemini", return_value=custom):
+            result = check_stock("AAPL", thesis, [], price_check_adverse, market_check_ok, fake_config)
+        assert result["signal"] == "ABORT"
+        assert "confirmed by Gemini news" in result["reasoning"].lower() or "confirmed by gemini" in result["reasoning"].lower()
+
+    def test_catastrophic_price_move_always_aborts(
+        self, fake_config, thesis, price_check_catastrophic, market_check_ok,
+    ):
+        """A >5% adverse move is catastrophic and ABORTs regardless of news."""
+        with patch("titantrade.daily_sentry._call_gemini", return_value=CONTINUE_JSON):
+            result = check_stock("AAPL", thesis, [], price_check_catastrophic, market_check_ok, fake_config)
+        assert result["signal"] == "ABORT"
+        assert "hard abort" in result["reasoning"].lower()
 
     def test_garbage_response_defaults_to_continue(self, fake_config, thesis, price_check_ok, market_check_ok):
         with patch("titantrade.daily_sentry._call_gemini", return_value="not json"):
             result = check_stock("AAPL", thesis, [], price_check_ok, market_check_ok, fake_config)
         assert result["signal"] == "CONTINUE"
 
-    def test_garbage_with_adverse_price_still_aborts(self, fake_config, thesis, price_check_adverse, market_check_ok):
-        """Parse failure + adverse price = ABORT (price override applies regardless)."""
+    def test_garbage_with_catastrophic_price_still_aborts(
+        self, fake_config, thesis, price_check_catastrophic, market_check_ok,
+    ):
+        """Parse failure + catastrophic move = ABORT (hard threshold ignores news)."""
         with patch("titantrade.daily_sentry._call_gemini", return_value="broken"):
-            result = check_stock("AAPL", thesis, [], price_check_adverse, market_check_ok, fake_config)
+            result = check_stock("AAPL", thesis, [], price_check_catastrophic, market_check_ok, fake_config)
         assert result["signal"] == "ABORT"
+
+
+# ---------------------------------------------------------------------------
+# Price-move uses avg_entry_price when position present (#6)
+# ---------------------------------------------------------------------------
+
+class TestPriceMovePositionAware:
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=200.0)
+    def test_held_position_uses_avg_entry(self, mock_price, fake_config):
+        """For a held position, _check_price_move should reference
+        position.avg_entry_price, not thesis.target_entry_price.
+        """
+        from titantrade.daily_sentry import _check_price_move
+        thesis = {
+            "thesis": "BULLISH",
+            "target_entry_price": 100.0,  # stale thesis target
+        }
+        position = {"avg_entry_price": "180.0", "qty": "10"}
+        # Current $200, entry $180 → +11% (not adverse). If we used the stale
+        # thesis target $100 it would look like +100% (no adverse).
+        result = _check_price_move("AAPL", thesis, fake_config, position=position)
+        assert result["adverse_move"] is False
+        # The move was computed off $180 (broker entry), not $100 (thesis)
+        assert abs(result["move_pct"] - 11.11) < 0.1
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=170.0)
+    def test_held_position_detects_real_drawdown(self, mock_price, fake_config):
+        """Drop below avg_entry_price by >3% triggers adverse_move."""
+        from titantrade.daily_sentry import _check_price_move
+        thesis = {"thesis": "BULLISH", "target_entry_price": 100.0}
+        position = {"avg_entry_price": "180.0", "qty": "10"}
+        # Current $170, entry $180 → -5.5% (adverse). Without position-aware
+        # reference, current vs thesis target $100 = +70% (would miss the drawdown).
+        result = _check_price_move("AAPL", thesis, fake_config, position=position)
+        assert result["adverse_move"] is True
+        assert result["move_pct"] < -3.0
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=170.0)
+    def test_no_position_falls_back_to_thesis_target(self, mock_price, fake_config):
+        from titantrade.daily_sentry import _check_price_move
+        thesis = {"thesis": "BULLISH", "target_entry_price": 180.0}
+        # No position passed in
+        result = _check_price_move("AAPL", thesis, fake_config)
+        assert result["adverse_move"] is True  # -5.5% from 180
 
 
 # ---------------------------------------------------------------------------

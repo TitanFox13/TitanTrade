@@ -47,15 +47,43 @@ class TestPriceCheckAdverseMoves:
     @patch("titantrade.price_check.cancel_all_orders_for_ticker")
     @patch("titantrade.price_check._fetch_spy_quote", return_value=0.5)
     @patch("titantrade.price_check.get_positions")
-    def test_aborts_on_3pct_drop(
+    def test_moderate_3pct_drop_does_NOT_abort_anymore(
         self, mock_pos, mock_spy, mock_cancel, mock_close,
         fake_config, tmp_state_dir, thesis_doc,
     ):
+        """price_check has no news context so it can't confirm noise vs real
+        breakdown. After the Bug-#3 fix it only fires on catastrophic >=5%
+        moves; moderate 3-5% moves wait for the next sentry pass with news.
+        """
         mock_pos.return_value = [
             {
                 "symbol": "AAPL",
                 "qty": "50",
-                "current_price": "179.00",  # -3.5% from 185.50
+                "current_price": "179.00",  # -3.5% from 185.50 — moderate
+                "avg_entry_price": "185.50",
+            },
+        ]
+        write_state_file(tmp_state_dir, "weekly_thesis.json", thesis_doc)
+        result = run_price_check(fake_config)
+        assert result["aborts"] == 0  # waits for sentry to confirm
+        mock_close.assert_not_called()
+
+    @patch("titantrade.price_check.close_position_at_market")
+    @patch("titantrade.price_check.cancel_all_orders_for_ticker")
+    @patch("titantrade.price_check._fetch_spy_quote", return_value=0.5)
+    @patch("titantrade.price_check.get_positions")
+    def test_catastrophic_5pct_drop_DOES_abort(
+        self, mock_pos, mock_spy, mock_cancel, mock_close,
+        fake_config, tmp_state_dir, thesis_doc,
+    ):
+        """A catastrophic >=5% move still aborts immediately — too dangerous
+        to wait for the next sentry pass.
+        """
+        mock_pos.return_value = [
+            {
+                "symbol": "AAPL",
+                "qty": "50",
+                "current_price": "175.00",  # -5.7% from 185.50 — catastrophic
                 "avg_entry_price": "185.50",
             },
         ]

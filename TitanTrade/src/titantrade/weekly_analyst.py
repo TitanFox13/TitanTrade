@@ -154,12 +154,17 @@ OUTPUT FORMAT (strict JSON, no other text):
 
 PASS2_SYSTEM_PROMPT = """\
 You are a portfolio manager reviewing your analyst team's individual stock theses.
-Your job is to select the BEST 3-5 trades for this week, considering:
+Your job is to select the best trades for this week, considering:
 1. Individual thesis quality and conviction
 2. Portfolio diversification (avoid sector concentration)
 3. Market regime appropriateness
 4. Risk/reward balance across the portfolio
 5. Historical performance (learn from past mistakes)
+
+The TARGET NUMBER OF TRADES is supplied with each request (it scales with
+market regime — more in strong-bullish, fewer in bearish). Treat it as a soft
+target: prefer hitting it rather than under-selecting, but quality matters
+more than quantity.
 
 You must output ONLY valid JSON. No markdown, no commentary outside JSON.
 """
@@ -189,15 +194,16 @@ STOCK CORRELATION MATRIX (60-day, select pairs):
 
 INSTRUCTIONS:
 1. Review all {thesis_count} theses.
-2. Select the TOP 3-5 trades for this week. Criteria:
+2. TARGET COUNT for this run: {target_count} trades. Criteria:
    a. Highest conviction (confidence > 0.70 preferred)
    b. Best risk/reward ratio (take_profit distance vs stop_loss distance)
    c. Diversified across sectors (max 2 picks from same sector)
    d. Aligned with market regime (fewer BULLISH in bearish/crisis regimes)
    e. Not overlapping with existing holdings (unless adding is justified)
 3. For each thesis NOT selected, briefly explain why.
-4. If the market regime is "crisis" or "strong_bearish", consider selecting
-   0-2 trades only (capital preservation over opportunity).
+4. The target is a soft floor when conviction is available — in strong_bullish
+   regimes, prefer hitting it (more deployment); in bearish/crisis, choose
+   fewer trades regardless of target.
 5. You may adjust confidence scores based on portfolio context.
 
 OUTPUT FORMAT (strict JSON):
@@ -374,6 +380,24 @@ def analyze_stock(
     return thesis
 
 
+# Pass 2 target count by regime. Production showed fixed 3-5 was too few in
+# strong-bullish regimes, leaving us with 50%+ cash and lagging SPY by 5+ pts.
+# In bearish regimes, fewer trades is still the right call (capital
+# preservation).
+_PASS2_TARGET_BY_REGIME: dict[str, int] = {
+    "strong_bullish": 6,
+    "bullish": 5,
+    "neutral": 4,
+    "bearish": 3,
+    "strong_bearish": 2,
+    "crisis": 1,
+}
+
+
+def _target_pass2_count(regime: str) -> int:
+    return _PASS2_TARGET_BY_REGIME.get(regime, 4)
+
+
 def rank_and_select(
     all_theses: list[dict[str, Any]],
     market_ctx: dict[str, Any],
@@ -388,6 +412,13 @@ def rank_and_select(
 
     On parse failure, falls back to selecting all BULLISH theses.
     """
+    # Target count scales with regime — the previous fixed 3-5 was too few in
+    # strong-bullish regimes (where Pass 1 typically produces 8-10 BULLISH
+    # theses) and caused 50%+ cash drag. In bearish regimes, fewer trades is
+    # still appropriate.
+    regime = (market_ctx.get("market_regime") or "neutral").lower()
+    target_count = _target_pass2_count(regime)
+
     prompt = PASS2_USER_TEMPLATE.format(
         all_theses_json=json.dumps(all_theses, indent=2),
         market_context=json.dumps(market_ctx, indent=2),
@@ -397,6 +428,7 @@ def rank_and_select(
         correlation_json=json.dumps(correlation_matrix or {}, indent=2),
         performance_feedback=performance_text,
         thesis_count=len(all_theses),
+        target_count=target_count,
     )
 
     log.info(f"Pass 2: Ranking {len(all_theses)} theses")

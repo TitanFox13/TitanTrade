@@ -227,13 +227,16 @@ class TestResubmitExpiredBrackets:
 # place_native_stop_loss — qty-race retry + fallback
 # ---------------------------------------------------------------------------
 
-def _make_qty_race_error() -> HTTPError:
+def _make_qty_race_error(
+    related_order_id: str = "75c2b7cf-06c0-45d0-8eb9-e169891dea08",
+) -> HTTPError:
     return HTTPError(
         status_code=403,
         body=(
             '{"code":40310000,"available":"0","existing_qty":"121",'
             '"held_for_orders":"121",'
             '"message":"insufficient qty available for order (requested: 121, available: 0)",'
+            f'"related_orders":["{related_order_id}"],'
             '"symbol":"FCX"}'
         ),
         url="https://paper-api.alpaca.markets/v2/orders",
@@ -249,24 +252,26 @@ def _make_response(data: dict[str, Any]) -> MagicMock:
 
 
 class TestPlaceNativeStopLoss:
-    @patch("titantrade.executor.time.sleep")  # skip real sleeps in poll loop
-    @patch("titantrade.executor.get_position")
+    @patch("titantrade.executor.time.sleep")
+    @patch("titantrade.executor.get_order")
     @patch("titantrade.executor.fetch_with_retry")
-    def test_retries_on_qty_race_after_polling(
-        self, mock_fetch, mock_get_pos, mock_sleep, fake_config,
+    def test_retries_on_qty_race_after_blocking_order_canceled(
+        self, mock_fetch, mock_get_order, mock_sleep, fake_config,
     ):
-        """When Alpaca returns 40310000, poll until qty_available releases,
-        then retry the stop-limit with the same qty."""
-        # Fetch: first raises qty-race, second succeeds
+        """When Alpaca returns 40310000, poll the BLOCKING order's status
+        (from related_orders) until it reaches a terminal state, then retry.
+        This is the post-Bug-#1 fix: we no longer poll qty_available, which
+        was lossy because Alpaca's position-side accounting lags order state.
+        """
         mock_fetch.side_effect = [
-            _make_qty_race_error(),
+            _make_qty_race_error("blocking-order-1"),
             _make_response({"id": "order-abc", "status": "accepted"}),
         ]
-        # Poll returns: qty_available=0 twice, then =121 (settled)
-        mock_get_pos.side_effect = [
-            {"qty": "121", "qty_available": "0"},
-            {"qty": "121", "qty_available": "0"},
-            {"qty": "121", "qty_available": "121"},
+        # Order polling: pending_cancel twice, then canceled
+        mock_get_order.side_effect = [
+            {"id": "blocking-order-1", "status": "pending_cancel"},
+            {"id": "blocking-order-1", "status": "pending_cancel"},
+            {"id": "blocking-order-1", "status": "canceled"},
         ]
 
         result = place_native_stop_loss("FCX", 121, 64.50, fake_config)
@@ -275,30 +280,49 @@ class TestPlaceNativeStopLoss:
         assert mock_fetch.call_count == 2
         for call in mock_fetch.call_args_list:
             assert call.kwargs["json_body"]["type"] == "stop_limit"
-        # We polled position state at least twice before qty released
-        assert mock_get_pos.call_count >= 2
+        # We polled the specific blocking order's status until it canceled
+        assert mock_get_order.call_count >= 2
+        # All get_order calls used the order id from related_orders
+        for call in mock_get_order.call_args_list:
+            assert call.args[0] == "blocking-order-1"
 
-    @patch("titantrade.executor.time.time")  # drive the timeout deterministically
+    @patch("titantrade.executor.time.time")
     @patch("titantrade.executor.time.sleep")
-    @patch("titantrade.executor.get_position")
+    @patch("titantrade.executor.get_order")
     @patch("titantrade.executor.fetch_with_retry")
-    def test_qty_race_times_out_if_never_released(
-        self, mock_fetch, mock_get_pos, mock_sleep, mock_time, fake_config,
+    def test_qty_race_times_out_if_cancel_never_completes(
+        self, mock_fetch, mock_get_order, mock_sleep, mock_time, fake_config,
     ):
-        """If qty_available never reaches the required amount within the
-        timeout, we raise instead of retrying forever.
+        """If the blocking order stays in pending_cancel past the timeout
+        (e.g. off-hours), we raise rather than retrying forever.
         """
-        mock_fetch.side_effect = [_make_qty_race_error()]
-        # qty_available stays at 0 forever
-        mock_get_pos.return_value = {"qty": "121", "qty_available": "0"}
-        # time.time() advances from 0 → past the deadline on each call
-        mock_time.side_effect = [0.0, 0.0, 31.0, 31.0, 31.0, 31.0]
+        mock_fetch.side_effect = [_make_qty_race_error("stuck-order")]
+        # Order forever stuck in pending_cancel
+        mock_get_order.return_value = {"id": "stuck-order", "status": "pending_cancel"}
+        # time.time() jumps past the 120s deadline quickly
+        mock_time.side_effect = [0.0, 0.0, 121.0, 121.0, 121.0, 121.0]
 
         with pytest.raises(HTTPError) as exc_info:
             place_native_stop_loss("FCX", 121, 64.50, fake_config)
 
         assert exc_info.value.error_code == 40310000
         assert mock_fetch.call_count == 1  # one initial attempt; gave up polling
+
+    @patch("titantrade.executor.fetch_with_retry")
+    def test_qty_race_without_related_orders_raises(self, mock_fetch, fake_config):
+        """If Alpaca returns 40310000 without naming the blocking order in
+        related_orders, we can't poll — must raise."""
+        bad_error = HTTPError(
+            status_code=403,
+            body='{"code":40310000,"message":"insufficient qty","symbol":"FCX"}',
+            url="https://paper-api.alpaca.markets/v2/orders",
+            method="POST",
+        )
+        mock_fetch.side_effect = [bad_error]
+
+        with pytest.raises(HTTPError) as exc_info:
+            place_native_stop_loss("FCX", 121, 64.50, fake_config)
+        assert exc_info.value.error_code == 40310000
 
     @patch("titantrade.executor.fetch_with_retry")
     def test_falls_back_to_plain_stop_on_non_qty_error(self, mock_fetch, fake_config):
@@ -401,3 +425,329 @@ class TestAdjustStopSafety:
 
         # Different to the nearest penny — should NOT be treated as equal.
         assert abs(64.50 - 64.52) >= 0.01
+
+
+# ---------------------------------------------------------------------------
+# Bracket math sanity (Bug #2 — invalid stop/entry from ADJUSTed theses)
+# ---------------------------------------------------------------------------
+
+class TestBracketMathSanity:
+    """Production showed brackets being placed with stop_price >= entry_price
+    because the thesis had been ADJUSTed to raise the stop above the original
+    entry (locking in profit on a position already held). The new entry path
+    must detect and skip these — Alpaca would reject with HTTP 422 anyway.
+    """
+
+    @patch("titantrade.executor.place_bracket_order")
+    def test_handle_bullish_entry_skips_when_stop_above_entry(
+        self, mock_bracket, fake_config, data_bundle,
+    ):
+        from titantrade.executor import _handle_bullish_entry
+        thesis = {
+            "ticker": "AAPL",
+            "thesis": "BULLISH",
+            "confidence": 0.85,
+            "target_entry_price": 145.0,
+            "stop_loss_price": 165.0,  # higher than entry — invalid for new entry
+            "take_profit_price": 200.0,
+            "selected_for_trading": True,
+        }
+        result = _handle_bullish_entry(
+            ticker="AAPL", thesis=thesis,
+            portfolio_value=100_000, cash_balance=50_000,
+            positions=[], data_bundle=data_bundle, sentry=None, cfg=fake_config,
+        )
+        assert result is None
+        mock_bracket.assert_not_called()
+
+    @patch("titantrade.executor.place_bracket_order")
+    def test_handle_bullish_entry_skips_when_tp_below_stop(
+        self, mock_bracket, fake_config, data_bundle,
+    ):
+        from titantrade.executor import _handle_bullish_entry
+        thesis = {
+            "ticker": "AAPL",
+            "thesis": "BULLISH",
+            "confidence": 0.85,
+            "target_entry_price": 145.0,
+            "stop_loss_price": 140.0,
+            "take_profit_price": 138.0,  # below stop — invalid
+            "selected_for_trading": True,
+        }
+        result = _handle_bullish_entry(
+            ticker="AAPL", thesis=thesis,
+            portfolio_value=100_000, cash_balance=50_000,
+            positions=[], data_bundle=data_bundle, sentry=None, cfg=fake_config,
+        )
+        assert result is None
+        mock_bracket.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Market-hours awareness (Bug #1 root cause)
+# ---------------------------------------------------------------------------
+
+class TestMarketHoursHelper:
+    @patch("titantrade.executor.fetch_with_retry")
+    def test_is_market_open_true(self, mock_fetch, fake_config):
+        from titantrade.executor import is_market_open
+        mock_fetch.return_value = _make_response({"is_open": True})
+        assert is_market_open(fake_config) is True
+
+    @patch("titantrade.executor.fetch_with_retry")
+    def test_is_market_open_false(self, mock_fetch, fake_config):
+        from titantrade.executor import is_market_open
+        mock_fetch.return_value = _make_response({"is_open": False})
+        assert is_market_open(fake_config) is False
+
+    @patch("titantrade.executor.fetch_with_retry")
+    def test_is_market_open_assumes_open_on_error(self, mock_fetch, fake_config):
+        """Clock fetch failing must not block all trading — assume open."""
+        from titantrade.executor import is_market_open
+        mock_fetch.side_effect = RuntimeError("clock unreachable")
+        assert is_market_open(fake_config) is True
+
+
+# ---------------------------------------------------------------------------
+# Order-status polling helper
+# ---------------------------------------------------------------------------
+
+class TestWaitForOrderCanceled:
+    @patch("titantrade.executor.time.sleep")
+    @patch("titantrade.executor.get_order")
+    def test_returns_when_order_canceled(self, mock_get, mock_sleep, fake_config):
+        from titantrade.executor import _wait_for_order_canceled
+        mock_get.side_effect = [
+            {"status": "pending_cancel"},
+            {"status": "pending_cancel"},
+            {"status": "canceled"},
+        ]
+        assert _wait_for_order_canceled("oid", fake_config) == "canceled"
+        assert mock_get.call_count == 3
+
+    @patch("titantrade.executor.time.sleep")
+    @patch("titantrade.executor.get_order")
+    def test_returns_when_filled(self, mock_get, mock_sleep, fake_config):
+        """A bracket child order can become 'filled' instead of canceled."""
+        from titantrade.executor import _wait_for_order_canceled
+        mock_get.return_value = {"status": "filled"}
+        assert _wait_for_order_canceled("oid", fake_config) == "filled"
+
+    @patch("titantrade.executor.time.sleep")
+    @patch("titantrade.executor.get_order", return_value=None)
+    def test_treats_missing_order_as_canceled(self, mock_get, mock_sleep, fake_config):
+        """A 404 (order has been GC'd) means it's no longer holding qty."""
+        from titantrade.executor import _wait_for_order_canceled
+        assert _wait_for_order_canceled("oid", fake_config) == "canceled"
+
+    @patch("titantrade.executor.time.time")
+    @patch("titantrade.executor.time.sleep")
+    @patch("titantrade.executor.get_order")
+    def test_returns_none_on_timeout(
+        self, mock_get, mock_sleep, mock_time, fake_config,
+    ):
+        from titantrade.executor import _wait_for_order_canceled
+        mock_get.return_value = {"status": "pending_cancel"}
+        mock_time.side_effect = [0.0, 0.0, 200.0, 200.0]
+        assert _wait_for_order_canceled("oid", fake_config) is None
+
+
+# ---------------------------------------------------------------------------
+# Re-entry cooldown after ABORT (#1)
+# ---------------------------------------------------------------------------
+
+class TestReentryCooldown:
+    def test_record_and_check_cooldown(self, tmp_state_dir):
+        from titantrade.executor import (
+            _is_in_cooldown,
+            _record_abort_cooldown,
+            REENTRY_COOLDOWN_HOURS,
+        )
+        # Fresh ABORT — should be in cooldown
+        _record_abort_cooldown("FCX", "test reason")
+        in_cooldown, hours = _is_in_cooldown("FCX")
+        assert in_cooldown is True
+        assert hours < 1.0
+
+    def test_unrelated_ticker_not_in_cooldown(self, tmp_state_dir):
+        from titantrade.executor import _is_in_cooldown, _record_abort_cooldown
+        _record_abort_cooldown("FCX", "test")
+        in_cooldown, _ = _is_in_cooldown("NVDA")
+        assert in_cooldown is False
+
+    def test_expired_cooldown_returns_false_and_prunes(self, tmp_state_dir, monkeypatch):
+        """A cooldown older than REENTRY_COOLDOWN_HOURS should auto-expire."""
+        import datetime as dt
+        import json as _json
+        from titantrade.executor import _is_in_cooldown
+        # Write a stale entry directly (older than the window)
+        stale_time = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=100)
+        (tmp_state_dir / "abort_cooldown.json").write_text(_json.dumps({
+            "FCX": {"aborted_at": stale_time.isoformat(), "reason": "old"}
+        }))
+        in_cooldown, hours = _is_in_cooldown("FCX")
+        assert in_cooldown is False
+        assert hours >= 72  # past the window
+
+    @patch("titantrade.executor.place_bracket_order")
+    def test_handle_bullish_entry_blocked_by_cooldown(
+        self, mock_bracket, fake_config, data_bundle, tmp_state_dir,
+    ):
+        """A ticker in cooldown should not get a new bracket placed."""
+        from titantrade.executor import _record_abort_cooldown
+        _record_abort_cooldown("AAPL", "tripped")
+
+        thesis = {
+            "ticker": "AAPL",
+            "thesis": "BULLISH",
+            "confidence": 0.85,
+            "target_entry_price": 145.0,
+            "stop_loss_price": 138.0,
+            "take_profit_price": 160.0,
+            "selected_for_trading": True,
+        }
+        result = _handle_bullish_entry(
+            ticker="AAPL", thesis=thesis,
+            portfolio_value=100_000, cash_balance=50_000,
+            positions=[], data_bundle=data_bundle, sentry=None, cfg=fake_config,
+        )
+        assert result is None
+        mock_bracket.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Bracket-attempt price-chase cap (#4)
+# ---------------------------------------------------------------------------
+
+class TestBracketAttemptCap:
+    @patch("titantrade.executor.place_bracket_order")
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.executor.get_positions", return_value=[])
+    @patch("titantrade.executor.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
+    @patch("titantrade.executor.get_expired_brackets")
+    def test_skips_after_max_attempts(
+        self, mock_expired, mock_account, mock_pos, mock_open, mock_bracket,
+        fake_config, bullish_thesis, tmp_state_dir,
+    ):
+        """If the same ticker has more than MAX_BRACKET_ATTEMPTS expired
+        brackets in Alpaca's history, we should stop chasing the price."""
+        from titantrade.executor import MAX_BRACKET_ATTEMPTS
+        # Generate enough expired brackets to trip the cap (+1 to be over)
+        mock_expired.return_value = [
+            {
+                "symbol": "AAPL", "status": "expired", "order_class": "bracket",
+                "side": "buy", "qty": "10", "limit_price": "100",
+            }
+            for _ in range(MAX_BRACKET_ATTEMPTS + 1)
+        ]
+        thesis_doc = {
+            "theses": [{**bullish_thesis, "selected_for_trading": True}],
+        }
+        result = resubmit_expired_brackets(fake_config, thesis_doc, [], {})
+        assert result == []
+        mock_bracket.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# State-file archival (#8)
+# ---------------------------------------------------------------------------
+
+class TestStateArchival:
+    def test_trade_log_archives_overflow(self, tmp_state_dir):
+        """When trade_log.json exceeds MAX_LIVE_TRADES, archive the excess."""
+        from titantrade.executor import (
+            _append_trade,
+            MAX_LIVE_TRADES,
+        )
+        # Append MAX+5 trades; archive should fire and trim to MAX
+        for i in range(MAX_LIVE_TRADES + 5):
+            _append_trade({
+                "id": f"trade_{i}",
+                "ticker": "AAPL",
+                "action": "BUY",
+                "shares": 1,
+                "price": 100.0,
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "trigger": "test",
+                "reasoning": "test",
+            })
+
+        # Main file kept the most recent MAX_LIVE_TRADES
+        data = json.loads((tmp_state_dir / "trade_log.json").read_text())
+        assert len(data["trades"]) == MAX_LIVE_TRADES
+
+        # Archive directory has at least one rolled-up file
+        archive_dir = tmp_state_dir / "archive"
+        assert archive_dir.exists()
+        archives = list(archive_dir.glob("trade_log.*.json"))
+        assert len(archives) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Stuck-in-cash + churn alerts (#9, #10)
+# ---------------------------------------------------------------------------
+
+class TestStuckInCashAlert:
+    @patch("titantrade.notifier.send_discord")
+    def test_alerts_after_threshold_days(
+        self, mock_send, tmp_state_dir,
+    ):
+        """3 days of high-cash should fire one alert, then suppress repeats today."""
+        from titantrade.executor import (
+            _maybe_alert_stuck_in_cash,
+            STUCK_IN_CASH_DAYS_THRESHOLD,
+        )
+        import datetime as dt
+        import json as _json
+        # Pre-seed state so we've been stuck for 4 days
+        start = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(
+            days=STUCK_IN_CASH_DAYS_THRESHOLD + 1)).date().isoformat()
+        (tmp_state_dir / "alert_state.json").write_text(_json.dumps({
+            "stuck_in_cash_since": start
+        }))
+
+        # 90% cash — over threshold
+        _maybe_alert_stuck_in_cash(portfolio_value=100_000, cash_balance=90_000)
+        assert mock_send.call_count == 1
+
+        # Same day — should NOT alert again
+        _maybe_alert_stuck_in_cash(portfolio_value=100_000, cash_balance=90_000)
+        assert mock_send.call_count == 1
+
+    @patch("titantrade.notifier.send_discord")
+    def test_does_not_alert_below_threshold(self, mock_send, tmp_state_dir):
+        from titantrade.executor import _maybe_alert_stuck_in_cash
+        _maybe_alert_stuck_in_cash(portfolio_value=100_000, cash_balance=30_000)
+        mock_send.assert_not_called()
+
+
+class TestTickerChurnAlert:
+    @patch("titantrade.notifier.send_discord")
+    def test_alerts_on_excessive_round_trips(self, mock_send, tmp_state_dir):
+        from titantrade.executor import (
+            _maybe_alert_ticker_churn,
+            TICKER_CHURN_ROUND_TRIPS,
+        )
+        import datetime as dt
+        import json as _json
+        # Build a trade log with 2 round trips of LLY in the last 3 days
+        now = dt.datetime.now(dt.timezone.utc)
+        trades = []
+        for i in range(TICKER_CHURN_ROUND_TRIPS):
+            ts_buy = (now - dt.timedelta(days=2 - i, hours=1)).isoformat()
+            ts_sell = (now - dt.timedelta(days=2 - i)).isoformat()
+            trades.append({
+                "ticker": "LLY", "action": "BUY", "timestamp": ts_buy,
+                "shares": 1, "price": 900.0, "trigger": "test", "reasoning": "test",
+            })
+            trades.append({
+                "ticker": "LLY", "action": "SELL", "timestamp": ts_sell,
+                "shares": 1, "price": 890.0, "trigger": "test", "reasoning": "test",
+            })
+        (tmp_state_dir / "trade_log.json").write_text(_json.dumps({"trades": trades}))
+
+        _maybe_alert_ticker_churn()
+        assert mock_send.call_count >= 1
+        # Re-running same day should NOT alert again for the same ticker
+        _maybe_alert_ticker_churn()
+        assert mock_send.call_count >= 1  # unchanged

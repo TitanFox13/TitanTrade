@@ -407,3 +407,111 @@ class TestConfidenceAwareSizing:
         assert result_low["allowed"] is True
         assert result_high["allowed"] is True
         assert result_high["shares"] > result_low["shares"]
+
+
+# ---------------------------------------------------------------------------
+# Macro-blackout narrowing (#2)
+# ---------------------------------------------------------------------------
+
+class TestMacroBlackoutHighImpactOnly:
+    def test_high_impact_event_blocks(self):
+        from titantrade.risk_manager import check_macro_blackout
+        import datetime as dt
+        soon = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=3)).isoformat()
+        cal = [{"date": soon, "event": "CPI YoY (May)"}]
+        blocked, name = check_macro_blackout(cal)
+        assert blocked is True
+        assert "CPI" in name
+
+    def test_low_impact_event_does_NOT_block(self):
+        """Atlanta Fed GDPNow, CB Employment Trends Index, retail-ex-autos
+        breakdowns etc. used to wrongly trigger the 24h blackout. After the
+        fix they're ignored.
+        """
+        from titantrade.risk_manager import check_macro_blackout
+        import datetime as dt
+        soon = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=3)).isoformat()
+        cal = [
+            {"date": soon, "event": "Atlanta Fed GDPNow (Q2)"},
+            {"date": soon, "event": "CB Employment Trends Index (Apr)"},
+            {"date": soon, "event": "Retail Sales Ex Autos MoM (Apr)"},
+        ]
+        blocked, _ = check_macro_blackout(cal)
+        assert blocked is False
+
+    def test_mix_keeps_high_impact_winner(self):
+        from titantrade.risk_manager import check_macro_blackout
+        import datetime as dt
+        soon = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2)).isoformat()
+        cal = [
+            {"date": soon, "event": "Atlanta Fed GDPNow (Q2)"},
+            {"date": soon, "event": "FOMC Minutes"},  # high-impact
+        ]
+        blocked, name = check_macro_blackout(cal)
+        assert blocked is True
+        assert "FOMC" in name
+
+    def test_event_beyond_window_does_not_block(self):
+        from titantrade.risk_manager import check_macro_blackout
+        import datetime as dt
+        far = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=48)).isoformat()
+        cal = [{"date": far, "event": "FOMC Minutes"}]
+        blocked, _ = check_macro_blackout(cal)
+        assert blocked is False
+
+
+# ---------------------------------------------------------------------------
+# adjusted_confidence wiring (#3)
+# ---------------------------------------------------------------------------
+
+class TestAdjustedConfidenceUsed:
+    @pytest.fixture(autouse=True)
+    def _mock_sector(self, monkeypatch):
+        monkeypatch.setattr(
+            "titantrade.risk_manager.get_stock_sector", lambda t: "Technology",
+        )
+
+    def test_pre_trade_check_uses_adjusted_confidence(
+        self, tmp_state_dir, fake_config, bullish_thesis, sample_positions,
+    ):
+        """When adjusted_confidence is set (by Pass 2), it overrides the
+        original confidence for the gate AND for confidence-scaled sizing."""
+        # Pass-1 confidence 0.72, Pass-2 raised to 0.95 → larger position
+        thesis_low_high = dict(bullish_thesis)
+        thesis_low_high["confidence"] = 0.72
+        thesis_low_high["adjusted_confidence"] = 0.95
+
+        result_high = pre_trade_check(
+            ticker="AAPL", thesis=thesis_low_high,
+            portfolio_value=100_000, cash_balance=50_000,
+            positions=sample_positions, stock_atr=3.0,
+            earnings_blocked=False, cfg=fake_config,
+        )
+        assert result_high["allowed"] is True
+
+        # Compare against same thesis with no adjustment (uses 0.72)
+        thesis_no_adj = dict(bullish_thesis)
+        thesis_no_adj["confidence"] = 0.72
+        thesis_no_adj.pop("adjusted_confidence", None)
+        result_low = pre_trade_check(
+            ticker="AAPL", thesis=thesis_no_adj,
+            portfolio_value=100_000, cash_balance=50_000,
+            positions=sample_positions, stock_atr=3.0,
+            earnings_blocked=False, cfg=fake_config,
+        )
+        assert result_low["allowed"] is True
+        # Higher adjusted confidence → more shares
+        assert result_high["shares"] > result_low["shares"]
+
+    def test_fallback_to_original_when_no_adjustment(
+        self, tmp_state_dir, fake_config, bullish_thesis, sample_positions,
+    ):
+        """When adjusted_confidence is absent, original confidence is used."""
+        # No adjusted_confidence in fixture
+        result = pre_trade_check(
+            ticker="AAPL", thesis=bullish_thesis,
+            portfolio_value=100_000, cash_balance=50_000,
+            positions=sample_positions, stock_atr=3.0,
+            earnings_blocked=False, cfg=fake_config,
+        )
+        assert result["allowed"] is True

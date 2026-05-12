@@ -113,3 +113,54 @@ class TestRankAndSelect:
             )
         assert "AAPL" in result["selected_tickers"]
         assert "NVDA" not in result["selected_tickers"]
+
+
+# ---------------------------------------------------------------------------
+# Pass 2 target count scales with regime (#5)
+# ---------------------------------------------------------------------------
+
+class TestPass2TargetCount:
+    def test_strong_bullish_targets_more(self):
+        from titantrade.weekly_analyst import _target_pass2_count
+        assert _target_pass2_count("strong_bullish") >= 6
+        assert _target_pass2_count("bullish") >= 5
+        assert _target_pass2_count("neutral") == 4
+
+    def test_bearish_targets_fewer(self):
+        from titantrade.weekly_analyst import _target_pass2_count
+        assert _target_pass2_count("bearish") <= 3
+        assert _target_pass2_count("strong_bearish") <= 2
+        assert _target_pass2_count("crisis") <= 1
+
+    def test_unknown_regime_defaults_to_neutral(self):
+        from titantrade.weekly_analyst import _target_pass2_count
+        assert _target_pass2_count("weird") == _target_pass2_count("neutral")
+
+
+# ---------------------------------------------------------------------------
+# Earnings blackout narrowed window (#7)
+# ---------------------------------------------------------------------------
+
+class TestEarningsBlackoutNarrowed:
+    def test_default_window_is_2_days(self):
+        from titantrade.earnings import DEFAULT_BLOCK_DAYS
+        assert DEFAULT_BLOCK_DAYS == 2
+
+    def test_4_days_out_no_longer_blocks(self):
+        """A position with earnings 4 days out should NOT be blocked under
+        the new 2-day window (was blocked under the old 5-day rule).
+        We use 4 days rather than 3 because ``(earnings_dt - now).days``
+        rounds down — 3 calendar days at noon may register as 2.
+        """
+        import datetime as dt
+        from titantrade.earnings import is_earnings_blocked
+        earnings_date = (dt.date.today() + dt.timedelta(days=4)).isoformat()
+        blocked, _ = is_earnings_blocked("AAPL", earnings_date)
+        assert blocked is False
+
+    def test_1_day_out_still_blocks(self):
+        import datetime as dt
+        from titantrade.earnings import is_earnings_blocked
+        earnings_date = (dt.date.today() + dt.timedelta(days=1)).isoformat()
+        blocked, _ = is_earnings_blocked("AAPL", earnings_date)
+        assert blocked is True

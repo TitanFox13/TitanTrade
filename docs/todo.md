@@ -146,6 +146,36 @@
       window observed in production when Alpaca's `pending_cancel` took
       longer than expected to settle
 
+## Phase 1.18: Strategy & operational hardening (2026-05-12)
+- [x] Re-entry cooldown (72h) after ABORT — stops whipsaw cycles
+- [x] Narrowed macro blackout: 24h → 6h, only high-impact events (FOMC, NFP, CPI, core PCE, GDP)
+- [x] `pre_trade_check` now uses `adjusted_confidence` from Pass-2 (fixed confidence-scaling bug)
+- [x] Bracket resubmission capped at 5 expired attempts per ticker (price-chase guard)
+- [x] Pass 2 target count scales with regime (6/5/4/3/2/1 for strong_bullish → crisis)
+- [x] Sentry price-move uses broker `avg_entry_price` for held positions (not stale thesis target)
+- [x] Earnings blackout narrowed 5 → 2 calendar days
+- [x] State-file archival: trade_log/near_misses auto-trim to most recent N, overflow → state/archive/
+- [x] Discord alert when bot is >70% cash for 3+ days
+- [x] Discord alert when a ticker round-trips 2+ times in 7 days
+- [x] 24 new tests (342 total passing)
+
+## Phase 1.17: Off-hours awareness + ABORT-noise reduction (2026-05-12)
+- [x] Diagnosed live: cancel orders submitted off-hours sit in `pending_cancel`
+      for 10+ minutes (sometimes hours) until next market open
+- [x] New `is_market_open(cfg)` using Alpaca `/v2/clock`
+- [x] New `get_order(order_id, cfg)` and `_wait_for_order_canceled()` that
+      polls the specific blocking order's status (from `related_orders` in
+      Alpaca's 403 body), replacing the qty_available polling that didn't work
+- [x] ADJUST, orphan-close, and trailing-stop adjustments now skip during
+      off-hours (old stop remains protective on the book)
+- [x] Bracket math sanity check in `_handle_bullish_entry` and
+      `resubmit_expired_brackets`: refuse to send invalid (stop >= entry)
+      brackets to Alpaca that would only get HTTP 422 anyway
+- [x] Graduated price-ABORT severity: 3-5% adverse only ABORTs with Gemini
+      news confirmation; >=5% adverse always ABORTs; `price_check.py`
+      (no news context) only fires on the catastrophic threshold
+- [x] 14 new unit tests covering all three fixes; 318 total passing
+
 ## Phase 1.15: Capital Deployment Improvements (2026-04-05)
 - [x] Confidence-proportional position sizing (linear 0.7x-1.3x scaling)
 - [x] `confidence_scaled_risk()` helper in risk_manager.py

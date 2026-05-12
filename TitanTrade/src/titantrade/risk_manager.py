@@ -26,7 +26,32 @@ MAX_SECTOR_EXPOSURE_PCT = 40.0  # No more than 40% of portfolio in one sector
 MIN_CASH_RESERVE_PCT = 20.0     # Always keep 20% cash for opportunities
 MIN_CONFIDENCE = 0.70           # Only trade when AI confidence >= 70%
 ATR_RISK_BUDGET = 0.02          # Target 2% of portfolio at risk per position (ATR-based)
-MACRO_BLACKOUT_HOURS = 24       # No new entries within 24h of major macro events
+MACRO_BLACKOUT_HOURS = 6        # No new entries within 6h of high-impact macro events
+
+# Only these specific macro events get the blackout. Production logs showed
+# the previous 24h-on-everything rule blocking >50% of trading windows because
+# FMP's economic calendar includes dozens of low-impact items (Atlanta Fed
+# GDPNow, CB Employment Trends Index, retail ex-autos breakdowns, etc.). We
+# now match by case-insensitive substring against the event name.
+HIGH_IMPACT_MACRO_KEYWORDS: tuple[str, ...] = (
+    "fomc",                 # Fed rate decision / minutes
+    "nonfarm payrolls",     # Monthly NFP
+    "cpi yoy",              # Consumer Price Index headline
+    "cpi mom",              # Consumer Price Index monthly
+    "core cpi",             # Core CPI variants
+    "core pce price",       # Fed's preferred inflation gauge
+    "ppi yoy",              # Producer Price Index headline
+    "gdp growth rate",      # Quarterly GDP
+    "unemployment rate",    # Headline unemployment
+    "fed interest rate",    # Fed rate decisions
+    "ecb interest rate",    # ECB (US equities react)
+)
+
+
+def _is_high_impact_macro(event_name: str) -> bool:
+    """Match an event name (case-insensitive) against the high-impact list."""
+    name = (event_name or "").lower()
+    return any(kw in name for kw in HIGH_IMPACT_MACRO_KEYWORDS)
 MAX_AVG_CORRELATION = 0.75      # Block entry if average correlation with held tickers > 75%
 
 
@@ -268,6 +293,11 @@ def check_macro_blackout(economic_calendar: list[dict[str, Any]]) -> tuple[bool,
         hours_until = (event_dt - now).total_seconds() / 3600
         if 0 <= hours_until <= MACRO_BLACKOUT_HOURS:
             event_name = event.get("event", "Unknown macro event")
+            # Only block on actually-market-moving events. Without this filter
+            # we were locked out of trading >50% of the time because every
+            # FMP-indexed economic indicator triggered the blackout.
+            if not _is_high_impact_macro(event_name):
+                continue
             log.warning(
                 f"MACRO BLACKOUT: {event_name} in {hours_until:.0f}h — "
                 f"blocking new entries"
@@ -363,7 +393,13 @@ def pre_trade_check(
     }
 
     entry_price = thesis.get("target_entry_price", 0)
-    confidence = thesis.get("confidence", 0)
+    # Use Pass-2's adjusted_confidence when present — that's Claude's
+    # portfolio-aware refinement of the per-stock Pass-1 confidence. Falls
+    # back to the original Pass-1 confidence for theses that didn't go
+    # through Pass 2 (e.g. existing held positions on their first review).
+    confidence = thesis.get("adjusted_confidence")
+    if confidence is None:
+        confidence = thesis.get("confidence", 0)
 
     def _fail(gate: str, detail: str) -> None:
         result["failed_gates"].append(gate)

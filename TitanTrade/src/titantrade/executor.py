@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import time
@@ -86,6 +86,38 @@ def cancel_order(order_id: str, cfg: Config) -> None:
     url = f"{cfg.alpaca.base_url}/v2/orders/{order_id}"
     fetch_with_retry("DELETE", url, headers=_headers(cfg))
     log.info(f"Cancelled order {order_id}")
+
+
+def get_order(order_id: str, cfg: Config) -> dict[str, Any] | None:
+    """Fetch a single order by ID. Returns None on 404."""
+    url = f"{cfg.alpaca.base_url}/v2/orders/{order_id}"
+    try:
+        resp = fetch_with_retry("GET", url, headers=_headers(cfg))
+        return resp.json()
+    except HTTPError as exc:
+        if exc.status_code == 404:
+            return None
+        raise
+
+
+def is_market_open(cfg: Config) -> bool:
+    """Return True if US equity markets are currently open.
+
+    Off-hours cancels enter a ``pending_cancel`` state that does not resolve
+    until the next market open — sometimes 12+ hours. ADJUST/orphan-close
+    flows should defer until the market is open rather than trying to
+    cancel-and-replace stops during off-hours.
+    """
+    url = f"{cfg.alpaca.base_url}/v2/clock"
+    try:
+        resp = fetch_with_retry("GET", url, headers=_headers(cfg))
+        return bool(resp.json().get("is_open", False))
+    except Exception as exc:  # noqa: BLE001
+        # If we can't determine, assume open and let downstream logic deal
+        # with broker errors — failing closed would block all trading on a
+        # transient API blip.
+        log.warning(f"Clock fetch failed, assuming market open: {exc}")
+        return True
 
 
 def cancel_all_orders_for_ticker(ticker: str, cfg: Config) -> int:
@@ -192,42 +224,46 @@ def place_bracket_order(
     return resp.json()
 
 
-# How long to wait for Alpaca's ``qty_available`` to release after a cancel
-# before giving up. In production we've observed the ``pending_cancel``
-# window lasting 5-15 s; 30 s gives ample margin while still failing fast
-# enough to surface a genuine broker problem.
-QTY_SETTLE_TIMEOUT_SECONDS = 30.0
-QTY_SETTLE_POLL_INTERVAL = 0.5
+# How long to wait for a cancel to reach the ``canceled`` state before giving
+# up on the qty-race retry. During market hours this happens in 1-5 s; during
+# off-hours the order can sit in ``pending_cancel`` until the next market open
+# (which is why the ADJUST flow now skips altogether when ``is_market_open``
+# is False).
+CANCEL_SETTLE_TIMEOUT_SECONDS = 120.0
+CANCEL_SETTLE_POLL_INTERVAL = 1.0
+
+# Terminal order states — once an order reaches one of these, Alpaca has
+# released any qty it was holding.
+_TERMINAL_ORDER_STATES = {"canceled", "cancelled", "filled", "rejected", "expired", "done_for_day"}
 
 
-def _wait_for_qty_available(
-    ticker: str,
-    required_qty: float,
+def _wait_for_order_canceled(
+    order_id: str,
     cfg: Config,
-    timeout_seconds: float = QTY_SETTLE_TIMEOUT_SECONDS,
-) -> bool:
-    """Poll Alpaca until the ticker's ``qty_available`` meets ``required_qty``.
+    timeout_seconds: float = CANCEL_SETTLE_TIMEOUT_SECONDS,
+) -> str | None:
+    """Poll an order's status until it reaches a terminal state.
 
-    Used after a cancel that should have released qty, to deterministically
-    wait for the broker-side state to settle instead of sleeping a fixed
-    timeout and hoping. Returns True if the qty is available within
-    ``timeout_seconds``, False otherwise.
+    Returns the final status string (e.g. ``"canceled"``) on success, or
+    ``None`` on timeout. Polling the order's own status is the deterministic
+    way to know when its held qty has been released — polling
+    ``position.qty_available`` was lossy because Alpaca's position-side
+    accounting can lag the order-side state by several seconds.
     """
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         try:
-            pos = get_position(ticker, cfg)
-            if pos is None:
-                # Position closed while we were waiting — caller must handle.
-                log.warning(f"Position for {ticker} disappeared while waiting for qty")
-                return False
-            available = float(pos.get("qty_available", 0))
-            if available >= required_qty:
-                return True
-        except Exception as exc:  # noqa: BLE001 — transient fetch errors OK
-            log.debug(f"Position fetch during qty-wait failed for {ticker}: {exc}")
-        time.sleep(QTY_SETTLE_POLL_INTERVAL)
-    return False
+            order = get_order(order_id, cfg)
+            if order is None:
+                # 404 — order has been GC'd, definitely no longer holding qty
+                return "canceled"
+            status = str(order.get("status", "")).lower()
+            if status in _TERMINAL_ORDER_STATES:
+                return status
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"Order fetch during cancel-wait failed for {order_id}: {exc}")
+        time.sleep(CANCEL_SETTLE_POLL_INTERVAL)
+    return None
 
 
 def place_native_stop_loss(
@@ -269,36 +305,51 @@ def place_native_stop_loss(
         return resp.json()
     except HTTPError as exc:
         if exc.error_code == ALPACA_INSUFFICIENT_QTY:
-            # Qty race — a recent cancel hasn't settled. Poll for it.
+            # Qty race — a recent cancel hasn't reached the ``canceled`` state
+            # yet. Alpaca's 403 helpfully tells us WHICH order is holding the
+            # qty, so we poll that specific order until it terminates.
+            related = exc.data.get("related_orders") if isinstance(exc.data, dict) else None
+            blocking_id = related[0] if isinstance(related, list) and related else None
+            if not blocking_id:
+                log.error(
+                    f"Qty race for {ticker} but Alpaca did not name a blocking "
+                    f"order — cannot poll. Body: {exc.body[:200]}"
+                )
+                raise
+
             log.warning(
-                f"Qty race for {ticker} (code 40310000): {exc.error_message} "
-                f"— polling for qty_available to release "
-                f"(up to {QTY_SETTLE_TIMEOUT_SECONDS:.0f}s)"
+                f"Qty race for {ticker} (code 40310000) — blocked by order "
+                f"{blocking_id}, polling its status (up to "
+                f"{CANCEL_SETTLE_TIMEOUT_SECONDS:.0f}s)"
             )
             t0 = time.time()
-            settled = _wait_for_qty_available(ticker, qty, cfg)
+            final_status = _wait_for_order_canceled(blocking_id, cfg)
             waited = time.time() - t0
-            if not settled:
+            if final_status is None:
                 log.error(
-                    f"Qty for {ticker} never released within "
-                    f"{QTY_SETTLE_TIMEOUT_SECONDS:.0f}s — giving up on stop placement"
+                    f"Blocking order {blocking_id} for {ticker} never reached "
+                    f"a terminal state within {CANCEL_SETTLE_TIMEOUT_SECONDS:.0f}s "
+                    f"— giving up. (Common during off-hours; the ADJUST flow "
+                    f"should be gated on ``is_market_open``.)"
                 )
                 raise
 
             log.info(
-                f"Qty for {ticker} released after {waited:.1f}s — retrying stop-limit"
+                f"Blocking order {blocking_id} for {ticker} reached "
+                f"'{final_status}' after {waited:.1f}s — retrying stop-limit"
             )
             try:
                 resp = fetch_with_retry(
                     "POST", url, headers=_headers(cfg), json_body=stop_limit_body
                 )
                 log.info(
-                    f"Stop-limit for {ticker} succeeded after qty settled ({waited:.1f}s)"
+                    f"Stop-limit for {ticker} succeeded after cancel settled "
+                    f"({waited:.1f}s)"
                 )
                 return resp.json()
             except HTTPError as exc2:
                 log.error(
-                    f"Stop-limit for {ticker} failed after qty_available released: "
+                    f"Stop-limit for {ticker} failed after cancel settled: "
                     f"code={exc2.error_code} msg={exc2.error_message}"
                 )
                 raise
@@ -375,6 +426,76 @@ def calculate_shares(
 
 
 # ---------------------------------------------------------------------------
+# Re-entry cooldown (prevents whipsaw after ABORT)
+# ---------------------------------------------------------------------------
+
+# After we ABORT a ticker (sentry, price-check, or thesis-flip exit) we lock
+# new entries on that ticker for this many hours. Without this, the executor
+# would re-buy on the next run because Claude's weekly thesis is still
+# BULLISH — producing the documented "sell low, buy higher" cycles (LLY and
+# FCX each round-tripped 3+ times in a single week in prod logs).
+REENTRY_COOLDOWN_HOURS = 72
+
+# Maximum expired-bracket attempts we'll keep resubmitting before giving up.
+# Production showed CRWD running this loop daily for 10+ days, chasing the
+# price up without ever filling. Cap is reset at the next weekly thesis.
+MAX_BRACKET_ATTEMPTS = 5
+
+
+def _load_abort_cooldowns() -> dict[str, dict[str, Any]]:
+    """Return {ticker: {aborted_at, reason}} from disk."""
+    path = STATE_DIR / "abort_cooldown.json"
+    if not path.exists():
+        return {}
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_abort_cooldowns(data: dict[str, dict[str, Any]]) -> None:
+    with open(STATE_DIR / "abort_cooldown.json", "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _record_abort_cooldown(ticker: str, reason: str) -> None:
+    """Record an ABORT so re-entries are suppressed for REENTRY_COOLDOWN_HOURS."""
+    data = _load_abort_cooldowns()
+    data[ticker] = {
+        "aborted_at": datetime.now(timezone.utc).isoformat(),
+        "reason": reason[:200],  # cap to keep file small
+    }
+    _save_abort_cooldowns(data)
+
+
+def _is_in_cooldown(ticker: str) -> tuple[bool, float]:
+    """Return ``(in_cooldown, hours_since_abort)``.
+
+    Also prunes expired entries (older than the cooldown window) so the file
+    doesn't grow unbounded.
+    """
+    data = _load_abort_cooldowns()
+    entry = data.get(ticker)
+    if not entry:
+        return False, 0.0
+    try:
+        aborted_at = datetime.fromisoformat(entry["aborted_at"])
+    except (ValueError, KeyError, TypeError):
+        # Bad data — clean up and don't apply
+        data.pop(ticker, None)
+        _save_abort_cooldowns(data)
+        return False, 0.0
+    hours = (datetime.now(timezone.utc) - aborted_at).total_seconds() / 3600
+    if hours >= REENTRY_COOLDOWN_HOURS:
+        # Expired — clean up
+        data.pop(ticker, None)
+        _save_abort_cooldowns(data)
+        return False, hours
+    return True, hours
+
+
+# ---------------------------------------------------------------------------
 # State helpers
 # ---------------------------------------------------------------------------
 
@@ -386,12 +507,55 @@ def _load(filename: str) -> dict[str, Any]:
         return json.load(f)
 
 
+# Cap the size of append-only state files. Older records get spilled to a
+# timestamped archive next to the live file. Without this the files grow
+# linearly forever — production trade_log.json was approaching MBs after a
+# month of churning.
+MAX_LIVE_TRADES = 500
+MAX_LIVE_NEAR_MISSES = 200
+
+
+def _archive_overflow(filename: str, key: str, max_keep: int) -> None:
+    """If the named file's list exceeds ``max_keep``, archive the oldest
+    half to ``state/archive/{filename}.YYYYMMDD-HHMMSS.json`` and write back
+    only the kept tail.
+    """
+    path = STATE_DIR / filename
+    if not path.exists():
+        return
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return
+    items = data.get(key, [])
+    if len(items) <= max_keep:
+        return
+
+    cutoff = len(items) - max_keep
+    archived, kept = items[:cutoff], items[cutoff:]
+    archive_dir = STATE_DIR / "archive"
+    archive_dir.mkdir(exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    archive_path = archive_dir / f"{path.stem}.{stamp}.json"
+    with open(archive_path, "w") as f:
+        json.dump({key: archived}, f, indent=2)
+    data[key] = kept
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    log.info(
+        f"Archived {len(archived)} old {key} from {filename} to "
+        f"{archive_path.name}"
+    )
+
+
 def _append_trade(trade: dict[str, Any]) -> None:
     path = STATE_DIR / "trade_log.json"
     data = _load("trade_log.json")
     data.setdefault("trades", []).append(trade)
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
+    _archive_overflow("trade_log.json", "trades", MAX_LIVE_TRADES)
 
 
 def _append_near_miss(record: dict[str, Any]) -> None:
@@ -400,6 +564,7 @@ def _append_near_miss(record: dict[str, Any]) -> None:
     data.setdefault("near_misses", []).append(record)
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
+    _archive_overflow("near_misses.json", "near_misses", MAX_LIVE_NEAR_MISSES)
 
 
 def _build_trade_context(
@@ -507,6 +672,9 @@ def _handle_abort(ticker: str, sentry: dict[str, Any], cfg: Config) -> dict[str,
     )
     _append_trade(trade)
     log_decision(log, "executor", ticker, "SELL (ABORT)", reasoning)
+    # Suppress re-entry on this ticker until cooldown expires. Without this we
+    # observed prod cycles of buy→abort→buy-higher→abort within a single week.
+    _record_abort_cooldown(ticker, reasoning)
     return trade
 
 
@@ -527,6 +695,34 @@ def _handle_bullish_entry(
 
     if not entry_price or not stop_price:
         log.warning(f"No entry/stop price for {ticker} - skipping")
+        return None
+
+    # Re-entry cooldown: don't buy back into a ticker we just ABORTed.
+    in_cooldown, hours_since = _is_in_cooldown(ticker)
+    if in_cooldown:
+        remaining = REENTRY_COOLDOWN_HOURS - hours_since
+        log.info(
+            f"Skipping {ticker} bullish entry: in re-entry cooldown "
+            f"({hours_since:.1f}h since ABORT, {remaining:.1f}h remaining)"
+        )
+        return None
+
+    # Bracket sanity check — Alpaca rejects with HTTP 422 if the math is off.
+    # This happens when ADJUST has raised the stop above the original entry
+    # to lock in profit on a position we already hold; that thesis is for
+    # managing the position, not opening a new one.
+    if stop_price >= entry_price - 0.01:
+        log.info(
+            f"Skipping {ticker} bullish entry: stop ${stop_price:.2f} >= "
+            f"entry ${entry_price:.2f} (thesis is for managing existing "
+            f"position, not new entry)"
+        )
+        return None
+    if take_profit_price is not None and take_profit_price <= stop_price:
+        log.info(
+            f"Skipping {ticker} bullish entry: take_profit "
+            f"${take_profit_price:.2f} <= stop ${stop_price:.2f}"
+        )
         return None
 
     # Look up ATR from data bundle (for vol-adjusted sizing)
@@ -722,12 +918,23 @@ def resubmit_expired_brackets(
     all risk gates with current portfolio values.
 
     Returns list of resubmitted trade records.
+
+    Price-chase guard: if a ticker has more than ``MAX_BRACKET_ATTEMPTS``
+    expired brackets accumulated in Alpaca's order history (no fills), the
+    price is running away and re-submitting at ever-higher adjusted entry
+    just locks in worse cost basis. Give up until next weekly review.
     """
     expired = get_expired_brackets(cfg)
     if not expired:
         return []
 
     log.info(f"Found {len(expired)} expired bracket orders to evaluate")
+
+    # Count expired attempts per ticker so we can cap chase behavior.
+    attempts_per_ticker: dict[str, int] = {}
+    for o in expired:
+        sym = o.get("symbol", "")
+        attempts_per_ticker[sym] = attempts_per_ticker.get(sym, 0) + 1
 
     theses_by_ticker = {
         t["ticker"]: t for t in thesis_doc.get("theses", [])
@@ -754,6 +961,28 @@ def resubmit_expired_brackets(
 
         if ticker in held_tickers:
             log.info(f"Skipping expired bracket for {ticker}: already holding position")
+            continue
+
+        # Price-chase guard: if we've already failed to fill N times, the
+        # price has clearly run away. Stop resubmitting until next weekly
+        # thesis refresh, when Claude will reassess.
+        attempts = attempts_per_ticker.get(ticker, 0)
+        if attempts > MAX_BRACKET_ATTEMPTS:
+            log.info(
+                f"Skipping expired bracket for {ticker}: {attempts} prior "
+                f"expirations (cap {MAX_BRACKET_ATTEMPTS}) — price chase, "
+                f"waiting for next weekly thesis"
+            )
+            continue
+
+        # Re-entry cooldown: if we ABORTed this ticker recently, don't resubmit
+        in_cooldown, hours_since = _is_in_cooldown(ticker)
+        if in_cooldown:
+            log.info(
+                f"Skipping expired bracket for {ticker}: in re-entry cooldown "
+                f"({hours_since:.1f}h since ABORT, "
+                f"{REENTRY_COOLDOWN_HOURS - hours_since:.1f}h remaining)"
+            )
             continue
 
         # Check for existing open orders
@@ -792,6 +1021,34 @@ def resubmit_expired_brackets(
                     f"${original_entry:.2f} -> ${entry_price:.2f} "
                     f"(current: ${current_price:.2f})"
                 )
+
+        # Sanity-check the bracket math before sending it to the broker.
+        # Alpaca requires:
+        #   stop_loss.stop_price <= base_price (entry) - 0.01
+        #   take_profit.limit_price > stop_loss.stop_price
+        # When ADJUST raises the stop above the original entry to lock in
+        # profit on a position we already hold, the (entry, stop, tp) triple
+        # from the thesis becomes invalid for a NEW bracket entry. The thesis
+        # is for *managing* the existing position, not *opening* a new one,
+        # so skip resubmission entirely.
+        if stop_price is not None and entry_price is not None:
+            if stop_price >= entry_price - 0.01:
+                log.info(
+                    f"Skipping resubmission for {ticker}: stop ${stop_price:.2f} "
+                    f">= entry ${entry_price:.2f} (thesis is for managing existing "
+                    f"position, not new entry)"
+                )
+                continue
+        if (
+            take_profit_price is not None
+            and stop_price is not None
+            and take_profit_price <= stop_price
+        ):
+            log.info(
+                f"Skipping resubmission for {ticker}: take_profit ${take_profit_price:.2f} "
+                f"<= stop ${stop_price:.2f} (bracket math invalid)"
+            )
+            continue
 
         stock_atr = data_bundle.get("stocks", {}).get(ticker, {}).get("atr_14")
         earnings_blocked = (
@@ -1219,6 +1476,18 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     """
     log.info("Starting trade execution")
 
+    # Off-hours guard. During off-hours Alpaca's cancel sits in
+    # ``pending_cancel`` for hours, which makes cancel+replace patterns
+    # (ADJUST, orphan close) extremely unreliable. We can still process
+    # ABORT signals (those go through close_position_at_market which
+    # acts on the position itself, not on the order), and we can still
+    # place new bracket entries. But we'll defer ADJUST and orphan
+    # close to the next market-open run. This is recorded in the cfg
+    # so individual code paths can check it cheaply.
+    market_open = is_market_open(cfg)
+    if not market_open:
+        log.info("Market is closed — ADJUST and orphan-close will defer until next open")
+
     # Ensure sector cache is populated for risk gate checks
     try:
         load_stock_sectors(cfg.trading.watchlist, cfg)
@@ -1227,14 +1496,21 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
 
     # --- Pre-flight safety checks (run before any thesis-based logic) ---
 
-    # Close orphaned positions (expired thesis or missing thesis entry)
-    try:
-        orphan_trades = close_orphaned_positions(cfg)
-        if orphan_trades:
-            log.info(f"Closed {len(orphan_trades)} orphaned positions")
-    except Exception as exc:
-        log.error(f"Orphan position check failed: {exc}")
-        orphan_trades = []
+    # Close orphaned positions (expired thesis or missing thesis entry).
+    # Skipped during off-hours because closing a position requires cancelling
+    # its protective stop first, and that cancel will sit in ``pending_cancel``
+    # for hours. The position is still safe — its old stop is on the book — and
+    # the next market-hours executor run will close it cleanly.
+    orphan_trades: list[dict[str, Any]] = []
+    if market_open:
+        try:
+            orphan_trades = close_orphaned_positions(cfg)
+            if orphan_trades:
+                log.info(f"Closed {len(orphan_trades)} orphaned positions")
+        except Exception as exc:
+            log.error(f"Orphan position check failed: {exc}")
+    else:
+        log.info("Skipping orphan close (market closed)")
 
     # Gap-down protection: detect unfilled stop-limits after overnight gaps
     try:
@@ -1405,6 +1681,18 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                             )
                             continue
 
+                    # Off-hours guard: cancels can sit in pending_cancel for
+                    # hours when the market is closed. The OLD stop is still
+                    # active on the book protecting the position, so deferring
+                    # the price update until the next market-hours run is safe.
+                    if not market_open and existing_stop is not None:
+                        log.info(
+                            f"ADJUST {ticker}: market closed — deferring stop "
+                            f"update from ${existing_price:.2f} to "
+                            f"${new_stop:.2f} until next market-open run"
+                        )
+                        continue
+
                     # Remember the old stop price so we can restore it if the
                     # cancel+replace half-fails (cancel succeeded, place failed).
                     # Without this safety net, ADJUST could strand a position
@@ -1466,8 +1754,12 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
             elif not has_stop and fractional:
                 log.info(f"Fractional position {ticker} ({qty} shares) — no broker stop (sentry protects)")
 
-            # Trailing stop: ratchet the stop up as the position gains (whole shares only)
-            if not fractional:
+            # Trailing stop: ratchet the stop up as the position gains
+            # (whole shares only). Skipped off-hours for the same reason as
+            # ADJUST — the cancel would sit in pending_cancel until next open
+            # and leave the position with no stop. The existing stop is on
+            # the book and still protective; trailing can wait one cycle.
+            if not fractional and market_open:
                 try:
                     manage_trailing_stop(ticker, thesis, position, open_orders, cfg)
                 except Exception as exc:
@@ -1480,8 +1772,150 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     except Exception:
         pass
 
+    # Post-run observability alerts (best-effort; never let them break exec)
+    try:
+        _maybe_alert_stuck_in_cash(portfolio_value, cash_balance)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"Stuck-in-cash check failed: {exc}")
+    try:
+        _maybe_alert_ticker_churn()
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"Ticker-churn check failed: {exc}")
+
     log.info(f"Execution complete: {len(executed)} actions taken")
     return executed
+
+
+# ---------------------------------------------------------------------------
+# Observability alerts (Discord)
+# ---------------------------------------------------------------------------
+
+# Bot heavily in cash for this many days triggers an alert.
+STUCK_IN_CASH_PCT_THRESHOLD = 70.0
+STUCK_IN_CASH_DAYS_THRESHOLD = 3
+
+# A single ticker bought+sold this many times in this many days = churn.
+TICKER_CHURN_ROUND_TRIPS = 2
+TICKER_CHURN_WINDOW_DAYS = 7
+
+# To suppress repeat alerts, we record when we last fired each one.
+_ALERT_STATE_FILE = "alert_state.json"
+
+
+def _load_alert_state() -> dict[str, Any]:
+    return _load(_ALERT_STATE_FILE)
+
+
+def _save_alert_state(data: dict[str, Any]) -> None:
+    with open(STATE_DIR / _ALERT_STATE_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _maybe_alert_stuck_in_cash(portfolio_value: float, cash_balance: float) -> None:
+    """Discord-alert if cash % has been above threshold for N consecutive days.
+
+    We track the date of the first observation; if we drop below the
+    threshold, the tracker resets.
+    """
+    if portfolio_value <= 0:
+        return
+    cash_pct = cash_balance / portfolio_value * 100
+    state = _load_alert_state()
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    if cash_pct < STUCK_IN_CASH_PCT_THRESHOLD:
+        # Healthy — clear any previous streak
+        if "stuck_in_cash_since" in state:
+            state.pop("stuck_in_cash_since", None)
+            state.pop("stuck_in_cash_last_alert", None)
+            _save_alert_state(state)
+        return
+
+    since = state.get("stuck_in_cash_since")
+    if not since:
+        state["stuck_in_cash_since"] = today
+        _save_alert_state(state)
+        return
+
+    try:
+        since_date = datetime.fromisoformat(since).date()
+    except ValueError:
+        state["stuck_in_cash_since"] = today
+        _save_alert_state(state)
+        return
+
+    days = (datetime.now(timezone.utc).date() - since_date).days
+    if days < STUCK_IN_CASH_DAYS_THRESHOLD:
+        return
+
+    # Don't re-alert more than once per 24h
+    last_alert = state.get("stuck_in_cash_last_alert")
+    if last_alert == today:
+        return
+
+    log.warning(
+        f"STUCK IN CASH: {cash_pct:.0f}% cash for {days}+ days — alerting"
+    )
+    try:
+        from titantrade.notifier import notify_stuck_in_cash
+        notify_stuck_in_cash(cash_pct, days, portfolio_value)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"stuck-in-cash Discord alert failed: {exc}")
+    state["stuck_in_cash_last_alert"] = today
+    _save_alert_state(state)
+
+
+def _maybe_alert_ticker_churn() -> None:
+    """Scan recent trade_log for tickers that have been bought+sold multiple
+    times in a short window, indicating whipsaw.
+    """
+    trades = _load("trade_log.json").get("trades", [])
+    if not trades:
+        return
+    cutoff = datetime.now(timezone.utc) - timedelta(days=TICKER_CHURN_WINDOW_DAYS)
+
+    # Count BUY→SELL round trips per ticker in the window
+    round_trips: dict[str, int] = {}
+    open_buys: dict[str, int] = {}
+    for t in trades:
+        try:
+            ts = datetime.fromisoformat(t.get("timestamp", ""))
+        except (ValueError, TypeError):
+            continue
+        if ts < cutoff:
+            continue
+        sym = t.get("ticker", "")
+        action = t.get("action", "")
+        if action == "BUY":
+            open_buys[sym] = open_buys.get(sym, 0) + 1
+        elif action == "SELL" and open_buys.get(sym, 0) > 0:
+            round_trips[sym] = round_trips.get(sym, 0) + 1
+            open_buys[sym] -= 1
+
+    state = _load_alert_state()
+    today = datetime.now(timezone.utc).date().isoformat()
+    alerts_today = state.get("churn_alerts_today", {})
+    if alerts_today.get("date") != today:
+        alerts_today = {"date": today, "tickers": []}
+
+    for ticker, count in round_trips.items():
+        if count < TICKER_CHURN_ROUND_TRIPS:
+            continue
+        if ticker in alerts_today["tickers"]:
+            continue  # already alerted today
+        log.warning(
+            f"TICKER CHURN: {ticker} round-tripped {count}x in "
+            f"{TICKER_CHURN_WINDOW_DAYS} days"
+        )
+        try:
+            from titantrade.notifier import notify_ticker_churn
+            notify_ticker_churn(ticker, count, TICKER_CHURN_WINDOW_DAYS)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"ticker-churn Discord alert failed: {exc}")
+        alerts_today["tickers"].append(ticker)
+
+    state["churn_alerts_today"] = alerts_today
+    _save_alert_state(state)
 
 
 def main() -> None:

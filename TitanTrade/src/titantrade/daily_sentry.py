@@ -25,7 +25,8 @@ from titantrade.retry import fetch_with_retry
 log = get_logger("sentry")
 
 # Thresholds
-PRICE_MOVE_ABORT_PCT = 3.0   # Abort if stock moves 3%+ against thesis
+PRICE_MOVE_ABORT_PCT = 3.0   # "Adverse move" warning threshold (sets price_check.adverse_move)
+PRICE_MOVE_HARD_ABORT_PCT = 5.0  # Catastrophic: always ABORT regardless of news
 MARKET_DROP_ALERT_PCT = 2.0  # Alert if SPY drops 2%+ intraday
 
 SENTRY_PROMPT_TEMPLATE = """\
@@ -135,13 +136,33 @@ def _fetch_spy_quote(cfg: Config) -> float | None:
     return None
 
 
-def _check_price_move(ticker: str, thesis: dict[str, Any], cfg: Config) -> dict[str, Any]:
-    """Check if the stock has moved adversely since the thesis entry price.
+def _check_price_move(
+    ticker: str,
+    thesis: dict[str, Any],
+    cfg: Config,
+    position: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Check if the stock has moved adversely since the reference entry price.
+
+    When we hold a position, use ``avg_entry_price`` from the broker (the
+    actual cost basis after both tranches filled). Otherwise fall back to
+    the thesis's ``target_entry_price``. This matters because for a position
+    that's been held for weeks and is up 20%, a 3% pullback from the high
+    should NOT register as "down 3% from entry" — it should reference the
+    real entry, not the stale Sunday thesis level.
 
     Uses the lightweight quote endpoint (1 API call) instead of historical bars.
     """
-    entry_price = thesis.get("target_entry_price")
     direction = thesis.get("thesis", "NEUTRAL")
+    # Prefer real broker avg_entry_price when we hold the position
+    entry_price = None
+    if position:
+        try:
+            entry_price = float(position.get("avg_entry_price", 0)) or None
+        except (TypeError, ValueError):
+            entry_price = None
+    if entry_price is None:
+        entry_price = thesis.get("target_entry_price")
 
     if not entry_price or direction == "NEUTRAL":
         return {"adverse_move": False, "move_pct": 0, "alert": "No entry price to compare"}
@@ -306,17 +327,64 @@ def check_stock(
         signal = validate_sentry_signal({"ticker": ticker}, ticker)
         signal["reasoning"] = f"Gemini parse failed: {exc} - defaulting to CONTINUE"
 
-    # Hard safety override: price-based ABORT regardless of Gemini output
-    if price_check.get("adverse_move") and signal["signal"] != "ABORT":
+    # Price-based override.
+    #
+    # Previously: ANY adverse move >= 3% forced ABORT regardless of Gemini.
+    # Production showed this was too aggressive — single-stock 3% intraday
+    # moves on no news happen constantly in a normal-to-bullish market, and
+    # we were churning positions on noise (DASH/DECK/LLY each round-tripped
+    # multiple times in a single week).
+    #
+    # New policy — graduated by severity:
+    #   - >= 5% adverse: catastrophic, always ABORT (regardless of news)
+    #   - 3-5% adverse + Gemini flagged news concern: confirmed ABORT
+    #   - 3-5% adverse + Gemini clean: WARN but don't override CONTINUE
+    #     (likely noise — let our broker-side stop handle a real breakdown)
+    move_pct = price_check.get("move_pct", 0) or 0
+    is_adverse = price_check.get("adverse_move", False)
+    is_catastrophic = move_pct <= -PRICE_MOVE_HARD_ABORT_PCT
+    has_news_concern = (
+        len(signal.get("conflicting_headlines") or []) > 0
+        or bool(signal.get("price_concern"))
+        or bool(signal.get("market_concern"))
+    )
+
+    if is_catastrophic and signal["signal"] != "ABORT":
         log.warning(
-            f"Price-based ABORT override for {ticker}: "
-            f"{price_check['move_pct']:+.1f}% adverse move"
+            f"Catastrophic price-based ABORT for {ticker}: "
+            f"{move_pct:+.1f}% (>= {PRICE_MOVE_HARD_ABORT_PCT}% hard threshold)"
         )
         signal["signal"] = "ABORT"
         signal["price_concern"] = True
         signal["reasoning"] = (
-            f"PRICE-BASED OVERRIDE: {price_check['move_pct']:+.1f}% adverse move "
-            f"exceeds {PRICE_MOVE_ABORT_PCT}% threshold. "
+            f"PRICE-BASED HARD ABORT: {move_pct:+.1f}% adverse move exceeds "
+            f"{PRICE_MOVE_HARD_ABORT_PCT}% catastrophic threshold. "
+            f"Original Gemini assessment: {signal.get('reasoning', '')}"
+        )
+    elif is_adverse and has_news_concern and signal["signal"] != "ABORT":
+        log.warning(
+            f"News-confirmed price ABORT for {ticker}: "
+            f"{move_pct:+.1f}% adverse move with Gemini news concerns"
+        )
+        signal["signal"] = "ABORT"
+        signal["price_concern"] = True
+        signal["reasoning"] = (
+            f"PRICE-BASED OVERRIDE: {move_pct:+.1f}% adverse move "
+            f"confirmed by Gemini news/market concerns. "
+            f"Original Gemini assessment: {signal.get('reasoning', '')}"
+        )
+    elif is_adverse and signal["signal"] != "ABORT":
+        # 3-5% adverse move with NO news concern → likely noise. Don't ABORT.
+        # The broker-side stop-loss (typically 5-7% below entry) still protects
+        # against real breakdowns. We trade some sensitivity for less churn.
+        log.warning(
+            f"Adverse price move for {ticker} ({move_pct:+.1f}%) "
+            f"but Gemini found no news concerns — NOT aborting (likely noise)"
+        )
+        signal["price_concern"] = True
+        signal["reasoning"] = (
+            f"PRICE NOISE WARNING: {move_pct:+.1f}% adverse move with no news "
+            f"corroboration — broker-side stop will catch real breakdowns. "
             f"Original Gemini assessment: {signal.get('reasoning', '')}"
         )
 
@@ -369,6 +437,18 @@ def run_daily_sentry(cfg: Config) -> dict[str, Any]:
             f"all positions flagged for review"
         )
 
+    # Pull current positions so the price-move check can use the real
+    # broker avg_entry_price for held positions instead of the stale Sunday
+    # thesis target.
+    try:
+        from titantrade.executor import get_positions
+        positions_by_ticker: dict[str, dict[str, Any]] = {
+            p.get("symbol", ""): p for p in get_positions(cfg)
+        }
+    except Exception as exc:  # noqa: BLE001 — sentry must run regardless
+        log.warning(f"Could not fetch positions for sentry: {exc}")
+        positions_by_ticker = {}
+
     signals: list[dict[str, Any]] = []
 
     for ticker in cfg.trading.watchlist:
@@ -405,9 +485,11 @@ def run_daily_sentry(cfg: Config) -> dict[str, Any]:
             })
             continue
 
-        # Layer 2: Price-based check
+        # Layer 2: Price-based check (uses broker avg_entry_price when held)
         log.info(f"Layer 2: Price check for {ticker}")
-        price_check = _check_price_move(ticker, thesis, cfg)
+        price_check = _check_price_move(
+            ticker, thesis, cfg, position=positions_by_ticker.get(ticker),
+        )
 
         # Layer 3: News-based check (Gemini)
         try:

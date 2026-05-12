@@ -21,11 +21,13 @@ from titantrade.config import Config, STATE_DIR, load_config
 from titantrade.daily_sentry import (
     MARKET_DROP_ALERT_PCT,
     PRICE_MOVE_ABORT_PCT,
+    PRICE_MOVE_HARD_ABORT_PCT,
     _fetch_current_price,
     _fetch_spy_quote,
 )
 from titantrade.executor import (
     _append_trade,
+    _record_abort_cooldown,
     _trade_record,
     cancel_all_orders_for_ticker,
     close_position_at_market,
@@ -98,14 +100,27 @@ def run_price_check(cfg: Config) -> dict[str, Any]:
             should_abort = True
             reason = f"Market stress: SPY {spy_change:+.1f}%"
 
-        # Per-stock adverse move check
+        # Per-stock adverse move check. This module has NO news context (it
+        # runs between sentry passes specifically to avoid token spend), so
+        # we can't do the "news-confirmed" thing the daily_sentry does. To
+        # avoid noise-driven churn we ONLY abort here on catastrophic moves
+        # (>= 5%). Moderate 3-5% moves wait for the next sentry pass which
+        # has Gemini news context to make a confirmed decision.
         if entry_price > 0 and not should_abort:
             move_pct = (current_price - entry_price) / entry_price * 100
-            if direction == "BULLISH" and move_pct <= -PRICE_MOVE_ABORT_PCT:
+            if direction == "BULLISH" and move_pct <= -PRICE_MOVE_HARD_ABORT_PCT:
                 should_abort = True
                 reason = (
-                    f"Adverse move: ${entry_price:.2f} -> ${current_price:.2f} "
-                    f"({move_pct:+.1f}%)"
+                    f"Catastrophic move: ${entry_price:.2f} -> ${current_price:.2f} "
+                    f"({move_pct:+.1f}%, >= {PRICE_MOVE_HARD_ABORT_PCT}% threshold)"
+                )
+            elif direction == "BULLISH" and move_pct <= -PRICE_MOVE_ABORT_PCT:
+                # 3-5% range — log but don't fire. Next sentry run will check
+                # news context and decide. Broker stop still protects.
+                log.warning(
+                    f"PRICE NOISE for {ticker}: ${entry_price:.2f} -> "
+                    f"${current_price:.2f} ({move_pct:+.1f}%) — waiting for "
+                    f"next sentry pass with news context"
                 )
 
         if not should_abort:
@@ -127,6 +142,8 @@ def run_price_check(cfg: Config) -> dict[str, Any]:
             _append_trade(trade)
             actions.append(trade)
             log_decision(log, "price_check", ticker, "SELL (PRICE CHECK)", reason)
+            # Lock out re-entry for the cooldown window
+            _record_abort_cooldown(ticker, f"price_check: {reason}")
         except Exception as exc:
             log.error(f"Price check abort failed for {ticker}: {exc}")
 

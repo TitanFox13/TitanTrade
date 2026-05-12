@@ -16,7 +16,11 @@ from titantrade.retry import fetch_with_retry
 
 log = get_logger("earnings")
 
-DEFAULT_BLOCK_DAYS = 5
+# Narrowed from 5 to 2 calendar days. The 5-day window blocked entries even
+# when earnings were 3-4 trading days away, missing many setup opportunities.
+# 2 days = report tonight or tomorrow morning, which is the actual binary-
+# event risk window. Earlier moves get analyzed normally.
+DEFAULT_BLOCK_DAYS = 2
 
 
 def fetch_earnings_date(ticker: str, cfg: Config) -> str | None:

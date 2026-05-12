@@ -399,6 +399,114 @@
 - Daily summary reads state files which may be stale if the last sentry failed
 - No rate limiting on webhook calls — acceptable since jobs run at most ~8 times/day
 
+## Decision 046: Strategy & Operational Hardening (10 fixes)
+**Date**: 2026-05-12
+**Decision**: A coordinated set of 10 fixes targeting the underlying strategic and operational issues exposed by 2-3 months of production data, where the bot underperformed SPY by ~5 percentage points cumulatively.
+**Background**: The bot was technically sound (all the prior bracket / qty / market-hours bugs were addressed in ADRs 042-045) but **strategically losing**: re-entering after every ABORT, blocked by every minor macro event, ignoring Pass-2's confidence refinements, chasing prices it would never catch. Production logs showed clear "sell low, buy higher" cycles on LLY, DASH, FCX, DECK.
+
+### Fix 1 — Re-entry cooldown after ABORT (`executor.py`)
+- New `state/abort_cooldown.json` records every ABORT event with timestamp.
+- `_handle_abort()` and `price_check`'s ABORT path call `_record_abort_cooldown(ticker, reason)`.
+- `_is_in_cooldown(ticker)` returns True until `REENTRY_COOLDOWN_HOURS = 72` have passed.
+- `_handle_bullish_entry()` and `resubmit_expired_brackets()` check cooldown before placing new orders.
+- Effect: production saw LLY round-trip 3× in one week; this stops the cycle.
+
+### Fix 2 — Narrow macro blackout to high-impact events (`risk_manager.py`)
+- New `HIGH_IMPACT_MACRO_KEYWORDS` whitelist (FOMC, NFP, CPI, core PCE, GDP growth, etc.).
+- `MACRO_BLACKOUT_HOURS` reduced from 24 → 6.
+- Indicators like "Atlanta Fed GDPNow", "CB Employment Trends Index", "Retail Sales Ex Autos" no longer trigger the gate.
+- Effect: was blocking ~50% of trading windows; now blocks only genuinely market-moving events.
+
+### Fix 3 — `adjusted_confidence` used in `pre_trade_check` (`risk_manager.py`)
+- Pass-2 sometimes raises/lowers per-stock confidence based on portfolio context. The executor was ignoring this.
+- Now reads `thesis.adjusted_confidence` if present, falling back to `thesis.confidence`.
+- Effect: the confidence-scaled sizing (ADR 032) now uses Claude's actual final estimate.
+
+### Fix 4 — Bracket resubmission attempt cap (`executor.py`)
+- New `MAX_BRACKET_ATTEMPTS = 5`. `resubmit_expired_brackets()` counts expired entries per ticker (from Alpaca's order history) and skips if the count exceeds the cap.
+- Effect: CRWD chased its price for 10+ days in production; now gives up after 5 expirations and waits for the next weekly thesis.
+
+### Fix 5 — Pass 2 target count scales with regime (`weekly_analyst.py`)
+- New `_target_pass2_count(regime)` returns 6 / 5 / 4 / 3 / 2 / 1 for strong_bullish / bullish / neutral / bearish / strong_bearish / crisis.
+- Prompt's "TOP 3-5 trades" replaced with the dynamic `{target_count}` placeholder.
+- Effect: in strong_bullish we now aim for more deployment (6 picks × ~10% each ≈ 60%, leaving cash reserve room); in bearish we pull in.
+
+### Fix 6 — Sentry price-move uses broker `avg_entry_price` (`daily_sentry.py`)
+- `_check_price_move()` accepts an optional `position` parameter. When held, references `position.avg_entry_price` instead of the stale `thesis.target_entry_price`.
+- `run_daily_sentry()` pre-fetches all positions and threads them in.
+- Effect: for a position up 20% from broker entry, a 3% pullback is now correctly evaluated against the real cost basis rather than the unrelated Sunday thesis level.
+
+### Fix 7 — Earnings blackout narrowed 5 → 2 days (`earnings.py`)
+- `DEFAULT_BLOCK_DAYS` reduced from 5 to 2.
+- Effect: stops blocking entries on stocks 3-4 days out from earnings (where setups can play out normally); still blocks tonight/tomorrow when the binary event is imminent.
+
+### Fix 8 — State-file size cap + archival (`executor.py`)
+- `_append_trade` / `_append_near_miss` now call `_archive_overflow()` which rolls oldest entries off to `state/archive/{file}.YYYYMMDD-HHMMSS.json` when the live file exceeds `MAX_LIVE_TRADES = 500` / `MAX_LIVE_NEAR_MISSES = 200`.
+- Effect: trade_log.json was approaching MBs after a month of churn; now self-trimming.
+
+### Fix 9 — Stuck-in-cash Discord alert (`notifier.py`, `executor.py`)
+- New `notify_stuck_in_cash()` + `_maybe_alert_stuck_in_cash()` tracks consecutive days at ≥70% cash.
+- Fires Discord alert after 3 days, suppressed for the rest of that day.
+- Effect: operator knows when the bot is over-conservative without polling dashboards.
+
+### Fix 10 — Ticker churn Discord alert (`notifier.py`, `executor.py`)
+- New `notify_ticker_churn()` + `_maybe_alert_ticker_churn()` scans the last 7 days of `trade_log.json` for any ticker that's been bought+sold ≥2 times.
+- Fires Discord alert once per ticker per day.
+- Effect: even with the cooldown (#1) preventing same-day churn, weekly cycles get surfaced.
+
+**Tests**: 24 new tests (342 total passing) covering cooldown lifecycle, high-impact-only blackout, adjusted_confidence wiring, attempt cap, regime-scaled targets, avg_entry_price preference, narrowed earnings, archival, and both new alerts.
+
+**Trade-offs**:
+- Re-entry cooldown (72h) means we'll miss the rare case where a stock genuinely flipped from bad-news to good-news within 3 days. Acceptable trade given the documented churn losses.
+- Narrowing macro blackout could surface real risk if a "low-impact" event surprises (rare). Whitelist can be expanded if it bites.
+- Higher Pass-2 target count in bullish regimes means more concentrated portfolio risk if Claude has an off week. Mitigated by the existing 40% sector cap and 8% drawdown circuit breaker.
+
+## Decision 043: Market-Hours-Aware Order Operations + Order-Status Polling
+**Date**: 2026-05-12
+**Decision**: The polling approach in ADR 042 (poll `qty_available`) was diagnosed as wrong after another 2 weeks in production. Replaced with: (1) poll the **blocking order's** `status` directly using the order ID Alpaca names in `related_orders`, and (2) skip ADJUST / orphan-close / trailing-stop adjustments entirely when the market is closed.
+**Problem** (verified live):
+- Live test on 2026-05-12 03:54 ET (market closed) showed a stop-order cancel sat in `pending_cancel` for **10+ minutes** with no progress. `qty_available` remained at 0 the whole time, so our 30-s polling timeout fired every time.
+- In production logs over the previous 2 weeks, this caused CRITICAL "no stop-loss order" errors on ANET, URI, EQIX, DECK, LLY, DASH, FCX, HCA, GS, JPM — multiple times each. Positions sat unprotected for hours.
+- Root cause: the executor and weekly analyst run on UTC schedules (e.g. 09:00 UTC = 05:00 ET = pre-market). Cancels submitted off-hours get queued at the venue and don't resolve until next market open.
+**Fix**:
+- New `executor.is_market_open(cfg)` calls Alpaca's `/v2/clock` to check current state; assumes open on transient errors to fail safe.
+- New `executor.get_order(order_id, cfg)` retrieves a single order; returns `None` on 404.
+- New `executor._wait_for_order_canceled(order_id, cfg, timeout=120s)` polls the order's own `status` until it reaches a terminal state (`canceled`, `cancelled`, `filled`, `rejected`, `expired`, `done_for_day`). This is deterministic — when the order is truly canceled, qty is released.
+- `place_native_stop_loss` qty-race handler now extracts `related_orders[0]` from Alpaca's 403 body and polls that specific order until terminal, then retries the stop-limit.
+- `execute_trades()` calls `is_market_open()` once at the top and gates the ADJUST, orphan-close, and trailing-stop paths on it. The "no stop found — place one" safety path still fires regardless (rare, safety-critical).
+- Live verified: my own test order eventually canceled at 08:00 UTC after 10+ minutes in `pending_cancel`; new `get_order()` and `is_market_open()` work cleanly against live Alpaca paper.
+**Trade-offs**:
+- During off-hours runs, ADJUSTed stop levels are not applied. The OLD stop remains active on the book, so the position is still protected at its prior level. The new level applies at the next market-hours executor run.
+- Worst-case retry time is now 120 s (up from 30 s) when we DO try to wait for a cancel, but in practice we don't try during off-hours so this only fires during market hours where cancels complete in 1-5 s.
+
+## Decision 044: Bracket Math Sanity Check (Bug #2)
+**Date**: 2026-05-12
+**Decision**: Both `_handle_bullish_entry()` and `resubmit_expired_brackets()` now sanity-check the (entry, stop, take_profit) triple before sending to Alpaca, and skip with a clear log message when the math is invalid.
+**Problem**: Production logs showed repeated HTTP 422 errors from Alpaca:
+```
+Bracket BUY: 83.0 DECK entry=$108.76 stop=$110.29 tp=110.0
+take_profit.limit_price must be > stop_loss.stop_price
+```
+Cause: when a thesis is reviewed with `review_action=ADJUST`, Claude raises the stop above the original entry to lock in profit on a position already in profit. The new bracket would then be `entry=$106.50, stop=$110.29` — invalid for a fresh entry. This wasted broker requests and skipped real opportunities while ADJUSTed tickers had a "phantom" entry trying to fire.
+**Fix** (`executor.py`):
+- `_handle_bullish_entry`: refuse if `stop_price >= entry_price - 0.01` or `take_profit <= stop_price`; logs the reason and returns `None`.
+- `resubmit_expired_brackets`: identical check after `_adjust_entry_price` runs. If invalid, the thesis is interpreted as "for managing existing position, not opening a new one" and skipped.
+
+## Decision 045: News-Confirmed Price ABORT (Bug #3)
+**Date**: 2026-05-12
+**Decision**: Graduated price-based ABORT severity. A moderate (3-5%) adverse move now only triggers ABORT if Gemini's news analysis also flagged a concern. Catastrophic moves (>=5%) still ABORT regardless.
+**Problem**: Production logs showed excessive ABORT churn — DASH, DECK, LLY, FCX each round-tripped multiple times in a single week on small adverse moves. The previous "any 3% adverse move forces ABORT regardless of Gemini" rule was too aggressive in normal volatility, treating noise as breakdown.
+**Fix**:
+- New constant `PRICE_MOVE_HARD_ABORT_PCT = 5.0` in `daily_sentry.py`.
+- `check_stock()` now applies three-tier severity:
+  - `>= 5%` adverse → catastrophic, always ABORT (regardless of news)
+  - `3-5%` adverse + Gemini flagged conflicting headlines / price_concern / market_concern → confirmed ABORT
+  - `3-5%` adverse + Gemini clean → log warning, do NOT override CONTINUE (broker-side stop still protects)
+- `price_check.py` (zero-LLM intraday checker): only ABORTs at `>= 5%` since it has no news context; moderate moves are logged and deferred to the next sentry pass.
+**Trade-offs**:
+- We accept slightly more downside on positions where price moves 3-5% without news. Our broker-side stops at 5-7% below entry catch real breakdowns; the trade-off is fewer noise-driven exits.
+- Production observed 4+ aborts per week at the old threshold, most followed by re-entries within 24-48h. The churn cost (slippage + opportunity) was higher than the protection benefit at the 3% threshold.
+
 ## Decision 042: Poll qty_available Instead of Fixed-Sleep Retry
 **Date**: 2026-04-21
 **Decision**: Replace the 2-second blind sleep in `place_native_stop_loss`'s qty-race retry with an explicit poll of Alpaca's `qty_available`, waiting up to 30 seconds for the cancel to settle.
