@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from titantrade.indicators import (
+    atr as compute_atr,
     bollinger_bands,
     compute_all_indicators,
     macd,
@@ -67,6 +68,7 @@ def generate_synthetic_thesis(
             horizon="short_term",
             stop_pct=0.04, tp_rr=2.0,
             reasoning=f"Mean reversion: RSI {rsi_val:.0f}, price near 200-SMA ${sma_200:.2f}",
+            bars=bars,
         )
 
     # RSI extremely oversold
@@ -76,6 +78,7 @@ def generate_synthetic_thesis(
             horizon="short_term",
             stop_pct=0.05, tp_rr=2.0,
             reasoning=f"Extreme oversold: RSI {rsi_val:.0f}",
+            bars=bars,
         )
 
     # Golden cross with momentum
@@ -85,6 +88,7 @@ def generate_synthetic_thesis(
             horizon="medium_term",
             stop_pct=0.05, tp_rr=2.5,
             reasoning="Golden cross + MACD positive + above both SMAs",
+            bars=bars,
         )
 
     # MACD bullish crossover with trend support
@@ -94,6 +98,7 @@ def generate_synthetic_thesis(
             horizon="short_term",
             stop_pct=0.04, tp_rr=2.0,
             reasoning=f"MACD bullish crossover, RSI {rsi_val:.0f}, above 50-SMA",
+            bars=bars,
         )
 
     # Bollinger breakout with volume confirmation
@@ -104,6 +109,7 @@ def generate_synthetic_thesis(
             horizon="short_term",
             stop_pct=0.04, tp_rr=1.5,
             reasoning="Bollinger breakout with volume confirmation",
+            bars=bars,
         )
 
     # Death cross or bearish trend
@@ -122,9 +128,23 @@ def _bullish(
     confidence: float, horizon: str,
     stop_pct: float, tp_rr: float,
     reasoning: str,
+    bars: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """Build a BULLISH thesis. When bars are provided, the stop is the LARGER
+    of stop_pct or 2.5x ATR — matching the new strategy guidance to Claude
+    that stops < 1.5x ATR get noise-stopped. The old fixed-% stop is what
+    produced 74% stop-out rate in the v2 backtest.
+    """
     entry = round(current * 0.995, 2)
-    stop = round(entry * (1 - stop_pct), 2)
+
+    # ATR-aware stop: take the LARGER of fixed-pct or 2.5x ATR below entry.
+    pct_stop = entry * (1 - stop_pct)
+    atr_stop = pct_stop
+    if bars and len(bars) >= 15:
+        a = compute_atr(bars[-30:])
+        if a and a > 0:
+            atr_stop = entry - 2.5 * a
+    stop = round(min(pct_stop, atr_stop), 2)  # min => further BELOW entry => wider stop
     risk = entry - stop
     tp = round(entry + risk * tp_rr, 2)
 

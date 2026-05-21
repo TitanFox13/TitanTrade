@@ -45,9 +45,13 @@ def main() -> None:
         from titantrade.backtest.engine import run_backtest, print_summary
 
         data_dir = sys.argv[2] if len(sys.argv) > 2 else "data/historical"
-        # Accept an optional --confidence-scaling flag
         use_scaling = "--confidence-scaling" in sys.argv
-        result = run_backtest(data_dir=data_dir, use_confidence_scaling=use_scaling)
+        v2 = "--v2" in sys.argv
+        result = run_backtest(
+            data_dir=data_dir,
+            use_confidence_scaling=use_scaling,
+            strategy_v2=v2,
+        )
         print_summary(result)
         return
 

@@ -26,10 +26,11 @@ def compute_metrics(
         spy_end = spy_bars[-1]["close"]
         spy_return_pct = (spy_end - spy_start) / spy_start * 100
 
-    # Trade statistics
-    sells = [t for t in trade_log if t["action"] == "SELL"]
-    wins = [t for t in sells if t.get("pnl_pct", 0) > 0]
-    losses = [t for t in sells if t.get("pnl_pct", 0) <= 0]
+    # Trade statistics — only SELLs with a pnl_pct (so core_rebalance trims
+    # and pyramid buys, which don't carry P&L, are excluded).
+    sells = [t for t in trade_log if t["action"] == "SELL" and "pnl_pct" in t]
+    wins = [t for t in sells if t["pnl_pct"] > 0]
+    losses = [t for t in sells if t["pnl_pct"] <= 0]
 
     win_rate = len(wins) / len(sells) * 100 if sells else 0
     avg_win = sum(t["pnl_pct"] for t in wins) / len(wins) if wins else 0

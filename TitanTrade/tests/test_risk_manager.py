@@ -36,13 +36,15 @@ from tests.conftest import write_state_file
 
 class TestConfidenceGate:
     def test_passes_at_threshold(self):
-        assert passes_confidence_threshold("AAPL", 0.70) is True
+        # MIN_CONFIDENCE is now 0.55 (was 0.70). 0.55 should pass.
+        assert passes_confidence_threshold("AAPL", 0.55) is True
 
     def test_passes_above_threshold(self):
         assert passes_confidence_threshold("AAPL", 0.85) is True
 
     def test_fails_below_threshold(self):
-        assert passes_confidence_threshold("AAPL", 0.69) is False
+        # Floor lowered to 0.55 (was 0.70). Anything below now fails.
+        assert passes_confidence_threshold("AAPL", 0.50) is False
 
     def test_fails_at_zero(self):
         assert passes_confidence_threshold("AAPL", 0.0) is False
@@ -96,18 +98,23 @@ class TestDrawdownCircuitBreaker:
 # ---------------------------------------------------------------------------
 
 class TestCashReserve:
+    # Reserve floor lowered from 20% to 5%: cash is now treated as transit
+    # capital, not a strategic destination. The whole reason we redesigned
+    # the strategy: in a rising market, the 20% floor was creating ~80% cash
+    # drag in combination with the (also-removed) confidence gate.
     def test_plenty_of_cash(self):
-        # Portfolio 100k, cash 50k, reserve = 20k -> investable = 30k
+        # Portfolio 100k, cash 50k, reserve = 5k -> investable = 45k
         result = max_investable_amount(100_000, 50_000)
-        assert result == 30_000
+        assert result == 45_000
 
     def test_exactly_at_reserve(self):
-        # Portfolio 100k, cash 20k, reserve = 20k -> investable = 0
-        result = max_investable_amount(100_000, 20_000)
+        # Portfolio 100k, cash 5k, reserve = 5k -> investable = 0
+        result = max_investable_amount(100_000, 5_000)
         assert result == 0
 
     def test_below_reserve(self):
-        result = max_investable_amount(100_000, 15_000)
+        # Portfolio 100k, cash 4k < 5k reserve -> investable = 0
+        result = max_investable_amount(100_000, 4_000)
         assert result == 0
 
     def test_no_cash(self):
@@ -115,9 +122,9 @@ class TestCashReserve:
         assert result == 0
 
     def test_large_portfolio(self):
-        # Portfolio 1M, cash 500k, reserve = 200k -> investable = 300k
+        # Portfolio 1M, cash 500k, reserve = 50k -> investable = 450k
         result = max_investable_amount(1_000_000, 500_000)
-        assert result == 300_000
+        assert result == 450_000
 
 
 # ---------------------------------------------------------------------------
@@ -135,11 +142,12 @@ class TestPositionSizing:
 
     def test_atr_limits_below_max(self):
         # portfolio=100k, entry=$50, ATR=$50
-        # dollar_risk = 100k * 0.02 = 2000, atr_shares = 2000/50 = 40
-        # max_position = 100k * 0.10 / 50 = 200
-        # result = min(40, 200) = 40
+        # ATR_RISK_BUDGET=0.025 (was 0.02): dollar_risk = 100k*0.025 = 2500
+        # atr_shares = 2500/50 = 50
+        # max_position = 100k * 0.10 / 50 = 200 (no confidence param → no scaling)
+        # result = min(50, 200) = 50
         shares = volatility_adjusted_shares(100_000, 50.0, 50.0, 0.10)
-        assert shares == 40
+        assert shares == 50
 
     def test_no_atr_falls_back_to_fixed(self):
         # portfolio=100k, entry=$50, no ATR -> fixed: 100k * 0.10 / 50 = 200
@@ -170,8 +178,9 @@ class TestSectorExposure:
 
     def test_exceeds_limit(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: "Technology")
-        # Existing: NVDA $35k (35%) + new $10k = 45% -> exceeds 40%
-        positions = [{"symbol": "NVDA", "market_value": "35000"}]
+        # Sector cap loosened from 40% to 50% to allow tighter concentration
+        # on high-conviction sectors. NVDA $45k + new $10k = 55% > 50% → fails.
+        positions = [{"symbol": "NVDA", "market_value": "45000"}]
         allowed, pct = check_sector_limit("AAPL", 10_000, positions, 100_000)
         assert allowed is False
 
@@ -182,6 +191,50 @@ class TestSectorExposure:
         positions = [{"symbol": "NVDA", "market_value": "35000"}]
         allowed, pct = check_sector_limit("LLY", 10_000, positions, 100_000)
         assert allowed is True
+
+
+# ---------------------------------------------------------------------------
+# Overlay-sleeve cap (defends the always-on core allocation)
+# ---------------------------------------------------------------------------
+
+class TestOverlayCap:
+    """The overlay cap prevents the AI-pick sleeve from blowing past
+    MAX_TOTAL_OVERLAY_PCT (70% by default), which would starve the SPY core
+    allocation and rebalancing buffer.
+    """
+
+    def test_no_positions_full_headroom(self):
+        from titantrade.risk_manager import compute_overlay_headroom, MAX_TOTAL_OVERLAY_PCT
+        # No positions → full 70% headroom on $100k = $70k
+        assert compute_overlay_headroom([], 100_000) == 100_000 * MAX_TOTAL_OVERLAY_PCT
+
+    def test_core_ticker_excluded(self):
+        from titantrade.risk_manager import compute_overlay_headroom, MAX_TOTAL_OVERLAY_PCT
+        positions = [{"symbol": "SPY", "market_value": "30000"}]
+        # SPY is core, shouldn't count against overlay cap
+        headroom = compute_overlay_headroom(positions, 100_000, core_tickers=("SPY",))
+        assert headroom == 100_000 * MAX_TOTAL_OVERLAY_PCT
+
+    def test_existing_overlays_reduce_headroom(self):
+        from titantrade.risk_manager import compute_overlay_headroom, MAX_TOTAL_OVERLAY_PCT
+        positions = [
+            {"symbol": "AAPL", "market_value": "20000"},
+            {"symbol": "NVDA", "market_value": "15000"},
+        ]
+        # Overlay = 35k, cap = 70k, headroom = 35k
+        headroom = compute_overlay_headroom(positions, 100_000, core_tickers=("SPY",))
+        assert headroom == pytest.approx(100_000 * MAX_TOTAL_OVERLAY_PCT - 35_000)
+
+    def test_at_cap_zero_headroom(self):
+        from titantrade.risk_manager import compute_overlay_headroom, MAX_TOTAL_OVERLAY_PCT
+        positions = [{"symbol": "AAPL", "market_value": str(100_000 * MAX_TOTAL_OVERLAY_PCT)}]
+        assert compute_overlay_headroom(positions, 100_000, core_tickers=("SPY",)) == 0.0
+
+    def test_above_cap_clamps_to_zero(self):
+        from titantrade.risk_manager import compute_overlay_headroom
+        # Overlay = 80k, cap = 70k. Don't return negative — clamp.
+        positions = [{"symbol": "AAPL", "market_value": "80000"}]
+        assert compute_overlay_headroom(positions, 100_000, core_tickers=("SPY",)) == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +262,9 @@ class TestPreTradeCheck:
         assert result["allowed"] is True
         assert result["shares"] > 0
         assert result["failed_gates"] == []
-        assert len(result["gate_results"]) == 8
+        # 9 gates now: confidence, earnings, drawdown, cash_reserve, overlay_cap,
+        # position_size, sector_exposure, macro_blackout, correlation
+        assert len(result["gate_results"]) == 9
 
     def test_confidence_gate_fails(
         self, tmp_state_dir, fake_config, bullish_thesis, sample_positions
@@ -265,11 +320,13 @@ class TestPreTradeCheck:
     def test_cash_reserve_gate_fails(
         self, tmp_state_dir, fake_config, bullish_thesis, sample_positions
     ):
+        # Cash reserve floor is now 5%. A $4k cash balance against a $100k
+        # portfolio is below the 5% reserve.
         result = pre_trade_check(
             ticker="AAPL",
             thesis=bullish_thesis,
             portfolio_value=100_000,
-            cash_balance=10_000,  # Below 20% reserve (20k)
+            cash_balance=4_000,  # Below 5% reserve (5k)
             positions=sample_positions,
             stock_atr=3.0,
             earnings_blocked=False,
@@ -295,7 +352,9 @@ class TestPreTradeCheck:
         )
         assert result["allowed"] is False
         # All 6 gates should have results
-        assert len(result["gate_results"]) == 8
+        # 9 gates now: confidence, earnings, drawdown, cash_reserve, overlay_cap,
+        # position_size, sector_exposure, macro_blackout, correlation
+        assert len(result["gate_results"]) == 9
         for gate in ("confidence", "earnings", "drawdown", "cash_reserve", "position_size", "sector_exposure"):
             assert gate in result["gate_results"]
 
@@ -340,49 +399,137 @@ class TestPreTradeCheck:
 # Confidence-Scaled Risk
 # ---------------------------------------------------------------------------
 
+class TestVixScaledRisk:
+    """VIX-aware risk scaling. Big position sizes in calm markets, defensive
+    sizes in stressed ones. Orthogonal to confidence scaling.
+    """
+
+    def test_low_vix_amplifies(self):
+        from titantrade.risk_manager import vix_scaled_risk
+        # VIX < 15 → 1.2x
+        assert vix_scaled_risk(0.10, 12) == pytest.approx(0.12, abs=0.001)
+
+    def test_normal_vix_unchanged_at_25(self):
+        from titantrade.risk_manager import vix_scaled_risk
+        # VIX = 25 → exactly 1.0x (boundary of normal/elevated)
+        assert vix_scaled_risk(0.10, 25) == pytest.approx(0.10, abs=0.001)
+
+    def test_normal_vix_interp_at_20(self):
+        from titantrade.risk_manager import vix_scaled_risk
+        # VIX = 20 (mid normal) → 1.1x via linear interp 15→25
+        assert vix_scaled_risk(0.10, 20) == pytest.approx(0.11, abs=0.001)
+
+    def test_elevated_vix_trims(self):
+        from titantrade.risk_manager import vix_scaled_risk
+        # VIX = 30 → 0.85x (midpoint 25→35)
+        assert vix_scaled_risk(0.10, 30) == pytest.approx(0.085, abs=0.001)
+
+    def test_high_vix_defensive(self):
+        from titantrade.risk_manager import vix_scaled_risk
+        # VIX = 50 → 0.4x cap
+        assert vix_scaled_risk(0.10, 50) == pytest.approx(0.04, abs=0.001)
+
+    def test_extreme_vix_clamps_to_floor(self):
+        from titantrade.risk_manager import vix_scaled_risk
+        # VIX > 50 → still 0.4x (don't go lower)
+        assert vix_scaled_risk(0.10, 80) == pytest.approx(0.04, abs=0.001)
+
+    def test_no_vix_no_scaling(self):
+        from titantrade.risk_manager import vix_scaled_risk
+        # Missing VIX → don't penalize sizing
+        assert vix_scaled_risk(0.10, None) == 0.10
+        assert vix_scaled_risk(0.10, 0) == 0.10  # invalid VIX too
+
+    def test_monotonically_decreasing_above_15(self):
+        """Sanity: scaling must NOT increase as VIX rises past 15."""
+        from titantrade.risk_manager import vix_scaled_risk
+        prev = 1.0e9
+        for v in [16, 20, 25, 28, 32, 35, 40, 50]:
+            cur = vix_scaled_risk(0.10, v)
+            assert cur <= prev, f"Non-monotonic at VIX={v}: {prev} -> {cur}"
+            prev = cur
+
+
 class TestConfidenceScaledRisk:
-    def test_minimum_confidence(self):
-        # 0.70 -> multiplier 0.7 -> 10% * 0.7 = 7%
-        assert confidence_scaled_risk(0.10, 0.70) == pytest.approx(0.07, abs=0.001)
+    """The new piecewise curve has anchor points at 0.55/0.65/0.70/0.80/0.90/0.95.
+    Below 0.55 clamps to the floor; above 0.95 caps at 2.5x. The whole point:
+    let high-conviction theses take real positions, not tokens.
+    """
 
-    def test_baseline_confidence(self):
-        # 0.85 -> multiplier 1.0 -> 10% * 1.0 = 10%
-        assert confidence_scaled_risk(0.10, 0.85) == pytest.approx(0.10, abs=0.001)
+    def test_floor_confidence(self):
+        # 0.55 (floor) -> multiplier 0.40 -> 10% * 0.40 = 4%
+        assert confidence_scaled_risk(0.10, 0.55) == pytest.approx(0.04, abs=0.001)
 
-    def test_maximum_confidence(self):
-        # 1.00 -> multiplier 1.3 -> 10% * 1.3 = 13%
-        assert confidence_scaled_risk(0.10, 1.00) == pytest.approx(0.13, abs=0.001)
+    def test_legacy_baseline_confidence(self):
+        # 0.70 (old min) -> multiplier 1.00 -> 10% * 1.00 = 10% — preserves
+        # the old "baseline" risk so a 0.70 thesis is sized the same as before.
+        assert confidence_scaled_risk(0.10, 0.70) == pytest.approx(0.10, abs=0.001)
 
-    def test_mid_range(self):
-        # 0.775 -> multiplier = 0.7 + 0.075 * 2.0 = 0.85 -> 8.5%
-        assert confidence_scaled_risk(0.10, 0.775) == pytest.approx(0.085, abs=0.001)
+    def test_strong_confidence(self):
+        # 0.80 -> multiplier 1.50 -> 10% * 1.50 = 15%
+        assert confidence_scaled_risk(0.10, 0.80) == pytest.approx(0.15, abs=0.001)
+
+    def test_very_high_confidence(self):
+        # 0.90 -> multiplier 2.00 -> 10% * 2.00 = 20%
+        assert confidence_scaled_risk(0.10, 0.90) == pytest.approx(0.20, abs=0.001)
+
+    def test_max_confidence_caps(self):
+        # 0.95+ -> multiplier 2.50 -> 10% * 2.50 = 25%
+        assert confidence_scaled_risk(0.10, 0.95) == pytest.approx(0.25, abs=0.001)
+        assert confidence_scaled_risk(0.10, 1.00) == pytest.approx(0.25, abs=0.001)
+
+    def test_mid_range_interpolation(self):
+        # 0.85 sits between (0.80, 1.50) and (0.90, 2.00): mult = 1.75
+        assert confidence_scaled_risk(0.10, 0.85) == pytest.approx(0.175, abs=0.001)
 
     def test_clamped_below_min(self):
-        # Below min should clamp to min -> same as 0.70
-        assert confidence_scaled_risk(0.10, 0.50) == pytest.approx(0.07, abs=0.001)
+        # Below the floor clamps to the floor's value (0.40 multiplier)
+        assert confidence_scaled_risk(0.10, 0.50) == pytest.approx(0.04, abs=0.001)
 
     def test_clamped_above_max(self):
-        # Above 1.0 should clamp to 1.0 -> same as 1.00
-        assert confidence_scaled_risk(0.10, 1.50) == pytest.approx(0.13, abs=0.001)
+        # Above 1.0 clamps to the 0.95 cap (2.50 multiplier)
+        assert confidence_scaled_risk(0.10, 1.50) == pytest.approx(0.25, abs=0.001)
+
+    def test_monotonic_in_confidence(self):
+        """Sanity: the curve must be non-decreasing across the input range.
+        If this ever fails we've introduced a fold that would penalize higher
+        confidence — a strategic bug we must never ship.
+        """
+        prev = -1.0
+        for c in [0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]:
+            cur = confidence_scaled_risk(0.10, c)
+            assert cur >= prev, f"Non-monotonic at conf={c}: {prev} -> {cur}"
+            prev = cur
 
 
 class TestConfidenceAwareSizing:
     def test_no_confidence_unchanged(self):
-        """Without confidence param, sizing is identical to pre-existing behavior."""
+        """Without confidence param, sizing is identical to pre-existing behavior
+        (no confidence scaling, just the raw risk_per_trade_pct).
+        """
         shares = volatility_adjusted_shares(100_000, 50.0, 2.0, 0.10)
         assert shares == 200  # Same as TestPositionSizing.test_atr_based_sizing
 
     def test_high_confidence_more_shares(self):
-        """confidence=0.95 should produce more shares than baseline (no confidence)."""
+        """confidence=0.95 should produce dramatically more shares than baseline
+        — the whole strategic point. Old curve: only 1.3x. New curve: 2.5x.
+        """
         baseline = volatility_adjusted_shares(100_000, 50.0, 2.0, 0.10)
         high_conf = volatility_adjusted_shares(100_000, 50.0, 2.0, 0.10, confidence=0.95)
         assert high_conf > baseline
+        # And meaningfully so — at least 2x more
+        assert high_conf >= baseline * 2
 
     def test_low_confidence_fewer_shares(self):
-        """confidence=0.70 should produce fewer shares than baseline (no confidence)."""
+        """confidence=0.55 (the new floor) should produce a tiny probe — fewer
+        shares than baseline. This is the "we hear you but don't size up yet"
+        position.
+        """
         baseline = volatility_adjusted_shares(100_000, 50.0, 2.0, 0.10)
-        low_conf = volatility_adjusted_shares(100_000, 50.0, 2.0, 0.10, confidence=0.70)
+        low_conf = volatility_adjusted_shares(100_000, 50.0, 2.0, 0.10, confidence=0.55)
         assert low_conf < baseline
+        # Floor multiplier is 0.40 → ~40% of baseline
+        assert low_conf <= baseline * 0.5
 
     def test_confidence_flows_through_pre_trade_check(
         self, monkeypatch, tmp_state_dir, fake_config, bullish_thesis, sample_positions

@@ -19,6 +19,7 @@ log = logging.getLogger("titantrade.notifier")
 COLOR_SUCCESS = 0x2ECC71  # green
 COLOR_FAILURE = 0xE74C3C  # red
 COLOR_SUMMARY = 0x3498DB  # blue
+COLOR_STRATEGY = 0xF39C12  # orange — v2-strategy events (pyramid, tp1, core, override)
 
 
 def _get_webhook_url() -> str | None:
@@ -294,3 +295,105 @@ def send_daily_summary() -> str:
         fields=fields,
     )
     return "daily summary sent"
+
+
+# ---------------------------------------------------------------------------
+# Strategy v2 events — pyramid, TP1, core rebalance, cooldown override
+# ---------------------------------------------------------------------------
+
+def notify_pyramid_added(
+    ticker: str, add_shares: int, add_price: float,
+    existing_shares: int, gain_pct: float,
+) -> None:
+    """Pyramid fired: added to a winning position.
+
+    Important enough to see in real time — pyramids concentrate capital
+    in a working trade and are by design more aggressive than the initial
+    bracket. Operator should know each time.
+    """
+    send_discord(
+        title=f"Pyramid ▲ {ticker} — adding to winner",
+        description=(
+            f"Position is +{gain_pct:.1%} and the trailing stop is active. "
+            f"Adding {add_shares} shares (~50% of original notional) on top of "
+            f"the existing {existing_shares}. Stop remains the safety net; "
+            f"downside is bounded at breakeven or better."
+        ),
+        color=COLOR_STRATEGY,
+        fields=[
+            {"name": "Ticker", "value": ticker, "inline": True},
+            {"name": "Added", "value": f"{add_shares} @ ${add_price:.2f}", "inline": True},
+            {"name": "Gain", "value": f"+{gain_pct:.1%}", "inline": True},
+        ],
+    )
+
+
+def notify_tp1_partial(
+    ticker: str, sold_shares: int, sold_price: float,
+    remaining_shares: int, gain_pct: float,
+) -> None:
+    """TP1 partial sell fired: 1/3 of position taken at 50% of upside-to-TP,
+    stop raised to breakeven on the rest.
+    """
+    send_discord(
+        title=f"TP1 partial — {ticker} de-risked",
+        description=(
+            f"Sold {sold_shares} shares of {ticker} at ${sold_price:.2f} "
+            f"(+{gain_pct:.1%} on those shares). Remaining {remaining_shares} "
+            f"shares are now protected by a breakeven stop — runs free toward "
+            f"the full take-profit target."
+        ),
+        color=COLOR_STRATEGY,
+        fields=[
+            {"name": "Ticker", "value": ticker, "inline": True},
+            {"name": "Sold", "value": f"{sold_shares} @ ${sold_price:.2f}", "inline": True},
+            {"name": "Remaining", "value": str(remaining_shares), "inline": True},
+        ],
+    )
+
+
+def notify_core_rebalance(
+    action: str, ticker: str, shares: int, price: float,
+    target_value: float, current_value: float, stress: bool,
+) -> None:
+    """Core SPY/SH allocation was rebalanced. Includes the stress-swap case
+    when we flip between SPY and SH (inverse).
+    """
+    direction = "▲ BUY" if action == "BUY" else "▼ SELL"
+    send_discord(
+        title=f"Core rebalance — {direction} {ticker}",
+        description=(
+            f"Maintaining always-on baseline allocation. "
+            f"{'Market stress detected — holding hedge ETF.' if stress else 'Normal regime — holding index ETF.'}"
+        ),
+        color=COLOR_STRATEGY,
+        fields=[
+            {"name": "Action", "value": f"{direction} {shares} {ticker}", "inline": True},
+            {"name": "Price", "value": f"${price:.2f}", "inline": True},
+            {"name": "Target / current", "value": f"${target_value:,.0f} / ${current_value:,.0f}", "inline": False},
+        ],
+    )
+
+
+def notify_cooldown_override(
+    ticker: str, hours_since_abort: float, current_price: float, stop_price: float,
+) -> None:
+    """The 72h ABORT cooldown was overridden because sentry CONTINUE + price
+    recovered above stop. Rare event, important to log on Discord so the
+    operator knows we're re-entering a recently-stopped ticker.
+    """
+    send_discord(
+        title=f"Cooldown override — re-entering {ticker}",
+        description=(
+            f"This ticker ABORTed {hours_since_abort:.0f}h ago, but: sentry "
+            f"says CONTINUE, thesis still BULLISH, and price has recovered "
+            f"to ${current_price:.2f} (>1% above stop ${stop_price:.2f}). "
+            f"Re-entering — the original whipsaw lockout has been bypassed."
+        ),
+        color=COLOR_STRATEGY,
+        fields=[
+            {"name": "Ticker", "value": ticker, "inline": True},
+            {"name": "Hours since ABORT", "value": f"{hours_since_abort:.0f}h", "inline": True},
+            {"name": "Recovery", "value": f"${current_price:.2f} vs stop ${stop_price:.2f}", "inline": True},
+        ],
+    )

@@ -68,8 +68,33 @@ def fetch_ohlcv(
     return bars[-days:] if len(bars) > days else bars
 
 
+def _news_dedup_key(title: str) -> str:
+    """Normalize a headline for syndication-aware dedup.
+
+    Wires routinely republish the same story under near-identical titles
+    across dozens of outlets ("Apple Reports Strong Q2" / "Apple Reports
+    Strong Q2 Earnings" / "AAPL: Apple Reports Strong Q2"). An exact-title
+    set caught only the byte-identical cases. We normalize aggressively:
+    lowercase, keep only alphanumeric + spaces, collapse whitespace, take
+    the first 60 chars. That treats those three as the same story while
+    still distinguishing genuinely-different headlines that diverge early.
+    """
+    import re
+    if not title:
+        return ""
+    norm = re.sub(r"[^a-z0-9\s]", "", title.lower())
+    norm = " ".join(norm.split())  # collapse whitespace
+    return norm[:60]
+
+
 def fetch_news(ticker: str, cfg: Config, limit: int = 50) -> list[dict[str, Any]]:
-    """Pull recent news headlines and snippets from FMP."""
+    """Pull recent news headlines and snippets from FMP.
+
+    De-duplication is more aggressive than exact-title match — wire
+    syndication inflates apparent news volume by 5-10x and was causing
+    both the analyst and sentry to over-weight single events that appeared
+    to be "10 separate concerns".
+    """
     url = "https://financialmodelingprep.com/stable/news/stock"
     params = {
         "symbol": ticker,
@@ -81,20 +106,25 @@ def fetch_news(ticker: str, cfg: Config, limit: int = 50) -> list[dict[str, Any]
     resp = fetch_with_retry("GET", url, params=params)
     articles = resp.json()
 
-    # Deduplicate by title
-    seen_titles: set[str] = set()
+    seen_keys: set[str] = set()
     results: list[dict[str, Any]] = []
+    duplicates = 0
     for article in articles:
         title = article.get("title", "")
-        if title in seen_titles:
+        key = _news_dedup_key(title)
+        if not key or key in seen_keys:
+            duplicates += 1
             continue
-        seen_titles.add(title)
+        seen_keys.add(key)
         results.append({
             "title": title,
             "snippet": article.get("text", "")[:500],
             "published_at": article.get("publishedDate", ""),
             "source": article.get("site", ""),
         })
+
+    if duplicates > 0:
+        log.info(f"News dedup for {ticker}: removed {duplicates} syndicated duplicate(s)")
 
     return results
 

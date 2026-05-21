@@ -41,6 +41,7 @@ def run_backtest(
     end_date: str | None = None,
     thesis_interval_days: int = 7,
     use_confidence_scaling: bool = False,
+    strategy_v2: bool = False,
 ) -> dict[str, Any]:
     """Run a full backtest simulation.
 
@@ -88,6 +89,7 @@ def run_backtest(
     sim = PortfolioSimulator(
         initial_capital=initial_capital,
         use_confidence_scaling=use_confidence_scaling,
+        strategy_v2=strategy_v2,
     )
 
     # Track thesis generation schedule
@@ -97,6 +99,12 @@ def run_backtest(
 
     for i, date in enumerate(sorted_dates):
         day_bars = bars_by_date.get(date, {})
+        # v2 needs the core ticker's bar in day_bars so manage_core_position
+        # can rebalance. SPY was popped from all_data above (used separately
+        # for thesis market context) — splice it back in.
+        if strategy_v2 and date in spy_by_date:
+            day_bars = dict(day_bars)
+            day_bars[sim.core_ticker] = spy_by_date[date]
 
         # Generate new thesis every N days
         new_theses = None
@@ -124,7 +132,12 @@ def run_backtest(
                 active_theses[ticker] = thesis
             last_thesis_date = date
 
-        sim.process_day(date, day_bars, new_theses, SECTOR_MAP)
+        history_by_ticker: dict[str, list[dict]] | None = None
+        if strategy_v2:
+            history_by_ticker = {}
+            for t, ts_bars in all_data.items():
+                history_by_ticker[t] = [b for b in ts_bars if b["date"] <= date]
+        sim.process_day(date, day_bars, new_theses, SECTOR_MAP, history_by_ticker)
 
     # Compute metrics
     metrics = compute_metrics(sim.equity_curve, sim.trade_log, spy_bars, initial_capital)

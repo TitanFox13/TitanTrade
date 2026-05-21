@@ -153,6 +153,23 @@ def place_market_sell(ticker: str, qty: float, cfg: Config) -> dict[str, Any]:
     return resp.json()
 
 
+def place_market_buy(ticker: str, qty: float, cfg: Config) -> dict[str, Any]:
+    """Place an immediate market buy order. Used by the core-allocation
+    rebalancer where we want guaranteed fill, not a limit price.
+    """
+    url = f"{cfg.alpaca.base_url}/v2/orders"
+    body = {
+        "symbol": ticker,
+        "qty": str(qty),
+        "side": "buy",
+        "type": "market",
+        "time_in_force": "day",
+    }
+    log.info(f"Market BUY: {qty} {ticker}")
+    resp = fetch_with_retry("POST", url, headers=_headers(cfg), json_body=body)
+    return resp.json()
+
+
 def place_limit_buy(
     ticker: str,
     qty: float,
@@ -437,9 +454,114 @@ def calculate_shares(
 REENTRY_COOLDOWN_HOURS = 72
 
 # Maximum expired-bracket attempts we'll keep resubmitting before giving up.
-# Production showed CRWD running this loop daily for 10+ days, chasing the
-# price up without ever filling. Cap is reset at the next weekly thesis.
-MAX_BRACKET_ATTEMPTS = 5
+# Raised from 5 to 20 — the prior cap was a workaround for the bigger issue
+# that we were using day-TIF dip-buy limits in a rising market. Now that
+# high-conviction theses fill via near-market entries (see ``_choose_entry``),
+# only genuinely low-conviction ideas hit this cap, and a few extra days
+# of retry isn't expensive.
+MAX_BRACKET_ATTEMPTS = 20
+
+
+def compute_trend_regime(
+    ticker: str,
+    data_bundle: dict[str, Any],
+    current_price: float | None = None,
+) -> str:
+    """Classify a ticker's trend regime from its technical indicators.
+
+    Returns one of:
+      "strong_up" — golden cross, price >2% above SMA-50, above SMA-20,
+                    RSI not in exhausted territory (<75). Use a near-market
+                    entry: don't wait for a dip that isn't coming.
+      "up"        — above SMA-50 but lacks the strong-up criteria.
+                    Use a small-buffer-above-current breakout entry.
+      "range"     — neither clearly trending up nor down (also where we
+                    downgrade overbought-but-trending names — buying RSI 80
+                    extensions is how you become exit liquidity).
+      "down"      — below SMA-50 with negative momentum. Skip entry.
+
+    The whole point: in a rising market we kept missing entries because the
+    limit-below-current strategy never filled. Trend-aware sizing lets us
+    match the entry method to the actual price action.
+    """
+    stock = data_bundle.get("stocks", {}).get(ticker, {})
+    tech = stock.get("technical_indicators", {}) or {}
+    pvs = tech.get("price_vs_sma", {}) or {}
+
+    above_50 = pvs.get("above_sma_50")
+    above_200 = pvs.get("above_sma_200")
+    golden = pvs.get("golden_cross")
+    pct_from_50 = pvs.get("pct_from_sma_50")
+    sma_20 = pvs.get("sma_20")
+    rsi = tech.get("rsi_14")
+
+    # Overbought guard: even in a screaming uptrend, RSI > 75 means we'd be
+    # buying the spike. Downgrade to "range" — let the thesis-target limit
+    # wait for the inevitable pullback. (RSI < 25 in downtrend = catching
+    # falling knives; also already caught by the "down" branch.)
+    is_overbought = rsi is not None and rsi > 75
+
+    # Strong uptrend: above SMA-50 with cushion, golden cross, price > SMA-20,
+    # NOT overbought. When all four line up the path of least resistance is up.
+    if (
+        above_50 is True
+        and golden is True
+        and pct_from_50 is not None and pct_from_50 > 2.0
+        and current_price is not None and sma_20 is not None
+        and current_price > sma_20
+        and not is_overbought
+    ):
+        return "strong_up"
+
+    # Plain uptrend: above SMA-50 (and not overbought).
+    if above_50 is True and (pct_from_50 or 0) > 0 and not is_overbought:
+        return "up"
+
+    # Downtrend: below SMA-50 AND below SMA-200 AND noticeably negative
+    # from the SMA-50. Skip entry — we're not bottom-fishing.
+    if (
+        above_50 is False
+        and above_200 is False
+        and (pct_from_50 or 0) < -2.0
+    ):
+        return "down"
+
+    return "range"
+
+
+def _choose_entry_price(
+    thesis: dict[str, Any],
+    current_price: float | None,
+    regime: str,
+    confidence: float,
+) -> float:
+    """Pick the entry limit price based on trend regime + confidence.
+
+    The original strategy always used the thesis ``target_entry_price``, which
+    is a dip-buy level set at thesis-generation time (often hours or days ago).
+    In a rising market this guarantees the order expires unfilled.
+
+    New rules (when current price is available):
+      - confidence >= 0.80 OR strong_up regime → buy near-market
+        (current_price * 1.003 — cross the spread for a near-immediate fill)
+      - up regime → buy at current * 1.001 (small breakout buffer)
+      - range / no current price → use thesis target (dip-buy)
+      - down regime is filtered out by caller before this is reached
+
+    Always returns a price >= the thesis stop_loss_price; callers should
+    still validate bracket math (stop < entry < tp).
+    """
+    target = float(thesis.get("target_entry_price") or 0)
+    if not current_price:
+        return target
+
+    if confidence >= 0.80 or regime == "strong_up":
+        return round(current_price * 1.003, 2)
+    if regime == "up":
+        return round(current_price * 1.001, 2)
+    # Range: keep the thesis target, but cap at current_price so we don't
+    # accidentally pay above market if the thesis is stale-low.
+    return round(min(target, current_price), 2) if target else round(current_price, 2)
 
 
 def _load_abort_cooldowns() -> dict[str, dict[str, Any]]:
@@ -493,6 +615,49 @@ def _is_in_cooldown(ticker: str) -> tuple[bool, float]:
         _save_abort_cooldowns(data)
         return False, hours
     return True, hours
+
+
+# Minimum hours after ABORT before sentry-confirmed override can re-enter.
+# A 24h buffer prevents same-day whipsaw round-trips (the GS case) while
+# still allowing the recovery leg after a one-day shakeout.
+COOLDOWN_OVERRIDE_MIN_HOURS = 24
+
+
+def cooldown_override_allowed(
+    ticker: str,
+    thesis: dict[str, Any],
+    sentry: dict[str, Any] | None,
+    hours_since_abort: float,
+    current_price: float | None,
+) -> bool:
+    """Decide whether the daily sentry confirms it's safe to re-enter a
+    ticker that's still in the 72h ABORT cooldown.
+
+    Override only when ALL of these hold:
+      - At least ``COOLDOWN_OVERRIDE_MIN_HOURS`` (24) have passed
+      - The current weekly thesis is still BULLISH and selected for trading
+      - The latest sentry signal is CONTINUE (not ABORT)
+      - The current price has recovered above the thesis stop (price action
+        confirms the thesis hasn't been invalidated)
+
+    Without this override, a single intraday whipsaw locks the ticker out
+    for 72 hours — the GS case from production. With it, we re-enter on
+    confirmed recovery; without all four conditions we still respect the
+    full cooldown.
+    """
+    if hours_since_abort < COOLDOWN_OVERRIDE_MIN_HOURS:
+        return False
+    if thesis.get("thesis") != "BULLISH" or not thesis.get("selected_for_trading"):
+        return False
+    if not sentry or sentry.get("signal") != "CONTINUE":
+        return False
+    stop = thesis.get("stop_loss_price")
+    if not stop or not current_price:
+        return False
+    # Price must be at least 1% above the stop to qualify as "recovered"
+    if current_price < stop * 1.01:
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -692,20 +857,83 @@ def _handle_bullish_entry(
     entry_price = thesis.get("target_entry_price")
     stop_price = thesis.get("stop_loss_price")
     take_profit_price = thesis.get("take_profit_price")
+    confidence = float(thesis.get("confidence") or 0)
 
     if not entry_price or not stop_price:
         log.warning(f"No entry/stop price for {ticker} - skipping")
         return None
 
-    # Re-entry cooldown: don't buy back into a ticker we just ABORTed.
+    # Fetch current price up front — used by both the cooldown override and
+    # the trend-aware entry adjustment below.
+    try:
+        from titantrade.daily_sentry import _fetch_current_price
+        current_price = _fetch_current_price(ticker, cfg)
+    except Exception:
+        current_price = None
+
+    # Re-entry cooldown: don't buy back into a ticker we just ABORTed,
+    # UNLESS the daily sentry confirms recovery (see cooldown_override_allowed).
+    # The override prevents the production failure mode where a single-day
+    # whipsaw ABORT locks us out of the recovery leg for 72 hours.
     in_cooldown, hours_since = _is_in_cooldown(ticker)
     if in_cooldown:
-        remaining = REENTRY_COOLDOWN_HOURS - hours_since
+        if cooldown_override_allowed(
+            ticker, thesis, sentry, hours_since, current_price,
+        ):
+            log.warning(
+                f"Cooldown OVERRIDE for {ticker}: {hours_since:.1f}h since "
+                f"ABORT, sentry CONTINUE + price recovered above stop. "
+                f"Allowing re-entry."
+            )
+            try:
+                from titantrade.notifier import notify_cooldown_override
+                notify_cooldown_override(
+                    ticker=ticker, hours_since_abort=hours_since,
+                    current_price=current_price or 0,
+                    stop_price=float(thesis.get("stop_loss_price") or 0),
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning(f"Cooldown override notify failed for {ticker}: {exc}")
+        else:
+            remaining = REENTRY_COOLDOWN_HOURS - hours_since
+            log.info(
+                f"Skipping {ticker} bullish entry: in re-entry cooldown "
+                f"({hours_since:.1f}h since ABORT, {remaining:.1f}h remaining)"
+            )
+            return None
+
+    # ---- Trend-aware entry adjustment ----
+    # The old behavior used the thesis ``target_entry_price`` always — a
+    # dip-buy below current that in a rising market simply never filled.
+    # Now we look at the actual price + trend regime and adapt:
+    #   - strong uptrend OR high conviction → near-market entry
+    #   - uptrend → small breakout buffer above current
+    #   - range → keep thesis target (capped at current to avoid paying up)
+    #   - downtrend → skip (we're not bottom-fishing on day-TIF brackets)
+    regime = compute_trend_regime(ticker, data_bundle, current_price)
+    if regime == "down":
         log.info(
-            f"Skipping {ticker} bullish entry: in re-entry cooldown "
-            f"({hours_since:.1f}h since ABORT, {remaining:.1f}h remaining)"
+            f"Skipping {ticker} bullish entry: downtrend regime "
+            f"(price below SMA-50 and SMA-200). Wait for trend reversal."
         )
         return None
+
+    new_entry = _choose_entry_price(thesis, current_price, regime, confidence)
+    if new_entry and new_entry != entry_price:
+        cur_str = f"${current_price:.2f}" if current_price else "n/a"
+        log.info(
+            f"Entry adapted for {ticker} ({regime}, conf {confidence:.2f}): "
+            f"${entry_price:.2f} → ${new_entry:.2f} (current {cur_str})"
+        )
+        entry_price = new_entry
+        # Recompute stop/TP to preserve risk:reward when entry moves up.
+        original_target = thesis.get("target_entry_price")
+        if original_target and original_target > 0 and entry_price > original_target:
+            # Walk stop+TP up by the same delta we walked entry.
+            delta = entry_price - original_target
+            stop_price = round(stop_price + delta, 2)
+            if take_profit_price:
+                take_profit_price = round(take_profit_price + delta, 2)
 
     # Bracket sanity check — Alpaca rejects with HTTP 422 if the math is off.
     # This happens when ADJUST has raised the stop above the original entry
@@ -739,6 +967,11 @@ def _handle_bullish_entry(
     # ---- Run ALL risk gates via the risk manager ----
     economic_calendar = data_bundle.get("economic_calendar", [])
     correlation_matrix = data_bundle.get("correlation_matrix", {})
+    vix_level = (
+        data_bundle.get("market_context", {})
+        .get("vix", {})
+        .get("level")
+    )
 
     check = pre_trade_check(
         ticker=ticker,
@@ -751,6 +984,7 @@ def _handle_bullish_entry(
         cfg=cfg,
         economic_calendar=economic_calendar,
         correlation_matrix=correlation_matrix,
+        vix=vix_level,
     )
 
     if not check["allowed"]:
@@ -941,26 +1175,50 @@ def resubmit_expired_brackets(
     }
     held_tickers = {p["symbol"] for p in positions}
 
+    # Load latest sentry signals so we can evaluate cooldown-override per
+    # ticker without plumbing the full sentry_doc through this function.
+    sentry_doc = _load("sentry_signals.json")
+    sentry_by_ticker = {
+        s["ticker"]: s for s in sentry_doc.get("signals", [])
+    }
+
     account = get_account(cfg)
     portfolio_value = float(account.get("portfolio_value", 0))
     cash_balance = float(account.get("cash", 0))
 
     resubmitted: list[dict[str, Any]] = []
 
+    # Expired-bracket lists are dominated by duplicate parent orders for the
+    # same ticker (multiple expired BUY brackets per day, accumulated over
+    # weeks). Logging a skip line per expired order produced 50–60 nearly
+    # identical lines per run that drowned the actually-actionable lines.
+    # We dedupe by (ticker, reason) and emit at most one line per pair,
+    # appending a "(xN)" count when the same skip fired multiple times.
+    _skip_seen: set[tuple[str, str]] = set()
+    _skip_counts: dict[tuple[str, str], int] = {}
+
+    def _log_skip(ticker: str, reason: str) -> None:
+        key = (ticker, reason)
+        if key in _skip_seen:
+            _skip_counts[key] = _skip_counts.get(key, 1) + 1
+            return
+        _skip_seen.add(key)
+        log.info(f"Skipping expired bracket for {ticker}: {reason}")
+
     for order in expired:
         ticker = order.get("symbol", "")
         thesis = theses_by_ticker.get(ticker)
 
         if not thesis:
-            log.info(f"Skipping expired bracket for {ticker}: no active thesis")
+            _log_skip(ticker, "no active thesis")
             continue
 
         if thesis.get("thesis") != "BULLISH" or not thesis.get("selected_for_trading"):
-            log.info(f"Skipping expired bracket for {ticker}: thesis no longer bullish/selected")
+            _log_skip(ticker, "thesis no longer bullish/selected")
             continue
 
         if ticker in held_tickers:
-            log.info(f"Skipping expired bracket for {ticker}: already holding position")
+            _log_skip(ticker, "already holding position")
             continue
 
         # Price-chase guard: if we've already failed to fill N times, the
@@ -968,27 +1226,53 @@ def resubmit_expired_brackets(
         # thesis refresh, when Claude will reassess.
         attempts = attempts_per_ticker.get(ticker, 0)
         if attempts > MAX_BRACKET_ATTEMPTS:
-            log.info(
-                f"Skipping expired bracket for {ticker}: {attempts} prior "
-                f"expirations (cap {MAX_BRACKET_ATTEMPTS}) — price chase, "
-                f"waiting for next weekly thesis"
+            _log_skip(
+                ticker,
+                f"{attempts} prior expirations (cap {MAX_BRACKET_ATTEMPTS}) — "
+                f"price chase, waiting for next weekly thesis",
             )
             continue
 
-        # Re-entry cooldown: if we ABORTed this ticker recently, don't resubmit
+        # Re-entry cooldown: if we ABORTed this ticker recently, don't
+        # resubmit — unless the daily sentry confirms the price has recovered
+        # above the original stop and the thesis is still BULLISH.
         in_cooldown, hours_since = _is_in_cooldown(ticker)
         if in_cooldown:
-            log.info(
-                f"Skipping expired bracket for {ticker}: in re-entry cooldown "
-                f"({hours_since:.1f}h since ABORT, "
-                f"{REENTRY_COOLDOWN_HOURS - hours_since:.1f}h remaining)"
-            )
-            continue
+            sentry_signal = sentry_by_ticker.get(ticker)
+            try:
+                from titantrade.daily_sentry import _fetch_current_price
+                current_price = _fetch_current_price(ticker, cfg)
+            except Exception:
+                current_price = None
+            if cooldown_override_allowed(
+                ticker, thesis, sentry_signal, hours_since, current_price,
+            ):
+                log.warning(
+                    f"Cooldown OVERRIDE for {ticker} (resubmit): "
+                    f"{hours_since:.1f}h since ABORT, sentry CONTINUE + "
+                    f"price recovered. Allowing resubmit."
+                )
+                try:
+                    from titantrade.notifier import notify_cooldown_override
+                    notify_cooldown_override(
+                        ticker=ticker, hours_since_abort=hours_since,
+                        current_price=current_price or 0,
+                        stop_price=float(thesis.get("stop_loss_price") or 0),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(f"Cooldown override notify failed for {ticker}: {exc}")
+            else:
+                _log_skip(
+                    ticker,
+                    f"in re-entry cooldown ({hours_since:.1f}h since ABORT, "
+                    f"{REENTRY_COOLDOWN_HOURS - hours_since:.1f}h remaining)",
+                )
+                continue
 
         # Check for existing open orders
         open_orders = get_open_orders(ticker, cfg)
         if open_orders:
-            log.info(f"Skipping expired bracket for {ticker}: order already pending")
+            _log_skip(ticker, "order already pending")
             continue
 
         original_entry = thesis.get("target_entry_price")
@@ -997,30 +1281,37 @@ def resubmit_expired_brackets(
         if not original_entry or not original_stop:
             continue
 
-        # Dynamic entry price adjustment: use current price context
-        # to adjust entry/stop/TP instead of blindly reusing Sunday's levels
+        # Resubmit entry uses the SAME trend-aware logic as first-entry —
+        # previously this used the dip-buy ``_adjust_entry_price`` which
+        # capped at current * 0.995 and silently skipped on uptrends past
+        # +5%. That's why FCX was running 5+ "outside adjustment range"
+        # skips per cycle in production while the price was making new highs.
         from titantrade.daily_sentry import _fetch_current_price
         current_price = _fetch_current_price(ticker, cfg)
 
         entry_price = original_entry
         stop_price = original_stop
         take_profit_price = thesis.get("take_profit_price")
+        confidence = float(thesis.get("confidence") or 0)
 
-        if current_price:
-            adjusted = _adjust_entry_price(thesis, current_price)
-            if adjusted is None:
-                log.info(
-                    f"Skipping resubmission for {ticker}: "
-                    f"price ${current_price:.2f} outside adjustment range"
-                )
-                continue
-            entry_price, stop_price, take_profit_price = adjusted
-            if entry_price != original_entry:
-                log.info(
-                    f"Adjusted entry for {ticker}: "
-                    f"${original_entry:.2f} -> ${entry_price:.2f} "
-                    f"(current: ${current_price:.2f})"
-                )
+        regime = compute_trend_regime(ticker, data_bundle, current_price)
+        if regime == "down":
+            _log_skip(ticker, "downtrend regime — wait for trend reversal")
+            continue
+
+        new_entry = _choose_entry_price(thesis, current_price, regime, confidence)
+        if new_entry and new_entry != entry_price:
+            log.info(
+                f"Resubmit entry adapted for {ticker} ({regime}, conf {confidence:.2f}): "
+                f"${entry_price:.2f} → ${new_entry:.2f}"
+            )
+            # Walk stop/TP up by the same delta to preserve risk:reward.
+            if new_entry > original_entry:
+                delta = new_entry - original_entry
+                stop_price = round(stop_price + delta, 2)
+                if take_profit_price:
+                    take_profit_price = round(take_profit_price + delta, 2)
+            entry_price = new_entry
 
         # Sanity-check the bracket math before sending it to the broker.
         # Alpaca requires:
@@ -1055,6 +1346,9 @@ def resubmit_expired_brackets(
             data_bundle.get("stocks", {}).get(ticker, {})
             .get("earnings", {}).get("is_blocked", False)
         )
+        vix_level = (
+            data_bundle.get("market_context", {}).get("vix", {}).get("level")
+        )
 
         check = pre_trade_check(
             ticker=ticker,
@@ -1065,6 +1359,7 @@ def resubmit_expired_brackets(
             stock_atr=stock_atr,
             earnings_blocked=earnings_blocked,
             cfg=cfg,
+            vix=vix_level,
         )
 
         if not check["allowed"]:
@@ -1110,6 +1405,14 @@ def resubmit_expired_brackets(
     if resubmitted:
         log.info(f"Resubmitted {len(resubmitted)} expired brackets")
 
+    # Summarise the deduplicated skips so the count isn't lost.
+    total_extra = sum(c - 1 for c in _skip_counts.values() if c > 1)
+    if total_extra > 0:
+        log.info(
+            f"Expired-bracket skip dedup: collapsed {total_extra} duplicate "
+            f"skip line(s) across {len(_skip_counts)} (ticker, reason) pair(s)"
+        )
+
     return resubmitted
 
 
@@ -1130,18 +1433,151 @@ def _save_trailing_state(state: dict[str, Any]) -> None:
         json.dump(state, f, indent=2)
 
 
+def maybe_pyramid_position(
+    ticker: str,
+    thesis: dict[str, Any],
+    position: dict[str, Any],
+    sentry: dict[str, Any] | None,
+    portfolio_value: float,
+    cfg: Config,
+) -> dict[str, Any] | None:
+    """Add to a winning position when it's working. The "ride the wave"
+    operator — current behavior caps every entry at one bracket plus trail.
+    Now: at +``pyramid_trigger_pct`` (5%) gain with the trailing stop active
+    (so downside is bounded), we add ``pyramid_size_fraction`` (50%) of the
+    original notional as a market-buy, capped at ``pyramid_max_total_pct``
+    of portfolio.
+
+    Pyramids fire exactly once per position (tracked via
+    ``trailing_state[ticker]["pyramid_added"]``). Safety preconditions:
+      - pyramid_enabled in config (default True)
+      - trailing stop active = gain >= trailing_trigger_pct (so any reversal
+        hits the broker stop at breakeven or better)
+      - sentry signal is CONTINUE (no news/price red flag)
+      - thesis is still BULLISH + selected_for_trading
+      - the add wouldn't push total position above the per-ticker cap
+
+    Returns a trade record if a pyramid add fired; else None.
+    """
+    if not getattr(cfg.trading, "pyramid_enabled", False):
+        return None
+
+    state = _load_trailing_state()
+    ts = state.get(ticker, {}) or {}
+    if ts.get("pyramid_added"):
+        return None
+
+    if thesis.get("thesis") != "BULLISH" or not thesis.get("selected_for_trading"):
+        return None
+    if sentry and sentry.get("signal") == "ABORT":
+        return None
+
+    current_price = float(position.get("current_price", 0))
+    entry_price = float(position.get("avg_entry_price", 0))
+    qty = float(position.get("qty", 0))
+    if not current_price or not entry_price or qty <= 0:
+        return None
+    if _is_fractional(qty):
+        return None  # Pyramid only on whole-share positions
+
+    gain_pct = (current_price - entry_price) / entry_price
+    if gain_pct < cfg.trading.pyramid_trigger_pct:
+        return None
+
+    # Require the trailing stop to be active (gain >= trailing_trigger_pct)
+    # so downside on the combined position is bounded at breakeven or better.
+    if gain_pct < cfg.trading.trailing_trigger_pct:
+        return None
+
+    # Compute add size: original notional × pyramid_size_fraction, but cap
+    # at the per-ticker concentration limit.
+    current_notional = qty * current_price
+    add_notional = (qty * entry_price) * cfg.trading.pyramid_size_fraction
+    cap_notional = portfolio_value * cfg.trading.pyramid_max_total_pct
+    max_add_notional = max(0.0, cap_notional - current_notional)
+    add_notional = min(add_notional, max_add_notional)
+    if add_notional <= 0:
+        log.info(
+            f"Pyramid skipped for {ticker}: position already at "
+            f"{current_notional / portfolio_value:.0%} of portfolio "
+            f"(cap {cfg.trading.pyramid_max_total_pct:.0%})"
+        )
+        # Still mark pyramid_added so we don't keep computing this every cycle
+        ts["pyramid_added"] = True
+        ts["pyramid_skipped_reason"] = "at concentration cap"
+        state[ticker] = ts
+        _save_trailing_state(state)
+        return None
+
+    add_qty = int(add_notional / current_price)
+    if add_qty <= 0:
+        ts["pyramid_added"] = True
+        state[ticker] = ts
+        _save_trailing_state(state)
+        return None
+
+    log.info(
+        f"PYRAMID for {ticker}: position +{gain_pct:.1%}, adding {add_qty} "
+        f"shares @ ~${current_price:.2f} on top of {int(qty)} existing"
+    )
+    try:
+        place_market_buy(ticker, add_qty, cfg)
+    except Exception as exc:
+        log.error(f"Pyramid market-buy failed for {ticker}: {exc}")
+        return None
+
+    try:
+        from titantrade.notifier import notify_pyramid_added
+        notify_pyramid_added(
+            ticker=ticker, add_shares=int(add_qty), add_price=current_price,
+            existing_shares=int(qty), gain_pct=gain_pct,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"Pyramid Discord notify failed for {ticker}: {exc}")
+
+    trade = _trade_record(
+        ticker=ticker,
+        action="BUY",
+        shares=float(add_qty),
+        price=current_price,
+        trigger="pyramid",
+        reasoning=(
+            f"Pyramiding into winner: position +{gain_pct:.1%}, trailing stop "
+            f"active, sentry CONTINUE, thesis still BULLISH"
+        ),
+    )
+    _append_trade(trade)
+
+    ts["pyramid_added"] = True
+    ts["pyramid_price"] = current_price
+    ts["pyramid_timestamp"] = datetime.now(timezone.utc).isoformat()
+    state[ticker] = ts
+    _save_trailing_state(state)
+    return trade
+
+
 def manage_trailing_stop(
     ticker: str,
     thesis: dict[str, Any],
     position: dict[str, Any],
     open_orders: list[dict[str, Any]],
     cfg: Config,
+    stock_atr: float | None = None,
 ) -> None:
-    """Ratchet the stop-loss upward as the position gains value.
+    """Ratchet the stop-loss upward as the position gains value, and take
+    partial profit in tranches.
 
-    Uses the Alpaca position's avg_entry_price and current_price to determine
-    the gain. Once gain exceeds trailing_trigger_pct, replaces the stop-loss
-    with one that trails trailing_distance_pct below the high-water mark.
+    Trailing distance is **ATR-based** (default 2.5 ATRs below HWM). The old
+    fixed 3% trail was too tight: a position 8% in the money with normal
+    intraday volatility would crystallize on noise. ATR scales with the
+    ticker's actual movement.
+
+    Tranched TP: when gain reaches ``tp1_trigger_fraction`` of the upside
+    distance from entry to the thesis take-profit, sell ``tp1_fraction`` of
+    the position at market and raise the stop to breakeven on the remainder.
+    De-risks while keeping the runway open for outsized winners.
+
+    Falls back to ``trailing_distance_pct`` (5%) when ATR is unavailable.
     """
     current_price = float(position.get("current_price", 0))
     entry_price = float(position.get("avg_entry_price", 0))
@@ -1152,7 +1588,6 @@ def manage_trailing_stop(
 
     gain_pct = (current_price - entry_price) / entry_price
     trigger = cfg.trading.trailing_trigger_pct
-    distance = cfg.trading.trailing_distance_pct
 
     trailing_state = _load_trailing_state()
     ts = trailing_state.get(ticker, {})
@@ -1162,6 +1597,95 @@ def manage_trailing_stop(
     ts["high_water_mark"] = hwm
     ts["entry_price"] = entry_price
 
+    # ---- Tranched profit-taking (TP1) ----
+    # When gain reaches tp1_trigger_fraction of upside-to-TP, sell tp1_fraction
+    # of the position and reset the stop to breakeven. Only fires once per
+    # position (tracked via ts["tp1_taken"]).
+    tp_price = thesis.get("take_profit_price")
+    tp1_taken = bool(ts.get("tp1_taken", False))
+    if (
+        tp_price
+        and not tp1_taken
+        and qty >= 3
+        and not _is_fractional(qty)
+        and tp_price > entry_price
+    ):
+        tp1_trigger_price = entry_price + (tp_price - entry_price) * cfg.trading.tp1_trigger_fraction
+        if current_price >= tp1_trigger_price:
+            # Round-to-nearest (not floor) so a configured 0.333 actually sells
+            # 1/3, not 1/3 - 1 (e.g. 30 * 0.333 = 9.99, int() = 9 instead of 10).
+            tp1_qty = max(1, round(qty * cfg.trading.tp1_fraction))
+            log.info(
+                f"TP1 TRIGGERED for {ticker} @ ${current_price:.2f} "
+                f"(trigger ${tp1_trigger_price:.2f}, entry ${entry_price:.2f}, "
+                f"tp ${tp_price:.2f}) — selling {tp1_qty}/{int(qty)} shares, "
+                f"raising stop to breakeven on remainder"
+            )
+            try:
+                # Cancel OCO legs so the partial sell doesn't conflict with
+                # the bracket's qty accounting. We'll re-place a fresh stop
+                # below for the remaining qty.
+                cancel_all_orders_for_ticker(ticker, cfg)
+                # Brief wait for cancels to settle (market is open per the
+                # gate above; cancels should be near-instant).
+                time.sleep(2)
+                place_market_sell(ticker, tp1_qty, cfg)
+                # Re-place stop at breakeven (entry + small buffer) on the
+                # remaining qty. Poll once for the position to update.
+                time.sleep(2)
+                new_pos = get_position(ticker, cfg)
+                if new_pos:
+                    remaining_qty = float(new_pos.get("qty", 0))
+                    if remaining_qty > 0:
+                        breakeven_stop = round(entry_price * 1.005, 2)
+                        place_native_stop_loss(
+                            ticker, remaining_qty, breakeven_stop, cfg,
+                        )
+                        log.info(
+                            f"TP1 complete for {ticker}: sold {tp1_qty}, "
+                            f"remaining {remaining_qty} protected by "
+                            f"breakeven stop @ ${breakeven_stop:.2f}"
+                        )
+                        try:
+                            from titantrade.notifier import notify_tp1_partial
+                            tp1_gain = (current_price - entry_price) / entry_price
+                            notify_tp1_partial(
+                                ticker=ticker, sold_shares=int(tp1_qty),
+                                sold_price=current_price,
+                                remaining_shares=int(remaining_qty),
+                                gain_pct=tp1_gain,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            log.warning(f"TP1 Discord notify failed for {ticker}: {exc}")
+                ts["tp1_taken"] = True
+                ts["tp1_price"] = current_price
+                ts["tp1_timestamp"] = datetime.now(timezone.utc).isoformat()
+                trailing_state[ticker] = ts
+                _save_trailing_state(trailing_state)
+                # Refresh position for the trailing-stop logic below
+                position = new_pos or position
+                qty = float(position.get("qty", 0)) if position else 0
+                # Refresh open_orders since we cancelled+replaced
+                open_orders = get_open_orders(ticker, cfg)
+                if qty <= 0:
+                    return
+            except Exception as exc:
+                log.error(f"TP1 partial sell failed for {ticker}: {exc}")
+                # Restoration attempt: re-place the original stop so the
+                # position isn't left bare. The original stop price comes
+                # from the thesis.
+                try:
+                    if thesis.get("stop_loss_price"):
+                        place_native_stop_loss(
+                            ticker, qty, thesis["stop_loss_price"], cfg,
+                        )
+                        log.warning(
+                            f"{ticker}: restored thesis stop after TP1 failure"
+                        )
+                except Exception as rexc:
+                    log.error(f"CRITICAL: {ticker} stop restore failed: {rexc}")
+                return
+
     if gain_pct < trigger:
         # Not yet triggered — save state but don't trail
         ts["trailing_active"] = False
@@ -1169,8 +1693,19 @@ def manage_trailing_stop(
         _save_trailing_state(trailing_state)
         return
 
-    # Calculate new trailing stop
-    new_stop = round(hwm * (1 - distance), 2)
+    # ---- ATR-based trailing distance ----
+    # 2.5x ATR below HWM by default. Floor at 1% of HWM as a cheap sanity
+    # bound for very-low-ATR names. Fall back to the fixed-pct trail when
+    # ATR isn't available in the data bundle.
+    if stock_atr and stock_atr > 0:
+        atr_trail = stock_atr * cfg.trading.trailing_atr_multiplier
+        # Sanity floor: never trail tighter than 1% of HWM (prevents absurdly
+        # tight stops on ultra-low-ATR names).
+        min_trail = hwm * 0.01
+        trail_distance = max(atr_trail, min_trail)
+        new_stop = round(hwm - trail_distance, 2)
+    else:
+        new_stop = round(hwm * (1 - cfg.trading.trailing_distance_pct), 2)
 
     # Never trail below the original thesis stop (would widen risk)
     original_stop = thesis.get("stop_loss_price", 0)
@@ -1248,15 +1783,212 @@ def _cleanup_trailing_state(held_tickers: set[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Core allocation: always-deployed SPY base + stress-state hedge swap
+# ---------------------------------------------------------------------------
+
+def manage_core_position(cfg: Config) -> dict[str, Any] | None:
+    """Maintain the always-on core market exposure (and swap to hedge on stress).
+
+    Strategic role: solve the cash-drag problem. Even when the AI thesis
+    selects nothing or the gates block everything, the portfolio still
+    participates in the market via this baseline allocation. Production
+    pre-redesign showed 83% cash for 5+ days in a rising market; this
+    is the structural fix.
+
+    Behavior:
+      - Reads ``market_health`` from sentry_signals.json.
+      - If market_stress is False (default): hold ``core_ticker`` (SPY).
+      - If market_stress is True: hold ``core_hedge_ticker`` (SH, inverse SPY).
+      - Target value = portfolio_value * core_allocation_pct (default 30%).
+      - Rebalances when current allocation drifts outside the band
+        (default ±5%pts).
+      - Uses market orders (we want guaranteed fill on the baseline).
+      - Skipped off-hours (market orders need market open anyway).
+
+    Returns a trade record dict if a buy/sell fired, else None.
+    """
+    if not is_market_open(cfg):
+        log.info("Core position management deferred — market closed")
+        return None
+
+    sentry_doc = _load("sentry_signals.json")
+    market_health = sentry_doc.get("market_health", {}) or {}
+    stress = bool(market_health.get("market_stress", False))
+
+    desired_ticker = cfg.trading.core_hedge_ticker if stress else cfg.trading.core_ticker
+    other_ticker = cfg.trading.core_ticker if stress else cfg.trading.core_hedge_ticker
+
+    account = get_account(cfg)
+    portfolio_value = float(account.get("portfolio_value", 0))
+    cash_balance = float(account.get("cash", 0))
+    if portfolio_value <= 0:
+        return None
+
+    target_value = portfolio_value * cfg.trading.core_allocation_pct
+    band_value = portfolio_value * cfg.trading.core_rebalance_band_pct
+
+    positions = get_positions(cfg)
+    positions_by_ticker = {p.get("symbol", ""): p for p in positions}
+
+    # Step 1: if we're holding the "wrong" core ticker (e.g. SPY when stress
+    # has flipped on), close it. The proceeds become cash that step 2 then
+    # deploys into the right core ticker.
+    closed_trade: dict[str, Any] | None = None
+    other_pos = positions_by_ticker.get(other_ticker)
+    if other_pos:
+        other_qty = float(other_pos.get("qty", 0))
+        if other_qty > 0:
+            log.info(
+                f"Core swap: closing {other_ticker} ({other_qty} shares) — "
+                f"stress={stress}, switching to {desired_ticker}"
+            )
+            try:
+                cancel_all_orders_for_ticker(other_ticker, cfg)
+                close_position_at_market(other_ticker, cfg)
+                closed_trade = _trade_record(
+                    ticker=other_ticker,
+                    action="SELL",
+                    shares=other_qty,
+                    price=float(other_pos.get("current_price", 0)),
+                    trigger="core_swap",
+                    reasoning=f"Stress={stress}, swapping core to {desired_ticker}",
+                )
+                _append_trade(closed_trade)
+            except Exception as exc:
+                log.error(f"Core swap close failed for {other_ticker}: {exc}")
+                return None
+
+    # Step 2: rebalance the desired core ticker toward target.
+    desired_pos = positions_by_ticker.get(desired_ticker)
+    current_value = float(desired_pos.get("market_value", 0)) if desired_pos else 0.0
+    current_price = float(desired_pos.get("current_price", 0)) if desired_pos else 0.0
+
+    if not current_price:
+        # Position not yet held — fetch a price quote
+        try:
+            from titantrade.daily_sentry import _fetch_current_price
+            current_price = _fetch_current_price(desired_ticker, cfg) or 0.0
+        except Exception:
+            current_price = 0.0
+
+    if current_price <= 0:
+        log.warning(f"Core: no price for {desired_ticker}, deferring rebalance")
+        return closed_trade
+
+    drift = current_value - target_value
+    if abs(drift) < band_value:
+        # Within the rebalance band — leave alone
+        return closed_trade
+
+    if drift < 0:
+        # Under-allocated: buy more
+        buy_value = -drift  # positive number
+        # Don't blow through the cash floor — leave a small buffer
+        from titantrade.risk_manager import MIN_CASH_RESERVE_PCT
+        cash_floor = portfolio_value * (MIN_CASH_RESERVE_PCT / 100.0)
+        available = max(0.0, cash_balance - cash_floor)
+        buy_value = min(buy_value, available)
+        if buy_value <= 0:
+            log.info(
+                f"Core: would buy {desired_ticker} but cash ${cash_balance:.0f} "
+                f"at or below ${cash_floor:.0f} floor"
+            )
+            return closed_trade
+        buy_qty = int(buy_value / current_price)
+        if buy_qty <= 0:
+            return closed_trade
+        try:
+            place_market_buy(desired_ticker, buy_qty, cfg)
+            trade = _trade_record(
+                ticker=desired_ticker,
+                action="BUY",
+                shares=buy_qty,
+                price=current_price,
+                trigger="core_rebalance",
+                reasoning=(
+                    f"Core rebalance: target {cfg.trading.core_allocation_pct:.0%} "
+                    f"= ${target_value:.0f}, current ${current_value:.0f} "
+                    f"(stress={stress})"
+                ),
+            )
+            _append_trade(trade)
+            log.info(
+                f"Core BUY {desired_ticker}: {buy_qty} shares @ ${current_price:.2f} "
+                f"(target ${target_value:.0f}, was ${current_value:.0f})"
+            )
+            try:
+                from titantrade.notifier import notify_core_rebalance
+                notify_core_rebalance(
+                    action="BUY", ticker=desired_ticker, shares=buy_qty,
+                    price=current_price, target_value=target_value,
+                    current_value=current_value, stress=stress,
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning(f"Core BUY Discord notify failed: {exc}")
+            return trade
+        except Exception as exc:
+            log.error(f"Core BUY failed for {desired_ticker}: {exc}")
+            return closed_trade
+    else:
+        # Over-allocated: trim
+        sell_value = drift
+        sell_qty = int(sell_value / current_price)
+        if sell_qty <= 0:
+            return closed_trade
+        try:
+            place_market_sell(desired_ticker, sell_qty, cfg)
+            trade = _trade_record(
+                ticker=desired_ticker,
+                action="SELL",
+                shares=sell_qty,
+                price=current_price,
+                trigger="core_rebalance",
+                reasoning=(
+                    f"Core trim: target ${target_value:.0f}, "
+                    f"current ${current_value:.0f} (stress={stress})"
+                ),
+            )
+            _append_trade(trade)
+            log.info(
+                f"Core SELL {desired_ticker}: {sell_qty} shares @ ${current_price:.2f}"
+            )
+            return trade
+        except Exception as exc:
+            log.error(f"Core SELL failed for {desired_ticker}: {exc}")
+            return closed_trade
+
+
+def _is_core_ticker(ticker: str, cfg: Config) -> bool:
+    """True if this ticker is managed by the core-allocation manager rather
+    than the AI thesis path. Used to skip trailing/sentry/orphan-close logic
+    on the baseline allocation.
+    """
+    return ticker in (cfg.trading.core_ticker, cfg.trading.core_hedge_ticker)
+
+
+# ---------------------------------------------------------------------------
 # Thesis expiry: close orphaned positions
 # ---------------------------------------------------------------------------
 
 def close_orphaned_positions(cfg: Config) -> list[dict[str, Any]]:
-    """Close positions that have no active thesis or that Claude flagged for CLOSE.
+    """Close positions that have no active thesis. Weekly-review CLOSE actions
+    on **losing** positions are downgraded to TIGHTEN_STOP — the analyst can
+    only tighten the leash on a losing position, never preempt it. Stops are
+    sacred; if the analyst wants out badly enough, they can tighten the stop
+    so close to market that the next normal day will trigger it.
 
-    Cases:
-    1. A held ticker has no entry in weekly_thesis.json (orphaned)
-    2. Claude's weekly review set review_action = "CLOSE" (explicit exit)
+    Cases handled here:
+    1. A held ticker has no entry in weekly_thesis.json (orphaned) → CLOSE
+    2. review_action == "CLOSE" AND position is **in profit** → CLOSE
+       (taking profit on a flipped thesis is legitimate)
+    3. review_action == "CLOSE" AND position is **at a loss** → SKIP
+       (would crystallize a loss the programmatic stop hasn't hit yet —
+        production showed HCA closed at -1.6% via this path while its stop
+        was still 4% away; let the stop do its job)
+
+    Independently of this function, the ADJUST path (executor section 4a)
+    will handle the stop-tightening when review_action=CLOSE on a loser —
+    it sees the (tighter) stop_loss_price the analyst sets and replaces.
     """
     thesis_doc = _load("weekly_thesis.json")
     positions = get_positions(cfg)
@@ -1277,15 +2009,37 @@ def close_orphaned_positions(cfg: Config) -> list[dict[str, Any]]:
         if qty <= 0:
             continue
 
+        # Core-allocation tickers (SPY, hedge ETFs) are managed by
+        # manage_core_position, not by the AI thesis path. They have no
+        # weekly thesis entry — but they're not "orphans" we should sell.
+        if _is_core_ticker(ticker, cfg):
+            continue
+
         thesis = theses_by_ticker.get(ticker)
 
         # Case 1: Position is covered by an active thesis that isn't CLOSE
         if thesis and thesis.get("review_action") != "CLOSE":
             continue
 
-        # Case 2: CLOSE action or no thesis at all
+        # Case 2: Explicit CLOSE action — gate on profit/loss
         if thesis and thesis.get("review_action") == "CLOSE":
-            reason = f"Weekly review: CLOSE — {thesis.get('reasoning', 'Thesis invalidated')}"
+            unrealized_pl_pct = float(pos.get("unrealized_plpc", 0)) * 100
+            if unrealized_pl_pct < 0:
+                # CLOSE on a loser is downgraded to "let the stop work".
+                # The analyst's stop_loss_price (typically tightened in the
+                # CLOSE thesis) will be applied by the ADJUST path. No
+                # discretionary market-sell.
+                log.info(
+                    f"Weekly CLOSE for {ticker} downgraded — position at "
+                    f"{unrealized_pl_pct:+.1f}% (loss). Stops are sacred; "
+                    f"deferring to programmatic stop. Original reasoning: "
+                    f"{thesis.get('reasoning', '')[:200]}"
+                )
+                continue
+            reason = (
+                f"Weekly review: CLOSE — {thesis.get('reasoning', 'Thesis invalidated')} "
+                f"(taking profit at {unrealized_pl_pct:+.1f}%)"
+            )
         else:
             reason = f"No thesis entry for {ticker} in current weekly analysis"
 
@@ -1465,14 +2219,16 @@ def _adjust_entry_price(
 def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     """Core execution: read thesis + sentry, run risk gates, place/cancel broker orders.
 
-    Risk gates applied to every entry:
-      1. Confidence threshold (>= 0.70)
+    Risk gates applied to every entry (constants live in risk_manager.py):
+      1. Confidence threshold (>= 0.55 floor, scales sizing up to 0.95)
       2. Earnings blackout window (5 days)
       3. Drawdown circuit breaker (8% from peak)
-      4. Cash reserve enforcement (20% minimum)
-      5. Volatility-adjusted position sizing (ATR-based)
-      6. Sector exposure limit (40% max per sector)
+      4. Cash reserve enforcement (5% minimum — cash is transit, not strategy)
+      5. Volatility-adjusted position sizing (ATR-based, conviction-scaled
+         up to MAX_POSITION_PCT = 25%)
+      6. Sector exposure limit (50% max per sector)
       7. Pass 2 selection filter (only trade analyst-selected stocks)
+      8. Trend regime (downtrend tickers skip entry — see compute_trend_regime)
     """
     log.info("Starting trade execution")
 
@@ -1541,6 +2297,28 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
         except (ValueError, TypeError):
             pass
 
+    # Warn if the data bundle (OHLCV / indicators / news baked into the
+    # data_bundle.json) is stale. Several downstream decisions — trend
+    # regime detection, ATR sizing, news-driven analyst review — operate
+    # on this snapshot. >24h old means real numbers may have moved.
+    bundle_generated = data_bundle.get("generated_at", "")
+    if bundle_generated:
+        try:
+            bundle_ts = datetime.fromisoformat(bundle_generated)
+            age_hours = (datetime.now(timezone.utc) - bundle_ts).total_seconds() / 3600
+            if age_hours > 48:
+                log.error(
+                    f"Data bundle is {age_hours:.0f}h old — trend regime/ATR "
+                    f"computations may be materially stale. Run "
+                    f"`titantrade fetch` to refresh."
+                )
+            elif age_hours > 24:
+                log.warning(
+                    f"Data bundle is {age_hours:.0f}h old — consider refreshing"
+                )
+        except (ValueError, TypeError):
+            pass
+
     account = get_account(cfg)
     portfolio_value = float(account.get("portfolio_value", 0))
     cash_balance = float(account.get("cash", 0))
@@ -1554,6 +2332,19 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     positions = get_positions(cfg)
 
     executed: list[dict[str, Any]] = orphan_trades + gap_trades
+
+    # Always-deployed core allocation: maintain SPY (or hedge under stress) at
+    # the configured target. Solves the "83% cash in a rising market" problem
+    # — the portfolio participates in the market regardless of whether the AI
+    # has actionable picks.
+    if market_open:
+        try:
+            core_trade = manage_core_position(cfg)
+            if core_trade:
+                executed.append(core_trade)
+                positions = get_positions(cfg)
+        except Exception as exc:
+            log.error(f"Core position management failed: {exc}")
 
     # Resubmit any expired bracket orders before processing new entries
     try:
@@ -1682,15 +2473,26 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                             continue
 
                     # Off-hours guard: cancels can sit in pending_cancel for
-                    # hours when the market is closed. The OLD stop is still
-                    # active on the book protecting the position, so deferring
-                    # the price update until the next market-hours run is safe.
-                    if not market_open and existing_stop is not None:
-                        log.info(
-                            f"ADJUST {ticker}: market closed — deferring stop "
-                            f"update from ${existing_price:.2f} to "
-                            f"${new_stop:.2f} until next market-open run"
-                        )
+                    # hours when the market is closed. The OLD stop (if any)
+                    # is still active on the book protecting the position,
+                    # so deferring the price update until the next market-
+                    # hours run is safe. We defer unconditionally — even when
+                    # no existing stop is found — because the fresh-place path
+                    # also cancels any TP leg holding the qty, which would
+                    # hang off-hours and 403.
+                    if not market_open:
+                        if existing_stop is not None:
+                            log.info(
+                                f"ADJUST {ticker}: market closed — deferring stop "
+                                f"update from ${existing_price:.2f} to "
+                                f"${new_stop:.2f} until next market-open run"
+                            )
+                        else:
+                            log.info(
+                                f"ADJUST {ticker}: market closed and no existing "
+                                f"stop — deferring fresh stop placement to "
+                                f"${new_stop:.2f} until next market-open run"
+                            )
                         continue
 
                     # Remember the old stop price so we can restore it if the
@@ -1731,26 +2533,134 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                 continue
 
             open_orders = get_open_orders(ticker, cfg)
-            has_stop = any(
-                o.get("type") in ("stop", "stop_limit") and o.get("side") == "sell"
-                for o in open_orders
-            )
+            sell_orders = [o for o in open_orders if o.get("side") == "sell"]
+            stop_orders = [
+                o for o in sell_orders
+                if o.get("type") in ("stop", "stop_limit")
+            ]
+            tp_limit_orders = [
+                o for o in sell_orders if o.get("type") == "limit"
+            ]
+            has_stop = bool(stop_orders)
 
             qty = float(position.get("qty", 0))
+            qty_available = float(position.get("qty_available", qty))
             fractional = _is_fractional(qty)
 
             if not has_stop and not fractional:
                 stop_price = thesis.get("stop_loss_price")
                 if stop_price:
-                    log.warning(
-                        f"No stop order found for {ticker} - placing native stop now"
-                    )
-                    try:
-                        place_native_stop_loss(ticker, qty, stop_price, cfg)
-                        # Refresh orders for trailing stop check
-                        open_orders = get_open_orders(ticker, cfg)
-                    except Exception as exc:
-                        log.error(f"Failed to place stop for {ticker}: {exc}")
+                    # The "place a fresh stop" path is fragile in three states
+                    # we keep hitting in production:
+                    #   1. Market closed: a cancel-and-replace sits in
+                    #      pending_cancel for hours and 403s with code 40310000.
+                    #   2. A TP limit leg from the original bracket is still
+                    #      active and holding all the qty (qty_available=0)
+                    #      because the stop_loss leg auto-expired end-of-day
+                    #      (bracket legs inherit TIF=day) but the TP didn't.
+                    #   3. Both 1 and 2.
+                    # The original code blindly tried to POST a stop and ate
+                    # a 403 every time. Now we detect the state and either
+                    # recover (market-open path) or defer cleanly (off-hours).
+                    held_for_orders = float(position.get("held_for_orders", 0))
+
+                    if qty_available <= 0 and tp_limit_orders:
+                        # TP leg is holding all the qty. We need to cancel it
+                        # before we can place a stop. Off-hours cancels won't
+                        # settle, so defer. During market hours, cancel the TP
+                        # and place a fresh stop (we lose the OCO link to TP,
+                        # but the stop is the safety-critical leg — the next
+                        # weekly ADJUST will reinstate a TP if appropriate).
+                        if not market_open:
+                            log.warning(
+                                f"{ticker} has no stop; qty held by TP leg(s) — "
+                                f"deferring stop placement to next market-open run"
+                            )
+                        else:
+                            log.warning(
+                                f"{ticker} has no stop; TP leg(s) hold all qty — "
+                                f"cancelling TP and placing fresh stop"
+                            )
+                            # Capture TP details up front so we can restore on
+                            # half-failure (cancel succeeded, place failed).
+                            # Without this, a failed place would leave the
+                            # position with NO exit orders at all (no stop,
+                            # no TP). The cost of restore is small — we just
+                            # re-post the same limit sell.
+                            tp_snapshots = [
+                                {
+                                    "qty": float(tp.get("qty", 0)),
+                                    "limit_price": float(tp.get("limit_price", 0)),
+                                }
+                                for tp in tp_limit_orders
+                                if float(tp.get("limit_price", 0)) > 0
+                                and float(tp.get("qty", 0)) > 0
+                            ]
+                            cancel_ok = True
+                            for tp in tp_limit_orders:
+                                try:
+                                    cancel_order(tp["id"], cfg)
+                                except Exception as cexc:
+                                    log.error(
+                                        f"Failed to cancel TP {tp.get('id')} for "
+                                        f"{ticker}: {cexc}"
+                                    )
+                                    cancel_ok = False
+                            if cancel_ok:
+                                try:
+                                    place_native_stop_loss(ticker, qty, stop_price, cfg)
+                                    open_orders = get_open_orders(ticker, cfg)
+                                except Exception as exc:
+                                    log.error(
+                                        f"Failed to place stop for {ticker} after "
+                                        f"TP cancel: {exc}"
+                                    )
+                                    for snap in tp_snapshots:
+                                        try:
+                                            place_limit_sell(
+                                                ticker,
+                                                snap["qty"],
+                                                snap["limit_price"],
+                                                cfg,
+                                                time_in_force="gtc",
+                                            )
+                                            log.warning(
+                                                f"{ticker}: restored TP "
+                                                f"{snap['qty']}@${snap['limit_price']:.2f} "
+                                                f"after failed stop placement"
+                                            )
+                                        except Exception as rexc:
+                                            log.error(
+                                                f"CRITICAL: {ticker} has neither "
+                                                f"stop nor TP — TP restore at "
+                                                f"${snap['limit_price']:.2f} also "
+                                                f"failed: {rexc}"
+                                            )
+                    elif qty_available <= 0:
+                        # Qty is held but not by a recognizable TP leg —
+                        # something unexpected. Don't blindly POST; surface
+                        # the discrepancy.
+                        log.error(
+                            f"{ticker} has no stop and qty_available=0 "
+                            f"(held_for_orders={held_for_orders}) but no TP "
+                            f"leg detected — manual review needed"
+                        )
+                    elif not market_open:
+                        log.warning(
+                            f"{ticker} has no stop, market closed — deferring "
+                            f"stop placement to next market-open run"
+                        )
+                    else:
+                        log.warning(
+                            f"No stop order found for {ticker} - placing native stop now"
+                        )
+                        try:
+                            place_native_stop_loss(
+                                ticker, qty_available, stop_price, cfg,
+                            )
+                            open_orders = get_open_orders(ticker, cfg)
+                        except Exception as exc:
+                            log.error(f"Failed to place stop for {ticker}: {exc}")
             elif not has_stop and fractional:
                 log.info(f"Fractional position {ticker} ({qty} shares) — no broker stop (sentry protects)")
 
@@ -1760,10 +2670,34 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
             # and leave the position with no stop. The existing stop is on
             # the book and still protective; trailing can wait one cycle.
             if not fractional and market_open:
+                # Pass ATR so the trailing distance can be volatility-adjusted
+                # (2.5x ATR default) instead of a fixed % that crystallizes
+                # winners on noise.
+                ticker_atr = (
+                    data_bundle.get("stocks", {}).get(ticker, {}).get("atr_14")
+                )
                 try:
-                    manage_trailing_stop(ticker, thesis, position, open_orders, cfg)
+                    manage_trailing_stop(
+                        ticker, thesis, position, open_orders, cfg,
+                        stock_atr=ticker_atr,
+                    )
                 except Exception as exc:
                     log.error(f"Trailing stop management failed for {ticker}: {exc}")
+
+                # Pyramid into winners: adds to a position that's working
+                # (+5% with trailing stop active). Runs after trailing-stop
+                # management so we have the latest position state.
+                try:
+                    refreshed_position = get_position(ticker, cfg)
+                    if refreshed_position:
+                        pyramid_trade = maybe_pyramid_position(
+                            ticker, thesis, refreshed_position, sentry,
+                            portfolio_value, cfg,
+                        )
+                        if pyramid_trade:
+                            executed.append(pyramid_trade)
+                except Exception as exc:
+                    log.error(f"Pyramid check failed for {ticker}: {exc}")
 
     # Clean up trailing state for tickers no longer held
     try:

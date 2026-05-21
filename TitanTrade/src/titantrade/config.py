@@ -60,12 +60,44 @@ class TradingSettings:
     trading_mode: str = "paper"
     stop_loss_pct: float = 0.05
     trailing_trigger_pct: float = 0.05   # Activate trailing stop after 5% gain
-    trailing_distance_pct: float = 0.03  # Trail 3% below high-water mark
+    # ATR-based trailing distance. Set to 2.5 ATRs below HWM by default — gives
+    # volatility room so we don't crystallize winners on noise. A 3% fixed
+    # trail (the prior default) stopped a 25% URI winner on first dip in
+    # production. Falls back to ``trailing_distance_pct`` only when ATR
+    # isn't available.
+    trailing_atr_multiplier: float = 2.5
+    trailing_distance_pct: float = 0.05  # Fallback %-trail if ATR missing (was 3%, now 5%)
+    # Take-profit tranche: at this fraction of the entry→TP distance, sell
+    # ``tp1_fraction`` of the position and raise the stop to breakeven.
+    # The remainder runs with the trailing stop. De-risks while keeping
+    # the runway open for outsized winners.
+    tp1_trigger_fraction: float = 0.5  # Trigger at 50% of upside-to-TP
+    tp1_fraction: float = 0.333         # Sell 1/3 at TP1
+
+    # Pyramid: add to a winning position when it's working. Aligned with the
+    # "ride the wave" mandate — current behavior caps at one entry per
+    # ticker and just trails. Adds happen exactly once per position, at
+    # ``pyramid_trigger_pct`` gain, sizing ``pyramid_size_fraction`` of the
+    # original position's notional (so the average entry walks up but the
+    # position doesn't blow past concentration caps).
+    pyramid_enabled: bool = True
+    pyramid_trigger_pct: float = 0.05      # Add when gain >= 5%
+    pyramid_size_fraction: float = 0.5     # Add 50% of original notional
+    pyramid_max_total_pct: float = 0.30    # Hard cap on total position size
     hedge_instruments: list[str] = field(default_factory=lambda: [
         "SH",    # Inverse S&P 500 (1x)
         "PSQ",   # Inverse Nasdaq 100 (1x)
         "SDS",   # Inverse S&P 500 (2x) — more aggressive
     ])
+    # --- Core/hedge allocation (Phase 3: "always deployed") ---
+    # The core position is a baseline market exposure that's always on,
+    # independent of the AI thesis. AI-picks are *overlays* on top of this.
+    # When sentry detects market stress, the core ticker is swapped for a
+    # hedge ticker (inverse ETF). Cash is transit, never a destination.
+    core_ticker: str = "SPY"        # Default-on market exposure
+    core_hedge_ticker: str = "SH"   # Inverse swap when market stress fires
+    core_allocation_pct: float = 0.30  # Target 30% of portfolio in the core
+    core_rebalance_band_pct: float = 0.05  # Rebalance if drift exceeds 5%pts
 
 
 @dataclass(frozen=True)

@@ -114,18 +114,45 @@ class TestTrailingStopRatchet:
     @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new"})
     @patch("titantrade.executor.cancel_order")
     @patch("titantrade.executor.get_position", return_value={"symbol": "AAPL", "qty": "50"})
-    def test_trails_3pct_below_hwm(
+    def test_trails_pct_fallback_when_no_atr(
         self, mock_get_pos, mock_cancel, mock_place,
         position_up_6pct, thesis_with_stop, existing_stop_order,
         fake_config, tmp_state_dir,
     ):
+        """When ATR is not supplied (or zero), the trailing distance falls
+        back to the % trail. Default is now 5% (was 3%) to give noise room.
+        """
         manage_trailing_stop(
             "AAPL", thesis_with_stop, position_up_6pct,
             [existing_stop_order], fake_config,
+            stock_atr=None,  # explicit fallback path
         )
         new_stop = mock_place.call_args[0][2]
         hwm = 196.63
-        expected = round(hwm * (1 - 0.03), 2)
+        expected = round(hwm * (1 - fake_config.trading.trailing_distance_pct), 2)
+        assert new_stop == expected
+
+    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new"})
+    @patch("titantrade.executor.cancel_order")
+    @patch("titantrade.executor.get_position", return_value={"symbol": "AAPL", "qty": "50"})
+    def test_trails_atr_distance_when_atr_supplied(
+        self, mock_get_pos, mock_cancel, mock_place,
+        position_up_6pct, thesis_with_stop, existing_stop_order,
+        fake_config, tmp_state_dir,
+    ):
+        """ATR-based trailing: stop sits 2.5x ATR below HWM (configurable
+        via trailing_atr_multiplier). With ATR=$4 and HWM=$196.63, stop
+        should be at HWM - 10 = $186.63 (rounded).
+        """
+        atr = 4.0
+        manage_trailing_stop(
+            "AAPL", thesis_with_stop, position_up_6pct,
+            [existing_stop_order], fake_config,
+            stock_atr=atr,
+        )
+        new_stop = mock_place.call_args[0][2]
+        hwm = 196.63
+        expected = round(hwm - atr * fake_config.trading.trailing_atr_multiplier, 2)
         assert new_stop == expected
 
     @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new"})
@@ -221,3 +248,106 @@ class TestTrailingStopState:
         _cleanup_trailing_state({"AAPL"})
         state = _load_trailing_state()
         assert "AAPL" in state
+
+
+class TestTrancheTpFirstTake:
+    """When gain reaches tp1_trigger_fraction of upside-to-TP, sell a partial
+    chunk (tp1_fraction) and raise the stop to breakeven. This is what stops
+    25% winners from giving back gains on noise.
+    """
+
+    @pytest.fixture
+    def position_at_tp1(self):
+        # entry $100, tp $120 → upside $20. tp1_trigger 50% → trigger at $110.
+        return {
+            "symbol": "FOO",
+            "qty": "30",  # 30 shares so tp1_fraction=1/3 takes a clean 10
+            "avg_entry_price": "100.00",
+            "current_price": "111.00",  # past TP1 trigger
+        }
+
+    @pytest.fixture
+    def thesis_with_tp(self):
+        return {
+            "ticker": "FOO",
+            "thesis": "BULLISH",
+            "stop_loss_price": 92.0,
+            "target_entry_price": 100.0,
+            "take_profit_price": 120.0,
+        }
+
+    @patch("titantrade.executor.time.sleep", return_value=None)
+    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new-stop"})
+    @patch("titantrade.executor.place_market_sell", return_value={"id": "tp1-sell"})
+    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=1)
+    @patch("titantrade.executor.get_position")
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    def test_partial_sell_and_breakeven_stop(
+        self,
+        mock_get_open, mock_get_pos, mock_cancel_all, mock_market_sell,
+        mock_place_stop, mock_sleep,
+        position_at_tp1, thesis_with_tp, fake_config, tmp_state_dir,
+    ):
+        # After partial sell, position has 20 shares remaining
+        mock_get_pos.return_value = {"symbol": "FOO", "qty": "20", "avg_entry_price": "100.00"}
+
+        manage_trailing_stop(
+            "FOO", thesis_with_tp, position_at_tp1, [], fake_config,
+            stock_atr=2.0,
+        )
+
+        # Partial sell happened
+        mock_market_sell.assert_called_once()
+        sell_args = mock_market_sell.call_args.args
+        assert sell_args[0] == "FOO"
+        assert sell_args[1] == 10  # 30 * 0.333 = 10
+        # Stop was re-placed at breakeven on the remaining 20 shares
+        stop_calls = mock_place_stop.call_args_list
+        assert len(stop_calls) >= 1
+        breakeven_call = stop_calls[0]
+        assert breakeven_call.args[0] == "FOO"
+        assert breakeven_call.args[1] == 20.0
+        # entry * 1.005 = 100.50
+        assert breakeven_call.args[2] == pytest.approx(100.50, abs=0.01)
+        # State tracks the TP1 take so it doesn't fire twice
+        state = _load_trailing_state()
+        assert state["FOO"]["tp1_taken"] is True
+
+    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new-stop"})
+    @patch("titantrade.executor.place_market_sell")
+    @patch("titantrade.executor.cancel_all_orders_for_ticker")
+    @patch("titantrade.executor.get_position")
+    def test_tp1_does_not_fire_below_trigger(
+        self,
+        mock_get_pos, mock_cancel_all, mock_market_sell, mock_place_stop,
+        thesis_with_tp, fake_config, tmp_state_dir,
+    ):
+        # At entry $100, tp $120 → TP1 trigger = $110. At $108 we should NOT fire.
+        pos = {
+            "symbol": "FOO", "qty": "30",
+            "avg_entry_price": "100.00", "current_price": "108.00",
+        }
+        manage_trailing_stop("FOO", thesis_with_tp, pos, [], fake_config, stock_atr=2.0)
+        mock_market_sell.assert_not_called()
+
+    @patch("titantrade.executor.time.sleep", return_value=None)
+    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new-stop"})
+    @patch("titantrade.executor.place_market_sell", return_value={"id": "tp1-sell"})
+    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=1)
+    @patch("titantrade.executor.get_position")
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    def test_tp1_only_fires_once(
+        self,
+        mock_get_open, mock_get_pos, mock_cancel_all, mock_market_sell,
+        mock_place_stop, mock_sleep,
+        position_at_tp1, thesis_with_tp, fake_config, tmp_state_dir,
+    ):
+        # Seed state as if TP1 already fired
+        _save_trailing_state({"FOO": {"tp1_taken": True, "high_water_mark": 111.0}})
+
+        manage_trailing_stop(
+            "FOO", thesis_with_tp, position_at_tp1, [], fake_config,
+            stock_atr=2.0,
+        )
+        # No second partial sell
+        mock_market_sell.assert_not_called()

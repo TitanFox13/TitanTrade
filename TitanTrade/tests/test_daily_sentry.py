@@ -73,11 +73,75 @@ class TestCheckStock:
             result = check_stock("AAPL", thesis, [], price_check_ok, market_check_ok, fake_config)
         assert result["signal"] == "CONTINUE"
 
-    def test_abort_signal(self, fake_config, thesis, price_check_ok, market_check_ok):
+    def test_abort_signal_with_price_confirmation(
+        self, fake_config, thesis, price_check_adverse, market_check_ok,
+    ):
+        """Gemini ABORT + adverse price move = confirmed ABORT.
+
+        Note: news-only ABORT (Gemini ABORT + price is fine) is now
+        downgraded to CONTINUE — see test_news_only_abort_downgraded.
+        ABORT requires BOTH news AND price confirmation.
+        """
         with patch("titantrade.daily_sentry._call_gemini", return_value=ABORT_JSON):
-            result = check_stock("AAPL", thesis, [], price_check_ok, market_check_ok, fake_config)
+            result = check_stock("AAPL", thesis, [], price_check_adverse, market_check_ok, fake_config)
         assert result["signal"] == "ABORT"
         assert len(result["conflicting_headlines"]) > 0
+
+    def test_news_only_abort_downgraded(
+        self, fake_config, thesis, price_check_ok, market_check_ok,
+    ):
+        """Strategic policy: Gemini alone cannot kill a position. If price is
+        holding (or rising!) and only the news interpretation says ABORT, we
+        downgrade to CONTINUE. The programmatic stop is the only kill switch
+        for losers. Prevents the GS-style whipsaw round-trip we saw in prod.
+        """
+        with patch("titantrade.daily_sentry._call_gemini", return_value=ABORT_JSON):
+            result = check_stock("AAPL", thesis, [], price_check_ok, market_check_ok, fake_config)
+        assert result["signal"] == "CONTINUE"
+        assert "downgraded" in result["reasoning"].lower()
+
+    def test_position_context_included_in_prompt(
+        self, fake_config, thesis, price_check_ok, market_check_ok,
+    ):
+        """The sentry prompt now includes position context (entry, current,
+        unrealized P&L) so Gemini's call is grounded in trade economics."""
+        captured_prompt = {}
+
+        def _capture(prompt, cfg, cost_label=""):
+            captured_prompt["text"] = prompt
+            return CONTINUE_JSON
+
+        position = {
+            "qty": "50", "avg_entry_price": "185.50",
+            "current_price": "190.00", "unrealized_plpc": "0.024",
+            "market_value": "9500",
+        }
+        with patch("titantrade.daily_sentry._call_gemini", side_effect=_capture):
+            check_stock(
+                "AAPL", thesis, [], price_check_ok, market_check_ok, fake_config,
+                position=position,
+            )
+
+        assert "POSITION CONTEXT" in captured_prompt["text"]
+        assert "$185.50" in captured_prompt["text"]
+        assert "+2.4%" in captured_prompt["text"]
+        # Prompt also instructs Gemini about the breach-only policy
+        assert "DOWNGRADED" in captured_prompt["text"]
+
+    def test_no_position_renders_no_position_string(
+        self, fake_config, thesis, price_check_ok, market_check_ok,
+    ):
+        """When called with position=None, prompt should say so explicitly
+        (not blank or 'unknown')."""
+        captured = {}
+        def _capture(prompt, cfg, cost_label=""):
+            captured["text"] = prompt
+            return CONTINUE_JSON
+
+        with patch("titantrade.daily_sentry._call_gemini", side_effect=_capture):
+            check_stock("AAPL", thesis, [], price_check_ok, market_check_ok, fake_config)
+
+        assert "no open position" in captured["text"]
 
     def test_moderate_price_move_without_news_does_NOT_abort(
         self, fake_config, thesis, price_check_adverse, market_check_ok,
@@ -307,3 +371,40 @@ class TestSentryObservability:
 
         assert result["failures"]["fallback_count"] == 0
         mock_notify.assert_not_called()
+
+    @patch("titantrade.daily_sentry.notify_sentry_degraded")
+    @patch("titantrade.daily_sentry.fetch_news", return_value=[])
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=100.0)
+    @patch("titantrade.daily_sentry._fetch_spy_quote", return_value=0.3)
+    @patch("titantrade.daily_sentry._call_gemini")
+    def test_fallback_emits_explicit_signal_log_line(
+        self, mock_gemini, mock_spy, mock_price, mock_news, mock_notify,
+        fake_config, tmp_state_dir, caplog,
+    ):
+        """Regression check: when Gemini retries are exhausted, the resulting
+        fallback signal must be logged with the same [sentry] TICKER: SIGNAL
+        shape as the happy path. Previously only the ERROR line appeared,
+        leaving operators to guess at what the sentry decided.
+        """
+        fake_config.trading.watchlist.clear()
+        fake_config.trading.watchlist.extend(["AAPL"])
+
+        mock_gemini.side_effect = RuntimeError("All 5 attempts failed: 503")
+
+        thesis_doc = _thesis_doc([_full_thesis("AAPL")])
+        write_state_file(tmp_state_dir, "weekly_thesis.json", thesis_doc)
+
+        import logging
+        with caplog.at_level(logging.WARNING, logger="titantrade.sentry"):
+            run_daily_sentry(fake_config)
+
+        fallback_log_lines = [
+            r.message for r in caplog.records
+            if r.message.startswith("[sentry] AAPL:")
+            and "fallback" in r.message.lower()
+        ]
+        assert len(fallback_log_lines) == 1, (
+            f"Expected one explicit fallback log line, got: {fallback_log_lines}"
+        )
+        # The fallback was CONTINUE (no adverse price move in the fixture)
+        assert "CONTINUE" in fallback_log_lines[0]

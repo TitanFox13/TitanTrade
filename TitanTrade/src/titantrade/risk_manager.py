@@ -21,12 +21,35 @@ log = get_logger("risk_manager")
 # Constants
 # ---------------------------------------------------------------------------
 
+# --- Strategic recalibration: "Always Deployed, Asymmetric Exposure" ---
+#
+# Prior values caused 83%+ cash-drag in production despite a rising market:
+#   MIN_CONFIDENCE=0.70 rejected ~all 0.65-0.69 ideas (the modal range).
+#   MIN_CASH_RESERVE_PCT=20.0 reserved capital that was never deployed
+#   anyway because of the confidence + sector + macro gates downstream.
+#
+# New posture: floors are looser, sizing is the lever. Sizing scales steeply
+# with confidence so we ride high-conviction ideas hard, take small probes
+# on low-conviction ones, and skip only when the thesis is actively bearish.
 MAX_DRAWDOWN_PCT = 8.0          # Halt new entries if portfolio drops >8% from peak
-MAX_SECTOR_EXPOSURE_PCT = 40.0  # No more than 40% of portfolio in one sector
-MIN_CASH_RESERVE_PCT = 20.0     # Always keep 20% cash for opportunities
-MIN_CONFIDENCE = 0.70           # Only trade when AI confidence >= 70%
-ATR_RISK_BUDGET = 0.02          # Target 2% of portfolio at risk per position (ATR-based)
+MAX_SECTOR_EXPOSURE_PCT = 50.0  # Allow tighter sector concentration when conviction warrants
+MIN_CASH_RESERVE_PCT = 5.0      # Cash is transit, not destination
+MIN_CONFIDENCE = 0.55           # Floor: take small probes at 0.55, scale up sharply with conviction
+ATR_RISK_BUDGET = 0.025         # 2.5% of portfolio risk per 1-ATR adverse move
 MACRO_BLACKOUT_HOURS = 6        # No new entries within 6h of high-impact macro events
+
+# Max % of portfolio in a single position (the ceiling that confidence-sizing
+# cannot exceed). Up from the de-facto ~10% cap so a 0.95-confidence thesis
+# can take a real position, not a token one.
+MAX_POSITION_PCT = 0.25
+
+# Max % of portfolio across all AI-overlay positions combined. Caps the
+# total stock-picking sleeve so the always-deployed core (30% SPY by default)
+# always has room. Without this cap, four 0.85-confidence theses at 17.5%
+# each would consume 70% — fine — but four 0.95-confidence at 25% each would
+# blow through the SPY allocation and starve the core rebalancer. The cap is
+# also a defense against AI confidence inflation in benign markets.
+MAX_TOTAL_OVERLAY_PCT = 0.70
 
 # Only these specific macro events get the blackout. Production logs showed
 # the previous 24h-on-everything rule blocking >50% of trading windows because
@@ -125,6 +148,33 @@ def max_investable_amount(portfolio_value: float, cash_balance: float) -> float:
     return available
 
 
+def compute_overlay_headroom(
+    positions: list[dict[str, Any]],
+    portfolio_value: float,
+    core_tickers: tuple[str, ...] = (),
+) -> float:
+    """Return dollar-value headroom in the AI-overlay sleeve.
+
+    The "overlay sleeve" is everything in the portfolio that ISN'T the core
+    position (SPY / hedge ETF). Capped at ``MAX_TOTAL_OVERLAY_PCT`` of total
+    portfolio value. Returns 0 (no headroom) if we're already at or above
+    the cap.
+
+    The point: prevent four 0.95-confidence theses from each sizing at 25%
+    and collectively consuming 100% of capital, starving the always-on SPY
+    core allocation and any rebalancing buffer.
+    """
+    if portfolio_value <= 0:
+        return 0.0
+    overlay_value = sum(
+        abs(float(p.get("market_value", 0)))
+        for p in positions
+        if p.get("symbol") not in core_tickers
+    )
+    cap_value = portfolio_value * MAX_TOTAL_OVERLAY_PCT
+    return max(0.0, cap_value - overlay_value)
+
+
 # ---------------------------------------------------------------------------
 # Sector exposure check
 # ---------------------------------------------------------------------------
@@ -183,21 +233,90 @@ def check_sector_limit(
 # Confidence-scaled risk
 # ---------------------------------------------------------------------------
 
+def vix_scaled_risk(base_risk_pct: float, vix: float | None) -> float:
+    """Scale risk_per_trade by the volatility environment.
+
+    The principle: position sizes should reflect how dangerous the regime is.
+    Calm markets reward courage; high-vol markets punish it. ATR-based sizing
+    handles the *per-stock* volatility, but a portfolio-level VIX scaler
+    handles the *market* one.
+
+    Anchor points:
+      VIX  < 15  → 1.2x (calm, low risk premium, lean in)
+      VIX 15-25  → 1.0x (normal)
+      VIX 25-35  → 0.7x (elevated, trim positions)
+      VIX  > 35  → 0.4x (high stress, defensive sizing)
+
+    If VIX is unavailable (None), returns base risk unchanged — we don't
+    penalize sizing for missing data, the per-stock ATR still protects.
+    """
+    if vix is None or vix <= 0:
+        return base_risk_pct
+
+    if vix < 15:
+        mult = 1.2
+    elif vix < 25:
+        # Linear interp between 15 (1.2) and 25 (1.0). At 20: 1.1.
+        mult = 1.2 - (vix - 15) / 10 * 0.2
+    elif vix < 35:
+        # Linear interp between 25 (1.0) and 35 (0.7).
+        mult = 1.0 - (vix - 25) / 10 * 0.3
+    elif vix < 50:
+        # Linear interp between 35 (0.7) and 50 (0.4).
+        mult = 0.7 - (vix - 35) / 15 * 0.3
+    else:
+        mult = 0.4
+
+    return round(base_risk_pct * mult, 4)
+
+
 def confidence_scaled_risk(
     base_risk_pct: float,
     confidence: float,
     min_confidence: float = MIN_CONFIDENCE,
 ) -> float:
-    """Scale risk_per_trade by confidence using linear interpolation.
+    """Scale risk_per_trade by confidence with a steep, piecewise curve.
 
-    confidence=0.70 (minimum) → multiplier 0.7 → 7% risk
-    confidence=0.85            → multiplier 1.0 → 10% risk (baseline)
-    confidence=1.00            → multiplier 1.3 → 13% risk
+    The old curve (0.7x at the floor, 1.3x at conf=1.0) was too flat: a
+    0.95-confidence "high-conviction" idea was sized just 1.3x a 0.70 "barely
+    passes the gate" idea. We want conviction to actually translate into
+    size — small probes at the floor, real positions in the sweet spot,
+    aggressive when the model is screaming.
 
-    Formula: multiplier = 0.7 + (confidence - min_confidence) * 2.0
+    Anchor points (returned as multipliers of base_risk_pct):
+      conf 0.55 → 0.40x   (tiny probe)
+      conf 0.65 → 0.80x
+      conf 0.70 → 1.00x   (the old baseline — preserved for backwards compat)
+      conf 0.80 → 1.50x
+      conf 0.90 → 2.00x
+      conf 0.95+ → 2.50x  (cap)
+
+    Below ``min_confidence`` the multiplier clamps to the floor's value
+    rather than going negative.
     """
-    clamped = max(min(confidence, 1.0), min_confidence)
-    multiplier = 0.7 + (clamped - min_confidence) * (0.6 / (1.0 - min_confidence))
+    # Piecewise-linear interpolation between anchor points.
+    anchors = [
+        (0.55, 0.40),
+        (0.65, 0.80),
+        (0.70, 1.00),
+        (0.80, 1.50),
+        (0.90, 2.00),
+        (0.95, 2.50),
+        (1.00, 2.50),
+    ]
+    c = max(min(confidence, 1.0), min_confidence)
+
+    multiplier = anchors[0][1]
+    for (x0, y0), (x1, y1) in zip(anchors, anchors[1:]):
+        if x0 <= c <= x1:
+            if x1 == x0:
+                multiplier = y1
+            else:
+                multiplier = y0 + (c - x0) * (y1 - y0) / (x1 - x0)
+            break
+    else:
+        multiplier = anchors[-1][1]
+
     return round(base_risk_pct * multiplier, 4)
 
 
@@ -211,6 +330,7 @@ def volatility_adjusted_shares(
     stock_atr: float | None,
     risk_per_trade_pct: float = 0.10,
     confidence: float | None = None,
+    vix: float | None = None,
 ) -> float:
     """Calculate shares using ATR-based risk budgeting.
 
@@ -229,6 +349,14 @@ def volatility_adjusted_shares(
     """
     if confidence is not None:
         risk_per_trade_pct = confidence_scaled_risk(risk_per_trade_pct, confidence)
+    if vix is not None:
+        # VIX scaling applies AFTER confidence scaling — so a 0.95-conf trade
+        # in a VIX=35 market is still sized down (2.5x × 0.7x = 1.75x base).
+        risk_per_trade_pct = vix_scaled_risk(risk_per_trade_pct, vix)
+    # Confidence×VIX-scaled risk can exceed the base — cap so a single
+    # high-conviction position can't take the whole portfolio.
+    # MAX_POSITION_PCT is the hard ceiling no amount of conviction overrides.
+    risk_per_trade_pct = min(risk_per_trade_pct, MAX_POSITION_PCT)
     max_position_value = portfolio_value * risk_per_trade_pct
 
     def _snap(raw: float) -> float:
@@ -369,6 +497,7 @@ def pre_trade_check(
     cfg: Config,
     economic_calendar: list[dict[str, Any]] | None = None,
     correlation_matrix: dict[str, dict[str, float]] | None = None,
+    vix: float | None = None,
 ) -> dict[str, Any]:
     """Run all risk checks before allowing a trade.
 
@@ -438,12 +567,24 @@ def pre_trade_check(
     else:
         _pass("cash_reserve", f"${investable:,.2f} available after reserve")
 
+    # Gate 4b: Overlay-sleeve cap
+    # Prevents the AI-pick sleeve from consuming so much portfolio value that
+    # the always-on SPY core has no room. Core tickers are excluded from the
+    # cap (they belong to a separate allocation budget).
+    core_tickers: tuple[str, ...] = (
+        cfg.trading.core_ticker,
+        cfg.trading.core_hedge_ticker,
+    )
+    overlay_headroom = compute_overlay_headroom(
+        positions, portfolio_value, core_tickers=core_tickers,
+    )
+
     # Gate 5: Position sizing (depends on gate 4 passing)
     shares = 0.0
     if investable > 0 and entry_price > 0:
         shares = volatility_adjusted_shares(
             portfolio_value, entry_price, stock_atr, cfg.trading.risk_per_trade,
-            confidence=confidence,
+            confidence=confidence, vix=vix,
         )
         position_value = shares * entry_price
 
@@ -454,11 +595,35 @@ def pre_trade_check(
             position_value = shares * entry_price
             result["flags"].append(f"Position reduced to {shares} shares (cash reserve)")
 
-        if shares <= 0:
+        # Reduce if exceeding overlay-sleeve headroom (keeps room for core)
+        if position_value > overlay_headroom:
+            if overlay_headroom <= 0:
+                _fail(
+                    "overlay_cap",
+                    f"Overlay sleeve at cap ({MAX_TOTAL_OVERLAY_PCT:.0%}); "
+                    f"existing AI positions already saturate the budget",
+                )
+                shares = 0.0
+            else:
+                raw = overlay_headroom / entry_price
+                shares = float(int(raw)) if raw >= 1.0 else round(raw, 2)
+                position_value = shares * entry_price
+                result["flags"].append(
+                    f"Position reduced to {shares} shares "
+                    f"(overlay cap, ${overlay_headroom:,.0f} headroom)"
+                )
+
+        if shares <= 0 and "overlay_cap" not in result["failed_gates"]:
             _fail("position_size", f"Position size is 0 shares at ${entry_price}")
-        else:
+        elif shares > 0:
             pct = (shares * entry_price / portfolio_value * 100) if portfolio_value > 0 else 0
             _pass("position_size", f"{shares} shares ({pct:.1f}% of portfolio)")
+            if "overlay_cap" not in result.get("failed_gates", []):
+                _pass(
+                    "overlay_cap",
+                    f"${overlay_headroom:,.0f} headroom in overlay sleeve "
+                    f"(cap {MAX_TOTAL_OVERLAY_PCT:.0%})",
+                )
     elif investable <= 0:
         result["gate_results"]["position_size"] = {
             "passed": False, "detail": "Not evaluated (cash reserve failed)",

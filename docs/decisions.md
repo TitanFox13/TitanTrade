@@ -729,3 +729,147 @@ Cause: when a thesis is reviewed with `review_action=ADJUST`, Claude raises the 
 - The sentry's price-based ABORT (3% adverse) and intraday price checks act as the safety net instead
 - Max loss on a fractional position is small ($50 at 10% sizing on a $500 account), so the risk is acceptable
 - As the account grows and positions become whole shares, bracket orders automatically resume
+
+## Decision 032: Strategic Redesign — "Always Deployed, Asymmetric Exposure"
+**Date**: 2026-05-21
+**Decision**: Replace the prior "dip-buy AI picks + 20% cash floor" design with a five-pillar always-deployed strategy.
+**Reasoning**:
+Production logs over a 3-week rising-market window showed the portfolio sitting at 83% cash for 5+ consecutive days while only realizing +1.75% (vs SPY participation potential). Root causes identified:
+- `MIN_CONFIDENCE=0.70` rejected the modal 0.65 thesis confidence range
+- `MIN_CASH_RESERVE_PCT=20%` reserved capital that never deployed anyway because of the downstream gates
+- Day-TIF bracket entries at thesis prices below current never filled in rising markets (58 expired brackets accumulated)
+- News-only sentry ABORT crystallized losses on whipsaw round-trips (GS case)
+- Weekly review's discretionary CLOSE override pre-empted programmatic stops (HCA closed at -1.6% with stop 4% away)
+- Fixed 3% trailing stop crystallized large winners on intraday noise
+
+**Implementation** (all changes):
+1. **Confidence sizing curve** (`risk_manager.confidence_scaled_risk`):
+   - Floor: 0.55 (was 0.70). Below the floor still skips.
+   - Piecewise multiplier: 0.55→0.40x, 0.70→1.00x, 0.80→1.50x, 0.90→2.00x, 0.95+→2.50x
+   - High-conviction theses can take up to 25% of portfolio (was capped at ~10%)
+2. **Cash floor** lowered: 20% → 5% (`MIN_CASH_RESERVE_PCT`)
+3. **Sector concentration** raised: 40% → 50% (`MAX_SECTOR_EXPOSURE_PCT`)
+4. **ATR-based trailing stops** (`manage_trailing_stop`):
+   - Trail 2.5× ATR below HWM (was 3% fixed)
+   - Fallback to 5% (was 3%) when ATR unavailable
+5. **Tranched profit-taking**:
+   - At 50% of upside-to-TP, sell 1/3 of position
+   - Raise stop to breakeven on the remainder
+   - Tracked in `trailing_stops.json` via `tp1_taken` flag
+6. **News-only sentry ABORT downgrade**:
+   - Gemini ABORT without adverse price move now downgrades to CONTINUE
+   - Programmatic stop remains the only kill switch for losers
+7. **Weekly CLOSE on losers downgraded**:
+   - `close_orphaned_positions` skips CLOSE actions when position is in loss
+   - ADJUST path can still tighten the stop; analyst can't preempt downside
+8. **Trend-aware entries** (`compute_trend_regime`, `_choose_entry_price`):
+   - strong_up regime or confidence ≥ 0.80: near-market entry (current × 1.003)
+   - up regime: small breakout buffer (current × 1.001)
+   - range: limit at min(thesis_target, current)
+   - down regime: skip entry entirely
+9. **Always-deployed core position** (`manage_core_position`):
+   - 30% of portfolio in SPY by default
+   - Auto-swap to SH (inverse SPY) when `market_stress` fires
+   - Rebalanced market-on-open when drift exceeds ±5%pts
+   - Bypasses the AI thesis path and risk gates
+10. Raised price-chase cap from 5 → 20 expirations (less restrictive with trend-aware entries)
+
+**Trade-offs**:
+- Much more capital deployment = more market exposure during sell-offs (intentional — the 8% drawdown circuit breaker remains as the systemic safety)
+- Bigger positions on high-conviction (up to 25%) increase single-name risk — mitigated by sector limit and the trailing stop
+- Stricter sentry ABORT means we won't exit on a single news interpretation — accepts more downside per name in exchange for less whipsaw churn
+- Core SPY position will dampen alpha vs pure stock-picking but guarantees market participation
+**Validation**:
+- 355 tests passing (was 317 before redesign), with mutation-tested coverage on critical paths
+- Backtest deferred to user — historical data needs to be downloaded first (`uv run python -m titantrade download-history && uv run python -m titantrade backtest`)
+- Paper-trade deployment expected before any live-money cutover
+
+## Decision 033: Strategic Phase 2 — Pyramiding + VIX-scaling + Smarter Re-entry
+**Date**: 2026-05-21
+**Decision**: Layer six additional changes on top of Decision 032 to convert the deployed-capital base into an opportunity-capturing system.
+**Reasoning**:
+After Decision 032 fixed cash drag and over-conservative gates, the next-order issue was that we still wouldn't *ride* winners or *re-enter* after shakeouts. Per the user's "ride the wave" mandate, these six additions push the strategy from defensive-corrected to actively opportunistic.
+
+**Implementation**:
+1. **Pyramid into winners** (`maybe_pyramid_position`):
+   - At +5% gain with trailing stop active, add 50% of original notional via market-buy
+   - Cap at `pyramid_max_total_pct` (30%) of portfolio for any single ticker
+   - Fires exactly once per position (tracked in `trailing_stops.json["pyramid_added"]`)
+   - Requires: sentry CONTINUE, thesis still BULLISH, whole-share position
+2. **VIX-aware risk scaling** (`risk_manager.vix_scaled_risk`):
+   - VIX < 15: 1.2x sizing (calm market, lean in)
+   - VIX 15-25: 1.0x (normal, linear interp from 1.2)
+   - VIX 25-35: 0.85-0.7x (elevated, trim)
+   - VIX 35+: 0.4x floor (defensive)
+   - Applies AFTER confidence scaling, before MAX_POSITION_PCT cap
+3. **RSI exhaustion check** in `compute_trend_regime`:
+   - Even in strong-uptrend with golden cross, RSI > 75 downgrades to "range"
+   - Prevents buying parabolic extensions
+4. **Smarter re-entry after ABORT** (`cooldown_override_allowed`):
+   - 72h hard cooldown bypassed when ALL of: ≥24h elapsed, thesis still BULLISH/selected, sentry CONTINUE, price ≥ 1% above stop
+   - Stops the production lockout where one whipsaw = 72h locked out of recovery
+5. **Resubmit-bracket alignment**: `resubmit_expired_brackets` now uses `compute_trend_regime` + `_choose_entry_price` (same as `_handle_bullish_entry`)
+   - Old `_adjust_entry_price` is no longer the resubmit code path — it capped at current*0.995 and silently skipped >+5% above entry, which is why FCX never re-filled
+6. **Total-overlay concentration cap** (`MAX_TOTAL_OVERLAY_PCT = 70%`):
+   - New `overlay_cap` gate added between cash_reserve and position_size
+   - Combined AI-pick positions can't exceed 70% of portfolio (protects the 30% SPY core allocation)
+   - Pre-trade check now evaluates 9 gates (was 8)
+
+**Trade-offs**:
+- Pyramiding inherently concentrates capital in winners — by design. Risk is mitigated by requiring the trailing stop to already be active (downside bounded at breakeven on the original lot).
+- VIX scaling means we'll size down meaningfully in stress periods. In a melt-up that briefly spikes VIX (e.g. >25 on a single bad day), we'll under-size; that's a deliberate trade for the systemic protection.
+- Smarter re-entry can fire mid-cooldown if conditions align — slightly faster churn possible if Gemini and price oscillate. Mitigated by the 24h minimum and price > 1.01 × stop requirement.
+- Overlay cap is the safety net that makes all the other risk-taking changes safe.
+**Validation**:
+- 382 tests passing (was 355 after Decision 032). Six pyramid tests, eight VIX-scaling tests, six cooldown-override tests, five overlay-cap tests, plus RSI/regime updates.
+- Mutation-tested the pyramid ABORT-gate to confirm regression coverage.
+- Backtest still deferred — same OHLCV-download prerequisite as Decision 032.
+
+## Decision 034: Realign AI Prompts and Data Flows With New Strategy
+**Date**: 2026-05-21
+**Decision**: The AI prompts (Pass 1, Pass 2, weekly review, daily sentry) and supporting data flows were updated to match Decisions 032-033. The prior prompts encoded the OLD policies — "lean toward ABORT", "confidence > 0.70 preferred", "CLOSE on invalidated thesis" — and were silently fighting the new executor logic.
+
+**Reasoning**:
+After Decisions 032-033 rewired the executor's risk gates, sizing, entry style, and sentry-ABORT downgrade, the AI prompts still told the models to operate as if the old strategy were in effect. Concretely:
+- Sentry prompt said "lean toward ABORT" — but the executor now downgrades news-only ABORTs to CONTINUE. Gemini was burning calls producing signals that the executor then discarded.
+- Pass 1 confidence guidance was vague ("only use >0.85 when exceptional") — but confidence now directly drives sizing on a steep curve (0.4x at 0.55 → 2.5x at 0.95). Uncalibrated confidence is the single biggest leak in this design.
+- Pass 2 said "confidence > 0.70 preferred" — but the new floor is 0.55, and we want sizing (not selection) to do the work.
+- Weekly review prompt allowed CLOSE on losers — but the executor now downgrades that to "let the stop work", so the analyst was wasting tokens issuing CLOSE actions that get rewritten.
+- News dedup was exact-title only — missing the wire syndication that inflated apparent news volume 5-10x.
+
+**Implementation**:
+1. **Sentry prompt rewrite** (`SENTRY_PROMPT_TEMPLATE` in daily_sentry.py):
+   - Explicitly tells Gemini that news-only ABORT will be downgraded by the executor.
+   - Lists the SPECIFIC conditions that warrant ABORT (literal breach-condition match, catastrophic price, named event causing institutional re-rating).
+   - Lists what NOT to ABORT on (generic market, vague macro, sector rotation narratives, 3-5% noise without confirming news).
+   - Decision asymmetry stated: "false ABORTs cost money, false CONTINUEs are caught by the stop".
+2. **Position context in sentry** (`_format_position_context`, `check_stock(position=...)`):
+   - Sentry now sees entry/current/unrealized-P&L/market value when called for a held position.
+   - Lets Gemini reason about real trade economics, not abstract news.
+3. **Pass 1 confidence calibration**:
+   - Replaced vague guidance with 5 explicit bands (0.55-0.64 probe, 0.65-0.74 standard, 0.75-0.84 high, 0.85-0.94 exceptional, 0.95+ reserved) with anchor criteria for each.
+   - Each band ties to the sizing multiplier the executor will apply.
+   - Bad breach conditions ("negative news flow", "sector weakness") now explicitly called out; analyst must name a falsifiable event.
+4. **Pass 1 stop guidance**:
+   - "Use the LARGER of: stop_loss_pct% below entry, or below meaningful technical." 
+   - References the new 2.5x ATR trailing — stops <1.5x ATR will be noise-stopped.
+5. **Pass 2 deployment context**:
+   - Tells the manager about the 70% overlay cap and 25% per-position max.
+   - "Quality strictly dominates quantity" — discourages padding to hit target_count.
+6. **Weekly review prompt**:
+   - States the "stops are sacred" policy: CLOSE on a loser will be downgraded to ADJUST.
+   - Adds an explicit ADD action for pyramid recommendations (though the auto-pyramid handles most cases).
+7. **News deduplication** (`_news_dedup_key` in data_fetcher.py):
+   - Aggressive normalization (lowercase, alphanumeric-only, first 60 chars) catches wire-syndicated variants while preserving genuinely-different stories.
+   - Logs duplicate count when present.
+8. **Data freshness warnings** (executor.py):
+   - Warns when data_bundle.json is >24h old (info), errors at >48h (likely materially stale).
+
+**Trade-offs**:
+- Calibrated confidence may produce fewer 0.85+ ratings than the prior loose-anchored version. That's by design — those slots are now 2.0-2.5x sized.
+- More aggressive news dedup risks over-collapsing if multiple distinct stories share a generic lead. Mitigated by the 60-char prefix (long enough to diverge on real differences).
+- Position-context in sentry adds a few tokens to every Gemini call. Cost increase is trivial vs. the value of grounded decisions.
+**Validation**:
+- 389 tests passing (was 382 after Decision 033).
+- New tests verify position-context rendering in the sentry prompt and news-dedup-key normalization edge cases.
+- Existing news-only-ABORT-downgrade test continues to enforce the policy at the executor layer (defense-in-depth: prompt asks Gemini not to do it, executor catches it if Gemini does anyway).

@@ -112,16 +112,61 @@ INSTRUCTIONS:
 3. Assess fundamental outlook from news and filings.
 4. Determine thesis: BULLISH, BEARISH, or NEUTRAL.
 5. If BULLISH:
-   a. target_entry_price: Set at a technically attractive level (support, SMA, etc.)
-   b. stop_loss_price: {stop_loss_pct}% below entry, but also consider placing at
-      a technical level (below support, below SMA, etc.)
-   c. take_profit_price: Realistic upside target for the week. Aim for minimum
-      2:1 reward-to-risk ratio. Set null if no clear near-term catalyst.
+   a. target_entry_price: Set at a technically attractive level (support, SMA,
+      breakout retest, etc.). NOTE: the executor will adapt the actual fill
+      level based on trend regime — strong uptrends fill near-market, ranges
+      fill at this level. So pick the level you'd LIKE to pay, not where you
+      think the price will be when filled.
+   b. stop_loss_price: Use the LARGER of (i) {stop_loss_pct}% below entry, or
+      (ii) the level below a meaningful technical (prior swing low, SMA-50,
+      recent support). The strategy uses 2.5x ATR for trailing — so a stop
+      that's <1.5x ATR below entry will be hit on routine noise. Aim for
+      stop distance ~2-4x ATR below entry.
+   c. take_profit_price: Realistic upside target with the hold horizon. The
+      strategy takes 1/3 off at 50% of upside-to-TP and trails the rest, so
+      a higher TP isn't punished by missing the move — set it where you'd
+      genuinely want the FULL position to exit. Minimum 2:1 reward-to-risk
+      vs the stop. Set null only if no clear near-term catalyst.
 6. If BEARISH or NEUTRAL: set entry/stop/take_profit fields to null.
-7. Define thesis_breach_condition: a specific, measurable event that invalidates
-   the thesis (the daily sentry will check for this).
-8. Set confidence between 0.0 and 1.0. Be honest - calibrate based on the
-   performance history below. Only use >0.85 when conviction is exceptional.
+7. Define thesis_breach_condition: a SPECIFIC, FALSIFIABLE event that
+   invalidates the thesis. The daily sentry will only ABORT if news matches
+   this literally. Examples of good breach conditions:
+     - "Q2 revenue guidance reduced > 5% in next earnings call"
+     - "CEO or CFO resigns / replaced"
+     - "FDA rejects pending drug approval"
+     - "Material lawsuit filed naming a director or officer"
+   Examples of BAD breach conditions (too vague — won't trigger ABORT):
+     - "Negative news flow"
+     - "Loss of momentum"
+     - "Sector weakness"
+   If you cannot name a specific event that would change your mind, your
+   conviction probably isn't real and confidence should be <= 0.65.
+
+8. Set confidence between 0.55 and 0.95 using these EXPLICIT BANDS — this
+   number directly drives position sizing (the strategy now scales risk
+   from 0.4x at conf=0.55 up to 2.5x at conf=0.95+, so calibration matters):
+
+   - 0.55-0.64  PROBE. Setup is interesting but at least one major piece is
+                 missing (e.g., technical setup good but news quiet, or thesis
+                 sound but RSI not aligned, or supportive context but no
+                 catalyst). Position will be sized as a small probe.
+   - 0.65-0.74  STANDARD CONVICTION. Multiple factors align (technicals +
+                 fundamentals OR technicals + catalyst OR fundamentals +
+                 sentiment). The default for a "yes I want this trade" call
+                 when nothing exceptional. Sized ~base.
+   - 0.75-0.84  HIGH CONVICTION. Strong technical setup at a clear level
+                 PLUS a concrete near-term catalyst PLUS aligned market
+                 regime. Sized 1.25-1.5x base.
+   - 0.85-0.94  EXCEPTIONAL. All three of: technicals, fundamentals, news/
+                 sentiment, AND a named catalyst within the hold horizon
+                 AND alignment with market regime AND positive insider/
+                 analyst signals. Sized 1.75-2.25x base. Use sparingly.
+   - 0.95+      RESERVED. Only when conviction is so high that you would
+                 personally bet your own money at significant size. Caps
+                 at 2.5x base.
+
+   Be calibrated, not optimistic. The sizing curve means inflated confidences
+   directly cost the portfolio money on losing trades.
 
 9. Set hold_horizon based on the setup:
    - "short_term" (1-2 weeks): quick swing trades, momentum plays
@@ -192,19 +237,43 @@ STOCK CORRELATION MATRIX (60-day, select pairs):
 
 {performance_feedback}
 
+SIZING & DEPLOYMENT CONTEXT (read before selecting):
+
+The strategy uses confidence-scaled sizing — a 0.95-confidence pick takes
+up to 25% of portfolio, a 0.65 pick takes ~10%, a 0.55 pick takes ~4%.
+Combined AI overlay positions are capped at 70% of portfolio (the
+remaining 30% is the always-on SPY core). High-conviction selections
+therefore consume "slots" of portfolio capacity quickly.
+
+Practical implications:
+  - 3 selections at 0.85-conf each ≈ 50% portfolio. Plenty of room.
+  - 4 selections at 0.90-conf each ≈ 80% — exceeds the overlay cap, the
+    executor will silently reduce later selections.
+  - Quality strictly dominates quantity. A 0.85-conf trade is worth
+    ~2x a 0.65-conf trade in dollars deployed.
+  - The confidence FLOOR is 0.55, not 0.70 — accepting low-conf probes
+    is fine, but only if you genuinely believe they have edge.
+
 INSTRUCTIONS:
 1. Review all {thesis_count} theses.
-2. TARGET COUNT for this run: {target_count} trades. Criteria:
-   a. Highest conviction (confidence > 0.70 preferred)
-   b. Best risk/reward ratio (take_profit distance vs stop_loss distance)
-   c. Diversified across sectors (max 2 picks from same sector)
+2. TARGET COUNT for this run: {target_count} trades. This is a SOFT cap
+   on quantity, not a forced minimum. Selection criteria:
+   a. Highest conviction first (no preference for 0.70+ — sizing handles it)
+   b. Best risk/reward ratio (TP distance / stop distance >= 2:1)
+   c. Diversified across sectors (max 2 picks from same sector — sector
+      cap is now 50% but spreading reduces idiosyncratic correlation)
    d. Aligned with market regime (fewer BULLISH in bearish/crisis regimes)
-   e. Not overlapping with existing holdings (unless adding is justified)
-3. For each thesis NOT selected, briefly explain why.
-4. The target is a soft floor when conviction is available — in strong_bullish
-   regimes, prefer hitting it (more deployment); in bearish/crisis, choose
-   fewer trades regardless of target.
-5. You may adjust confidence scores based on portfolio context.
+   e. Avoid overlap with existing holdings unless the thesis specifically
+      argues for adding (the pyramid system handles automatic adds on winners)
+3. PREFER fewer high-conviction names over more diluted ones. 3 picks at
+   0.85 will outperform 6 picks at 0.65 in this sizing model. Do not pad
+   the selection to hit the target_count if quality isn't there.
+4. For each thesis NOT selected, briefly explain why.
+5. In strong_bullish regimes, lean toward more deployment (use the full
+   target_count if quality supports it); in bearish/crisis, fewer trades
+   regardless of target.
+6. You may adjust confidence scores based on portfolio context (e.g. mark
+   a great-individual but redundant-sector pick down by 0.05-0.10).
 
 OUTPUT FORMAT (strict JSON):
 {{
@@ -268,18 +337,45 @@ ANALYST RATINGS:
 
 {performance_feedback}
 
+REVIEW POLICY (read carefully — this changed):
+
+The strategy treats programmatic stops as the ONLY kill switch for losing
+positions. A CLOSE action on a position currently AT A LOSS will be
+DOWNGRADED by the executor — it will not be honored, the stop will be
+allowed to do its job. So issuing CLOSE on a losing position is wasted
+discretion; instead use ADJUST to tighten the stop closer to current
+price if you want a faster exit.
+
+Conversely, a CLOSE on a position currently AT A PROFIT (taking gains
+because thesis is met or flipped) IS honored.
+
+Allowed review_action values:
+  - CONTINUE: thesis intact, keep holding with current stop/TP.
+  - ADJUST:   thesis intact, but stop and/or TP should be updated. This
+              is the right tool for "I want out faster on a loser" —
+              tighten the stop. Also the right tool for "trail tighter
+              because we're near TP". Only ADJUST that RAISES the stop
+              (vs current) is applied to losers — see "stops are sacred".
+  - CLOSE:    thesis is genuinely invalidated AND position is in profit
+              (analyst-driven profit-taking on a flipped thesis).
+              On a LOSER, this is rewritten to ADJUST behind the scenes,
+              so prefer ADJUST directly.
+
 INSTRUCTIONS:
 1. Evaluate whether the original thesis is still valid.
 2. REGIME CHECK: If a regime warning is present above, weigh it heavily.
    Holding an inverse ETF in a bullish/neutral regime is a strategic
-   contradiction. Default to CLOSE unless there is an exceptional
-   short-term catalyst for continued market decline.
-3. Check if the risk/reward has changed (e.g., price near take-profit, stop too far).
-4. Consider whether the hold horizon should change (short_term / medium_term / long_term).
-5. Decide:
-   - CONTINUE: thesis intact, keep holding with current levels
-   - ADJUST: thesis intact but stop-loss or take-profit should be updated
-   - CLOSE: thesis invalidated, or target reached, or risk/reward no longer favorable
+   contradiction. Default to CLOSE only if the position is in profit;
+   otherwise ADJUST to tighten the stop.
+3. Check if the risk/reward has changed (price near TP / stop too far /
+   trail too tight / etc.).
+4. Consider whether the hold horizon should change (short_term /
+   medium_term / long_term).
+5. If the position is working strongly (>5% gain, momentum intact):
+   you can suggest ADD via review_action="ADD" — but note that the
+   automatic pyramid logic ALREADY adds to winners at +5% with the
+   trailing stop active, so don't double-recommend it unless your
+   discretionary reasoning differs.
 
 OUTPUT FORMAT (strict JSON):
 {{
@@ -294,7 +390,8 @@ OUTPUT FORMAT (strict JSON):
 }}
 
 If review_action is ADJUST, set stop_loss_price and/or take_profit_price to the new values.
-If review_action is CLOSE, set thesis to the current view (BEARISH/NEUTRAL) with reasoning.
+If review_action is CLOSE, set thesis to the current view (BEARISH/NEUTRAL)
+with reasoning AND ensure the position is in profit — otherwise use ADJUST.
 """
 
 

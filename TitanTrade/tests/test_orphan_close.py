@@ -59,6 +59,56 @@ class TestReviewActionClose:
         assert len(result) == 0
         mock_close.assert_not_called()
 
+    @patch("titantrade.executor.close_position_at_market")
+    @patch("titantrade.executor.cancel_all_orders_for_ticker")
+    @patch("titantrade.executor.get_positions")
+    def test_close_on_losing_position_is_downgraded_to_skip(
+        self, mock_pos, mock_cancel, mock_close,
+        fake_config, tmp_state_dir,
+    ):
+        """Strategic policy: weekly CLOSE can take profit, but cannot crystallize
+        a loss the programmatic stop hasn't hit yet. Production showed HCA
+        closed at -1.6% via this path while its stop was 4% away.
+        """
+        write_state_file(tmp_state_dir, "weekly_thesis.json", {
+            "theses": [{"ticker": "HCA", "thesis": "BEARISH",
+                         "review_action": "CLOSE",
+                         "reasoning": "Deteriorating technical setup"}],
+        })
+        mock_pos.return_value = [
+            {"symbol": "HCA", "qty": "20", "current_price": "423.00",
+             "unrealized_plpc": "-0.016"},  # -1.6% loss
+        ]
+        result = close_orphaned_positions(fake_config)
+        # No close — the position lives or dies on its programmatic stop
+        assert len(result) == 0
+        mock_close.assert_not_called()
+
+    @patch("titantrade.executor._cleanup_trailing_state")
+    @patch("titantrade.executor.close_position_at_market")
+    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=0)
+    @patch("titantrade.executor.get_positions")
+    def test_close_on_winning_position_still_closes(
+        self, mock_pos, mock_cancel, mock_close, mock_cleanup,
+        fake_config, tmp_state_dir,
+    ):
+        """Weekly CLOSE on a position **in profit** is legitimate — taking
+        profit on a thesis that flipped is a sensible discretionary action.
+        Only the loss-side override is forbidden.
+        """
+        write_state_file(tmp_state_dir, "weekly_thesis.json", {
+            "theses": [{"ticker": "AAPL", "thesis": "BEARISH",
+                         "review_action": "CLOSE",
+                         "reasoning": "Take profit, thesis flipped"}],
+        })
+        mock_pos.return_value = [
+            {"symbol": "AAPL", "qty": "50", "current_price": "210.00",
+             "unrealized_plpc": "0.13"},  # +13% gain
+        ]
+        result = close_orphaned_positions(fake_config)
+        assert len(result) == 1
+        mock_close.assert_called_once()
+
 
 class TestMissingThesisEntry:
     @patch("titantrade.executor._cleanup_trailing_state")

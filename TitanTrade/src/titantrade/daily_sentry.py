@@ -30,14 +30,19 @@ PRICE_MOVE_HARD_ABORT_PCT = 5.0  # Catastrophic: always ABORT regardless of news
 MARKET_DROP_ALERT_PCT = 2.0  # Alert if SPY drops 2%+ intraday
 
 SENTRY_PROMPT_TEMPLATE = """\
-You are a financial news conflict detector. Your job is to determine if
-today's news contradicts or invalidates an existing trading thesis.
+You are a thesis-breach detector for an active trading position. Your job
+is NOT to second-guess the position on general market noise — that's what
+the programmatic stop-loss is for. Your job is to detect when something
+NEW and MATERIAL has happened that invalidates the original thesis premise.
 
 ACTIVE THESIS FOR {ticker}:
 - Direction: {thesis}
 - Confidence: {confidence}
 - Thesis Breach Condition: {breach_condition}
 - Reasoning: {reasoning}
+
+POSITION CONTEXT:
+{position_context}
 
 TODAY'S NEWS HEADLINES:
 {news_json}
@@ -48,27 +53,46 @@ PRICE ACTION ALERT:
 MARKET-WIDE ALERT:
 {market_alert}
 
-INSTRUCTIONS:
-1. Compare each news headline against the thesis breach condition.
-2. Check for material events: earnings surprises, executive changes,
-   regulatory actions, product recalls, major lawsuits, guidance changes.
-3. Consider the price action alert - a large adverse move with no news may
-   indicate information leakage or institutional selling.
-4. Consider the market-wide alert - broad market stress affects all positions.
-5. Output your decision:
-   - "ABORT" if ANY signal materially contradicts the thesis
-   - "CONTINUE" if news and price action are neutral or supportive
-6. Be conservative: when in doubt about material impact, lean toward ABORT.
-   Preserving capital is more important than catching every move.
+DECISION POLICY (read carefully — this differs from prior versions):
 
-OUTPUT FORMAT: a JSON object with the following fields (the Gemini API will
-enforce the schema; do not emit markdown fences):
+The downstream executor enforces a strict rule: "programmatic stops are
+the only kill switch for losers". A pure-news ABORT without confirming
+price weakness will be DOWNGRADED to CONTINUE by the executor. So please
+calibrate accordingly — issuing ABORT on speculative news harms the
+strategy, it doesn't protect it.
+
+Issue ABORT only when at least one of these holds:
+  1. News matches the explicit ``Thesis Breach Condition`` above —
+     literally, not figuratively. "Could be interpreted as bad for X"
+     is not breach; a stated guidance cut, executive departure, recall,
+     enforcement action, fraud allegation, or fundamental data print
+     against the thesis IS breach.
+  2. Catastrophic price move (the price-action alert says CATASTROPHIC).
+  3. A specific, named event (earnings miss, FDA rejection, lawsuit
+     filing, contract loss) that would clearly cause an institutional
+     re-rating of the name.
+
+Do NOT ABORT on:
+  - Generic market downturn (the market-wide alert is informational only;
+    individual ABORTs aren't the right tool for broad stress)
+  - Vague macro worry, broker-rating chatter, or analyst price-target tweaks
+  - A 3-5% adverse move with no specific corroborating news
+  - Sector-rotation narratives or "concerns about" framings
+
+When in doubt → CONTINUE. The stop-loss will handle real breakdowns.
+False ABORTs cost us money (whipsaw round-trips) and false CONTINUEs are
+caught by the stop. The asymmetry favors restraint.
+
+OUTPUT FORMAT: a JSON object with the following fields (the Gemini API
+will enforce the schema; do not emit markdown fences):
   - ticker: the stock symbol you are analyzing
   - signal: "CONTINUE" or "ABORT"
-  - conflicting_headlines: array of headline strings that contradict the thesis (empty if none)
+  - conflicting_headlines: array of headline strings that match the
+    breach condition or are otherwise material (empty if none)
   - price_concern: true if an adverse price move is a factor in your decision
   - market_concern: true if a broad-market stress is a factor in your decision
-  - reasoning: a concise (2-3 sentence) explanation of your decision
+  - reasoning: a concise (2-3 sentence) explanation that names the SPECIFIC
+    breach criterion if ABORT, or names the headline noise being dismissed if CONTINUE
 """
 
 
@@ -290,6 +314,28 @@ def _call_gemini(prompt: str, cfg: Config, cost_label: str = "") -> str:
     )
 
 
+def _format_position_context(position: dict[str, Any] | None) -> str:
+    """Render a one-paragraph position summary for the sentry prompt. Gives
+    Gemini the trade economics (gain/loss, entry, days held) so its
+    breach-or-noise calls are grounded in actual P&L, not abstract news."""
+    if not position:
+        return "(no open position — thesis is for a potential entry, not a held trade)"
+    try:
+        qty = float(position.get("qty", 0))
+        entry = float(position.get("avg_entry_price", 0))
+        current = float(position.get("current_price", 0))
+        unrealized_pl_pct = float(position.get("unrealized_plpc", 0)) * 100
+        market_value = float(position.get("market_value", 0))
+        return (
+            f"Held {qty:g} shares @ avg ${entry:.2f} (current ${current:.2f}, "
+            f"unrealized {unrealized_pl_pct:+.1f}%, market value ${market_value:,.0f}). "
+            f"The programmatic stop will handle a real breakdown — only ABORT "
+            f"if news specifically matches the breach condition above."
+        )
+    except (ValueError, TypeError):
+        return "(position data malformed)"
+
+
 def check_stock(
     ticker: str,
     thesis: dict[str, Any],
@@ -297,6 +343,7 @@ def check_stock(
     price_check: dict[str, Any],
     market_check: dict[str, Any],
     cfg: Config,
+    position: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the full sentry check for one stock using Gemini Flash.
 
@@ -309,6 +356,7 @@ def check_stock(
         confidence=thesis.get("confidence", 0),
         breach_condition=thesis.get("thesis_breach_condition", "None specified"),
         reasoning=thesis.get("reasoning", ""),
+        position_context=_format_position_context(position),
         news_json=json.dumps(news, indent=2),
         price_alert=price_check.get("alert", "No data"),
         market_alert=market_check.get("alert", "No data"),
@@ -385,6 +433,31 @@ def check_stock(
         signal["reasoning"] = (
             f"PRICE NOISE WARNING: {move_pct:+.1f}% adverse move with no news "
             f"corroboration — broker-side stop will catch real breakdowns. "
+            f"Original Gemini assessment: {signal.get('reasoning', '')}"
+        )
+
+    # ---- News-only ABORT downgrade ----
+    # Strategic posture: programmatic stops are the only kill switch for
+    # losers. Gemini alone — without any price confirmation — should not be
+    # able to force-close a position. Production case: GS was bought, then
+    # the next day Gemini interpreted a routine news item as breach-condition
+    # match, sentry ABORTed, position was force-closed at a loss, 72h cooldown
+    # locked us out of the re-entry as the stock recovered.
+    #
+    # Policy: if Gemini returns ABORT but price has NOT moved adversely and
+    # is not catastrophic, downgrade to CONTINUE with a logged warning. The
+    # warning still raises the operator's attention; the position lives or
+    # dies on its programmatic stop.
+    if signal["signal"] == "ABORT" and not is_adverse and not is_catastrophic:
+        log.warning(
+            f"News-only ABORT downgraded for {ticker}: Gemini flagged the "
+            f"thesis but price is holding ({move_pct:+.1f}%). Position will "
+            f"continue — programmatic stop remains the kill switch."
+        )
+        signal["signal"] = "CONTINUE"
+        signal["reasoning"] = (
+            f"NEWS-ONLY ABORT DOWNGRADED — price holding ({move_pct:+.1f}%), "
+            f"deferring to programmatic stop. "
             f"Original Gemini assessment: {signal.get('reasoning', '')}"
         )
 
@@ -494,7 +567,10 @@ def run_daily_sentry(cfg: Config) -> dict[str, Any]:
         # Layer 3: News-based check (Gemini)
         try:
             news = fetch_news(ticker, cfg, limit=20)
-            signal = check_stock(ticker, thesis, news, price_check, market_check, cfg)
+            signal = check_stock(
+                ticker, thesis, news, price_check, market_check, cfg,
+                position=positions_by_ticker.get(ticker),
+            )
             signals.append(signal)
         except Exception as exc:
             log.error(f"Sentry check failed for {ticker}: {exc}")
@@ -509,6 +585,9 @@ def run_daily_sentry(cfg: Config) -> dict[str, Any]:
                 "market_concern": market_check.get("market_stress", False),
                 "reasoning": f"Sentry check failed: {exc} - fallback to {fallback_signal}",
             })
+            # Mirror the same log line shape as the happy path so the resulting
+            # decision is visible in the run log without grepping JSON.
+            log.warning(f"[sentry] {ticker}: {fallback_signal} (fallback — Gemini unavailable)")
 
     # Determine run type
     now = datetime.now(timezone.utc)

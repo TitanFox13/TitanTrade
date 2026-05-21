@@ -15,7 +15,11 @@ import pytest
 
 from titantrade.executor import (
     _build_trade_context,
+    _choose_entry_price,
     _handle_bullish_entry,
+    compute_trend_regime,
+    manage_core_position,
+    maybe_pyramid_position,
     place_native_stop_loss,
     resubmit_expired_brackets,
 )
@@ -130,7 +134,7 @@ class TestHandleBullishEntry:
         self, mock_orders, mock_bracket, fake_config, bullish_thesis, sample_positions, data_bundle, tmp_state_dir
     ):
         """When blocked by 1-2 gates, a near-miss should be saved."""
-        bullish_thesis["confidence"] = 0.50  # Only confidence fails
+        bullish_thesis["confidence"] = 0.30  # Below new 0.55 floor — confidence fails
         _handle_bullish_entry(
             ticker="AAPL",
             thesis=bullish_thesis,
@@ -146,6 +150,194 @@ class TestHandleBullishEntry:
         data = json.loads(nm_path.read_text())
         assert len(data["near_misses"]) == 1
         assert data["near_misses"][0]["ticker"] == "AAPL"
+
+
+# ---------------------------------------------------------------------------
+# Trend regime detection + adaptive entries
+# ---------------------------------------------------------------------------
+
+class TestTrendRegime:
+    def _bundle(self, *, rsi=50.0, **pvs):
+        """Build a minimal data bundle with overridable price_vs_sma fields."""
+        return {
+            "stocks": {
+                "FOO": {
+                    "technical_indicators": {
+                        "rsi_14": rsi,
+                        "price_vs_sma": pvs,
+                    },
+                },
+            },
+        }
+
+    def test_strong_up(self):
+        bundle = self._bundle(
+            above_sma_50=True, above_sma_200=True,
+            golden_cross=True, pct_from_sma_50=5.0,
+            sma_20=100.0, sma_50=95.0,
+        )
+        assert compute_trend_regime("FOO", bundle, current_price=105.0) == "strong_up"
+
+    def test_up_without_golden_cross(self):
+        bundle = self._bundle(
+            above_sma_50=True, above_sma_200=True,
+            golden_cross=False, pct_from_sma_50=3.0,
+            sma_20=100.0, sma_50=95.0,
+        )
+        assert compute_trend_regime("FOO", bundle, current_price=103.0) == "up"
+
+    def test_down(self):
+        bundle = self._bundle(
+            above_sma_50=False, above_sma_200=False,
+            golden_cross=False, pct_from_sma_50=-4.0,
+            sma_20=95.0, sma_50=100.0,
+        )
+        assert compute_trend_regime("FOO", bundle, current_price=96.0) == "down"
+
+    def test_range_when_indicators_missing(self):
+        bundle = {"stocks": {"FOO": {"technical_indicators": {}}}}
+        assert compute_trend_regime("FOO", bundle, current_price=100.0) == "range"
+
+    def test_range_when_above_50_but_negative(self):
+        # Edge case: above_50 True but pct_from_50 negative (lagged data)
+        bundle = self._bundle(
+            above_sma_50=True, above_sma_200=False,
+            golden_cross=False, pct_from_sma_50=-0.5,
+            sma_20=100.0, sma_50=100.5,
+        )
+        assert compute_trend_regime("FOO", bundle, current_price=100.0) == "range"
+
+    def test_overbought_strong_up_downgrades_to_range(self):
+        """Even a screaming uptrend with golden cross gets downgraded to
+        'range' if RSI > 75. Buying parabolic extensions = exit liquidity.
+        """
+        bundle = self._bundle(
+            rsi=82.0,  # overbought
+            above_sma_50=True, above_sma_200=True,
+            golden_cross=True, pct_from_sma_50=8.0,
+            sma_20=100.0, sma_50=95.0,
+        )
+        assert compute_trend_regime("FOO", bundle, current_price=110.0) == "range"
+
+    def test_overbought_plain_up_also_downgrades(self):
+        bundle = self._bundle(
+            rsi=78.0,
+            above_sma_50=True, above_sma_200=True,
+            golden_cross=False, pct_from_sma_50=3.0,
+            sma_20=100.0, sma_50=95.0,
+        )
+        assert compute_trend_regime("FOO", bundle, current_price=103.0) == "range"
+
+
+class TestChooseEntryPrice:
+    def _thesis(self, target=100.0):
+        return {
+            "target_entry_price": target,
+            "stop_loss_price": 95.0,
+            "take_profit_price": 110.0,
+        }
+
+    def test_high_conviction_uses_near_market(self):
+        # conf >= 0.80 → current * 1.003 regardless of regime
+        price = _choose_entry_price(self._thesis(), 105.0, regime="up", confidence=0.85)
+        assert price == round(105.0 * 1.003, 2)
+
+    def test_strong_up_uses_near_market(self):
+        # strong_up regime → current * 1.003 even at lower conviction
+        price = _choose_entry_price(self._thesis(), 105.0, regime="strong_up", confidence=0.65)
+        assert price == round(105.0 * 1.003, 2)
+
+    def test_up_regime_uses_small_breakout_buffer(self):
+        price = _choose_entry_price(self._thesis(), 105.0, regime="up", confidence=0.65)
+        assert price == round(105.0 * 1.001, 2)
+
+    def test_range_keeps_thesis_target_when_below_current(self):
+        # Range + thesis target $100 + current $105 → cap at current.
+        # The point: don't blindly pay current when the thesis said wait
+        # for $100, but also don't sit on a $100 limit that won't fill.
+        # min(target, current) = min(100, 105) = 100.
+        price = _choose_entry_price(self._thesis(target=100.0), 105.0, "range", confidence=0.60)
+        assert price == 100.0
+
+    def test_no_current_price_falls_back_to_thesis(self):
+        price = _choose_entry_price(self._thesis(target=100.0), None, "up", confidence=0.65)
+        assert price == 100.0
+
+
+class TestHandleBullishEntryTrendAdaptive:
+    """Verify the real entry path responds to trend regime."""
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=200.0)
+    @patch("titantrade.executor.place_bracket_order")
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    def test_downtrend_skips_entry(
+        self, mock_orders, mock_bracket, mock_price,
+        fake_config, bullish_thesis, sample_positions, tmp_state_dir,
+    ):
+        """When the regime is 'down', we don't bottom-fish — skip entry."""
+        bundle = {
+            "stocks": {
+                "AAPL": {
+                    "technical_indicators": {
+                        "price_vs_sma": {
+                            "above_sma_50": False, "above_sma_200": False,
+                            "golden_cross": False, "pct_from_sma_50": -4.0,
+                            "sma_20": 210.0, "sma_50": 215.0,
+                        },
+                    },
+                    "atr_14": 3.0,
+                },
+            },
+        }
+        result = _handle_bullish_entry(
+            ticker="AAPL", thesis=bullish_thesis,
+            portfolio_value=100_000, cash_balance=50_000,
+            positions=sample_positions, data_bundle=bundle,
+            sentry=None, cfg=fake_config,
+        )
+        assert result is None
+        mock_bracket.assert_not_called()
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=200.0)
+    @patch("titantrade.executor.place_bracket_order", return_value={"id": "br-1"})
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    def test_strong_up_uses_near_market_entry(
+        self, mock_orders, mock_bracket, mock_price,
+        fake_config, bullish_thesis, sample_positions, tmp_state_dir, monkeypatch,
+    ):
+        """Strong uptrend → entry adapts to ~current price, not thesis target."""
+        monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: "Technology")
+
+        bullish_thesis["target_entry_price"] = 185.50  # original thesis dip-buy
+        bundle = {
+            "stocks": {
+                "AAPL": {
+                    "technical_indicators": {
+                        "price_vs_sma": {
+                            "above_sma_50": True, "above_sma_200": True,
+                            "golden_cross": True, "pct_from_sma_50": 5.0,
+                            "sma_20": 195.0, "sma_50": 190.0,
+                        },
+                    },
+                    "atr_14": 3.0,
+                },
+            },
+        }
+        _handle_bullish_entry(
+            ticker="AAPL", thesis=bullish_thesis,
+            portfolio_value=100_000, cash_balance=50_000,
+            positions=sample_positions, data_bundle=bundle,
+            sentry=None, cfg=fake_config,
+        )
+
+        # Bracket was placed; verify entry is near current ($200), not the
+        # thesis $185.50.
+        assert mock_bracket.call_count >= 1
+        first_call = mock_bracket.call_args_list[0]
+        entry_arg = first_call.kwargs.get("entry_limit_price") or first_call.args[2]
+        # current_price=200, mult=1.003 → 200.60
+        assert entry_arg >= 200.0
+        assert entry_arg <= 201.0
 
 
 class TestResubmitExpiredBrackets:
@@ -221,6 +413,47 @@ class TestResubmitExpiredBrackets:
         positions = [{"symbol": "AAPL", "qty": "50", "market_value": "9000"}]
         result = resubmit_expired_brackets(fake_config, thesis_doc, positions, {})
         assert result == []
+
+    @patch("titantrade.executor.place_bracket_order")
+    @patch("titantrade.executor.get_positions", return_value=[])
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.executor.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
+    @patch("titantrade.executor.get_expired_brackets")
+    def test_dedupes_skip_log_lines_per_ticker_reason(
+        self, mock_expired, mock_account, mock_open, mock_pos, mock_bracket,
+        fake_config, bullish_thesis, caplog,
+    ):
+        """Production logs were drowned by 50+ near-identical skip lines because
+        Alpaca's expired-order list contained many duplicate bracket parents per
+        ticker. Same-(ticker, reason) skips must be collapsed to one log line.
+        """
+        # 10 expired brackets for the same ticker, all hit the "already holding"
+        # skip path → should produce exactly ONE skip log line.
+        mock_expired.return_value = [
+            self._make_expired_order() for _ in range(10)
+        ]
+        thesis_doc = {
+            "theses": [{**bullish_thesis, "selected_for_trading": True}],
+        }
+        positions = [{"symbol": "AAPL", "qty": "50", "market_value": "9000"}]
+
+        import logging
+        with caplog.at_level(logging.INFO, logger="titantrade.executor"):
+            resubmit_expired_brackets(fake_config, thesis_doc, positions, {})
+
+        skip_lines = [
+            r.message for r in caplog.records
+            if "Skipping expired bracket for AAPL" in r.message
+        ]
+        assert len(skip_lines) == 1, (
+            f"Expected 1 deduplicated skip line, got {len(skip_lines)}: {skip_lines}"
+        )
+        # And the dedup summary should mention the collapsed duplicates.
+        summary_lines = [
+            r.message for r in caplog.records if "skip dedup" in r.message
+        ]
+        assert len(summary_lines) == 1
+        assert "9 duplicate" in summary_lines[0]
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +661,412 @@ class TestAdjustStopSafety:
 
 
 # ---------------------------------------------------------------------------
+# Section 4b — TP-leg-holding-qty recovery (off-hours + race-condition fixes)
+# ---------------------------------------------------------------------------
+
+class TestTpLegHoldingQty:
+    """Production scenario: a held position has no stop_loss order, but a
+    take-profit (limit sell) leg from the original bracket is still active
+    and holds all the qty. Placing a fresh stop deterministically 403s with
+    "insufficient qty available". Section 4b now:
+      1. Off-hours → defer (don't try the cancel — it won't settle).
+      2. Market open → cancel the TP, place the stop. On failure, restore TP.
+
+    These are inline-pattern tests like TestAdjustStopSafety. They document
+    the contract; they don't drive execute_trades end-to-end (which would
+    require mocking ~15 broker calls).
+    """
+
+    def test_off_hours_path_does_not_call_broker(self):
+        """When market is closed and qty is held by a TP leg, we must NOT
+        cancel anything. The cancel would hang in pending_cancel until next
+        open, and we'd still 403. Defer cleanly instead.
+        """
+        from unittest.mock import MagicMock
+        cancel_order = MagicMock()
+        place_native_stop_loss = MagicMock()
+
+        market_open = False
+        has_stop = False
+        qty_available = 0
+        tp_limit_orders = [{"id": "tp-1", "qty": "14", "limit_price": "550.00"}]
+
+        if not has_stop and qty_available <= 0 and tp_limit_orders:
+            if not market_open:
+                pass  # deferred — no broker calls
+            else:
+                for tp in tp_limit_orders:
+                    cancel_order(tp["id"])
+                place_native_stop_loss()
+
+        cancel_order.assert_not_called()
+        place_native_stop_loss.assert_not_called()
+
+    def test_market_open_cancels_tp_and_places_stop(self):
+        """Happy path: market open, TP holds qty, no stop → cancel TP, place
+        stop. Both broker calls fire exactly once.
+        """
+        from unittest.mock import MagicMock
+        cancel_order = MagicMock()
+        place_native_stop_loss = MagicMock(return_value={"id": "new-stop"})
+
+        market_open = True
+        has_stop = False
+        qty_available = 0
+        tp_limit_orders = [{"id": "tp-1", "qty": "14", "limit_price": "550.00"}]
+
+        if not has_stop and qty_available <= 0 and tp_limit_orders and market_open:
+            for tp in tp_limit_orders:
+                cancel_order(tp["id"])
+            place_native_stop_loss(stop_price=494.0)
+
+        cancel_order.assert_called_once_with("tp-1")
+        place_native_stop_loss.assert_called_once()
+
+    def test_failed_stop_placement_restores_tp(self):
+        """Safety net: if cancel succeeds and place_native_stop_loss raises,
+        we MUST restore the TP. Without this, the position is left with
+        neither stop nor TP — both downside and upside exits gone.
+        """
+        from unittest.mock import MagicMock
+        cancel_order = MagicMock()
+        place_native_stop_loss = MagicMock(side_effect=RuntimeError("503"))
+        place_limit_sell = MagicMock(return_value={"id": "restored-tp"})
+
+        tp_limit_orders = [{"id": "tp-1", "qty": "14", "limit_price": "550.00"}]
+        # Snapshot before cancel so we can restore later (this is the actual
+        # pattern in executor.py).
+        tp_snapshots = [
+            {"qty": float(tp["qty"]), "limit_price": float(tp["limit_price"])}
+            for tp in tp_limit_orders
+        ]
+
+        for tp in tp_limit_orders:
+            cancel_order(tp["id"])
+
+        try:
+            place_native_stop_loss(stop_price=494.0)
+        except Exception:
+            # Safety net branch
+            for snap in tp_snapshots:
+                place_limit_sell(snap["qty"], snap["limit_price"], "gtc")
+
+        cancel_order.assert_called_once()
+        place_native_stop_loss.assert_called_once()
+        # TP was restored at its original limit price
+        place_limit_sell.assert_called_once_with(14.0, 550.00, "gtc")
+
+
+# ---------------------------------------------------------------------------
+# REAL end-to-end integration tests — drive execute_trades through the new
+# branches. These call the actual production function and verify the real
+# code path (not inline-pattern stubs).
+# ---------------------------------------------------------------------------
+
+def _config_with_watchlist(cfg, watchlist: list[str]):
+    """Config is a frozen dataclass — build a new one with the desired
+    watchlist via dataclasses.replace.
+    """
+    from dataclasses import replace
+    new_trading = replace(cfg.trading, watchlist=watchlist)
+    return replace(cfg, trading=new_trading)
+
+
+@pytest.fixture
+def _e2e_state(tmp_state_dir):
+    """Write the three state files execute_trades needs."""
+    write_state_file(tmp_state_dir, "weekly_thesis.json", {
+        "generated_at": "2026-05-20T00:00:00+00:00",
+        "next_review_at": "2026-06-01T00:00:00+00:00",
+        "theses": [
+            {
+                "ticker": "CRWD",
+                "thesis": "BULLISH",
+                "confidence": 0.85,
+                "target_entry_price": 500.0,
+                "stop_loss_price": 494.0,
+                "take_profit_price": 550.0,
+                "selected_for_trading": True,
+                "review_action": "NEW",
+                "reasoning": "Held position needs stop",
+            },
+        ],
+    })
+    write_state_file(tmp_state_dir, "sentry_signals.json", {
+        "generated_at": "2026-05-20T13:00:00+00:00",
+        "signals": [{"ticker": "CRWD", "signal": "CONTINUE"}],
+    })
+    write_state_file(tmp_state_dir, "data_bundle.json", {"stocks": {}})
+    return tmp_state_dir
+
+
+def _stub_e2e_mocks(monkeypatch, *, market_open: bool, position: dict, open_orders: list):
+    """Patch all the broker/external touchpoints execute_trades needs.
+    Returns a dict of MagicMocks for assertions.
+    """
+    mocks: dict[str, MagicMock] = {}
+
+    def _patch(name: str, **kw):
+        m = MagicMock(**kw)
+        monkeypatch.setattr(f"titantrade.executor.{name}", m)
+        mocks[name] = m
+        return m
+
+    _patch("is_market_open", return_value=market_open)
+    _patch("load_stock_sectors", return_value=None)
+    _patch("close_orphaned_positions", return_value=[])
+    _patch("check_gap_down_protection", return_value=[])
+    _patch("resubmit_expired_brackets", return_value=[])
+    _patch("get_account", return_value={
+        "portfolio_value": "100000", "cash": "20000", "buying_power": "40000",
+    })
+    _patch("get_positions", return_value=[position])
+    _patch("get_position", return_value=position)
+    _patch("get_open_orders", return_value=open_orders)
+    _patch("cancel_order", return_value=None)
+    _patch("place_native_stop_loss", return_value={"id": "new-stop"})
+    _patch("place_limit_sell", return_value={"id": "restored-tp"})
+    _patch("manage_trailing_stop", return_value=None)
+    _patch("_maybe_alert_stuck_in_cash", return_value=None)
+    _patch("_maybe_alert_ticker_churn", return_value=None)
+    return mocks
+
+
+class TestExecuteTradesEndToEnd:
+    """Drive the actual execute_trades function through each new branch and
+    verify the real-world broker-call sequence. These tests catch regressions
+    that the inline-pattern tests (TestTpLegHoldingQty) cannot.
+    """
+
+    def test_off_hours_with_tp_holding_qty_makes_no_broker_calls(
+        self, monkeypatch, _e2e_state, fake_config,
+    ):
+        """Production bug: off-hours + held position + TP-leg-holds-qty +
+        no stop → previous code POSTed a stop, ate a 120s pending_cancel
+        wait, then 403'd. New code must defer with zero broker calls.
+        """
+        # Override the watchlist so the sector-cache + sentry loops only see CRWD.
+        fake_config = _config_with_watchlist(fake_config, ["CRWD"])
+
+        position = {
+            "symbol": "CRWD", "qty": "14", "qty_available": "0",
+            "held_for_orders": "14", "current_price": "560",
+            "avg_entry_price": "510",
+        }
+        # Only a TP limit leg — no stop. Qty is held by the TP.
+        open_orders = [
+            {"id": "tp-leg-1", "side": "sell", "type": "limit",
+             "qty": "14", "limit_price": "550.00"},
+        ]
+        mocks = _stub_e2e_mocks(
+            monkeypatch, market_open=False,
+            position=position, open_orders=open_orders,
+        )
+
+        from titantrade.executor import execute_trades
+        execute_trades(fake_config)
+
+        # The critical assertions — off-hours must NOT touch the broker for
+        # stop placement on this position.
+        mocks["cancel_order"].assert_not_called()
+        mocks["place_native_stop_loss"].assert_not_called()
+        mocks["place_limit_sell"].assert_not_called()
+
+    def test_market_open_with_tp_holding_qty_cancels_tp_then_places_stop(
+        self, monkeypatch, _e2e_state, fake_config,
+    ):
+        """Market-open recovery: cancel the TP that's holding the qty, then
+        place the protective stop. Both calls must fire exactly once."""
+        fake_config = _config_with_watchlist(fake_config, ["CRWD"])
+
+        position = {
+            "symbol": "CRWD", "qty": "14", "qty_available": "0",
+            "held_for_orders": "14", "current_price": "560",
+            "avg_entry_price": "510",
+        }
+        open_orders = [
+            {"id": "tp-leg-1", "side": "sell", "type": "limit",
+             "qty": "14", "limit_price": "550.00"},
+        ]
+        mocks = _stub_e2e_mocks(
+            monkeypatch, market_open=True,
+            position=position, open_orders=open_orders,
+        )
+
+        from titantrade.executor import execute_trades
+        execute_trades(fake_config)
+
+        # TP cancelled, stop placed, TP restore NOT called (happy path).
+        mocks["cancel_order"].assert_called_once()
+        assert mocks["cancel_order"].call_args.args[0] == "tp-leg-1"
+        mocks["place_native_stop_loss"].assert_called_once()
+        place_args = mocks["place_native_stop_loss"].call_args.args
+        assert place_args[0] == "CRWD"
+        assert float(place_args[1]) == 14.0  # qty
+        assert float(place_args[2]) == 494.0  # stop_price from thesis
+        mocks["place_limit_sell"].assert_not_called()
+
+    def test_failed_stop_placement_restores_tp_end_to_end(
+        self, monkeypatch, _e2e_state, fake_config,
+    ):
+        """Half-failure safety net: if place_native_stop_loss raises after the
+        TP was cancelled, the TP MUST be restored at its original limit price.
+        Without this, the position has neither stop nor TP — both exits gone.
+        """
+        fake_config = _config_with_watchlist(fake_config, ["CRWD"])
+
+        position = {
+            "symbol": "CRWD", "qty": "14", "qty_available": "0",
+            "held_for_orders": "14", "current_price": "560",
+            "avg_entry_price": "510",
+        }
+        open_orders = [
+            {"id": "tp-leg-1", "side": "sell", "type": "limit",
+             "qty": "14", "limit_price": "550.00"},
+        ]
+        mocks = _stub_e2e_mocks(
+            monkeypatch, market_open=True,
+            position=position, open_orders=open_orders,
+        )
+        # Make place_native_stop_loss fail to trigger the restore branch
+        mocks["place_native_stop_loss"].side_effect = RuntimeError("503 Service Unavailable")
+
+        from titantrade.executor import execute_trades
+        execute_trades(fake_config)
+
+        # Sequence: cancel TP → try stop (fails) → restore TP
+        mocks["cancel_order"].assert_called_once()
+        mocks["place_native_stop_loss"].assert_called_once()
+        mocks["place_limit_sell"].assert_called_once()
+        restore_args = mocks["place_limit_sell"].call_args
+        assert restore_args.args[0] == "CRWD"
+        assert float(restore_args.args[1]) == 14.0
+        assert float(restore_args.args[2]) == 550.00
+        assert restore_args.kwargs.get("time_in_force") == "gtc"
+
+    def test_off_hours_held_position_no_stop_no_tp_defers(
+        self, monkeypatch, _e2e_state, fake_config,
+    ):
+        """Off-hours, held position has no protective orders at all and qty
+        is fully available. Even though there's no race, we still defer —
+        the next market-open run will place the stop cleanly. (We don't
+        place stops during off-hours because the executor runs are 2/day
+        and a missed window is small; the original code did place here, but
+        the new gate is more conservative and that's fine.)
+
+        Actually checking the spec: qty_available > 0, no TP holding qty,
+        market closed → the new code logs "deferring stop placement to next
+        market-open run" and does NOT call place_native_stop_loss.
+        """
+        fake_config = _config_with_watchlist(fake_config, ["CRWD"])
+
+        position = {
+            "symbol": "CRWD", "qty": "14", "qty_available": "14",
+            "held_for_orders": "0", "current_price": "560",
+            "avg_entry_price": "510",
+        }
+        # No orders at all — fully unprotected
+        open_orders: list[dict[str, Any]] = []
+        mocks = _stub_e2e_mocks(
+            monkeypatch, market_open=False,
+            position=position, open_orders=open_orders,
+        )
+
+        from titantrade.executor import execute_trades
+        execute_trades(fake_config)
+
+        # Off-hours: no broker mutations
+        mocks["cancel_order"].assert_not_called()
+        mocks["place_native_stop_loss"].assert_not_called()
+
+    def test_market_open_held_position_no_protection_places_stop(
+        self, monkeypatch, _e2e_state, fake_config,
+    ):
+        """Market-open, held position with no protective orders → place stop
+        immediately for the available qty.
+        """
+        fake_config = _config_with_watchlist(fake_config, ["CRWD"])
+
+        position = {
+            "symbol": "CRWD", "qty": "14", "qty_available": "14",
+            "held_for_orders": "0", "current_price": "560",
+            "avg_entry_price": "510",
+        }
+        open_orders: list[dict[str, Any]] = []
+        mocks = _stub_e2e_mocks(
+            monkeypatch, market_open=True,
+            position=position, open_orders=open_orders,
+        )
+
+        from titantrade.executor import execute_trades
+        execute_trades(fake_config)
+
+        mocks["cancel_order"].assert_not_called()  # nothing to cancel
+        mocks["place_native_stop_loss"].assert_called_once()
+        args = mocks["place_native_stop_loss"].call_args.args
+        assert args[0] == "CRWD"
+        assert float(args[1]) == 14.0  # qty_available
+        assert float(args[2]) == 494.0  # stop_price from thesis
+
+    def test_adjust_off_hours_no_existing_stop_defers(
+        self, monkeypatch, tmp_state_dir, fake_config,
+    ):
+        """ADJUST branch with market closed AND no existing stop on the book
+        used to fall through to cancel_all_orders_for_ticker + place_native_stop_loss
+        because the off-hours gate had an `existing_stop is not None` clause.
+        Now it defers unconditionally when market is closed.
+        """
+        write_state_file(tmp_state_dir, "weekly_thesis.json", {
+            "generated_at": "2026-05-20T00:00:00+00:00",
+            "next_review_at": "2026-06-01T00:00:00+00:00",
+            "theses": [
+                {
+                    "ticker": "URI",
+                    "thesis": "BULLISH",
+                    "confidence": 0.85,
+                    "target_entry_price": 770.0,
+                    "stop_loss_price": 940.0,
+                    "take_profit_price": 1000.0,
+                    "selected_for_trading": True,
+                    "review_action": "ADJUST",  # ← key
+                    "reasoning": "Trail stop up",
+                },
+            ],
+        })
+        write_state_file(tmp_state_dir, "sentry_signals.json", {
+            "generated_at": "2026-05-20T13:00:00+00:00",
+            "signals": [{"ticker": "URI", "signal": "CONTINUE"}],
+        })
+        write_state_file(tmp_state_dir, "data_bundle.json", {"stocks": {}})
+
+        fake_config = _config_with_watchlist(fake_config, ["URI"])
+        position = {
+            "symbol": "URI", "qty": "5", "qty_available": "5",
+            "held_for_orders": "0", "current_price": "950",
+            "avg_entry_price": "800",
+        }
+        # No existing stop AND no TP — the ADJUST branch's off-hours gate
+        # previously bypassed this case (existing_stop is None) and fell
+        # through to the cancel_all_orders + place path, which 403d.
+        open_orders: list[dict[str, Any]] = []
+        mocks = _stub_e2e_mocks(
+            monkeypatch, market_open=False,
+            position=position, open_orders=open_orders,
+        )
+        # Spy on cancel_all_orders_for_ticker too
+        cancel_all = MagicMock(return_value=0)
+        monkeypatch.setattr("titantrade.executor.cancel_all_orders_for_ticker", cancel_all)
+
+        from titantrade.executor import execute_trades
+        execute_trades(fake_config)
+
+        # Off-hours ADJUST must defer — no cancel, no place
+        cancel_all.assert_not_called()
+        mocks["cancel_order"].assert_not_called()
+        mocks["place_native_stop_loss"].assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Bracket math sanity (Bug #2 — invalid stop/entry from ADJUSTed theses)
 # ---------------------------------------------------------------------------
 
@@ -615,6 +1254,70 @@ class TestReentryCooldown:
         mock_bracket.assert_not_called()
 
 
+class TestCooldownOverride:
+    """The cooldown override prevents the production lockout pattern: a single
+    whipsaw ABORT locks the ticker out for 72h even after the stock recovers.
+    With the override, sentry-confirmed recovery > 24h after the ABORT re-enters.
+    """
+
+    def _thesis(self, **overrides):
+        base = {
+            "ticker": "AAPL", "thesis": "BULLISH",
+            "selected_for_trading": True,
+            "stop_loss_price": 100.0,
+        }
+        base.update(overrides)
+        return base
+
+    def test_too_soon_no_override(self):
+        from titantrade.executor import cooldown_override_allowed
+        # Only 12h have passed — below the 24h minimum.
+        assert cooldown_override_allowed(
+            "AAPL", self._thesis(), {"signal": "CONTINUE"},
+            hours_since_abort=12, current_price=110.0,
+        ) is False
+
+    def test_thesis_no_longer_bullish_no_override(self):
+        from titantrade.executor import cooldown_override_allowed
+        bearish = self._thesis(thesis="BEARISH")
+        assert cooldown_override_allowed(
+            "AAPL", bearish, {"signal": "CONTINUE"},
+            hours_since_abort=48, current_price=110.0,
+        ) is False
+
+    def test_sentry_still_aborting_no_override(self):
+        from titantrade.executor import cooldown_override_allowed
+        assert cooldown_override_allowed(
+            "AAPL", self._thesis(), {"signal": "ABORT"},
+            hours_since_abort=48, current_price=110.0,
+        ) is False
+
+    def test_price_below_stop_no_override(self):
+        from titantrade.executor import cooldown_override_allowed
+        # Price = 99 below stop = 100 → hasn't recovered, don't re-enter
+        assert cooldown_override_allowed(
+            "AAPL", self._thesis(), {"signal": "CONTINUE"},
+            hours_since_abort=48, current_price=99.0,
+        ) is False
+
+    def test_all_conditions_met_allows_override(self):
+        from titantrade.executor import cooldown_override_allowed
+        # 48h since ABORT, thesis still BULLISH, sentry CONTINUE, price
+        # safely above stop → override allowed.
+        assert cooldown_override_allowed(
+            "AAPL", self._thesis(), {"signal": "CONTINUE"},
+            hours_since_abort=48, current_price=110.0,
+        ) is True
+
+    def test_no_sentry_no_override(self):
+        from titantrade.executor import cooldown_override_allowed
+        # If there's no sentry signal at all, can't confirm recovery
+        assert cooldown_override_allowed(
+            "AAPL", self._thesis(), None,
+            hours_since_abort=48, current_price=110.0,
+        ) is False
+
+
 # ---------------------------------------------------------------------------
 # Bracket-attempt price-chase cap (#4)
 # ---------------------------------------------------------------------------
@@ -751,3 +1454,245 @@ class TestTickerChurnAlert:
         # Re-running same day should NOT alert again for the same ticker
         _maybe_alert_ticker_churn()
         assert mock_send.call_count >= 1  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Core position manager (always-deployed SPY base + hedge swap)
+# ---------------------------------------------------------------------------
+
+class TestManageCorePosition:
+    def _write_sentry(self, tmp_state_dir, *, stress: bool):
+        from tests.conftest import write_state_file
+        write_state_file(tmp_state_dir, "sentry_signals.json", {
+            "signals": [],
+            "market_health": {
+                "market_stress": stress,
+                "spy_change_pct": -3.0 if stress else 0.5,
+                "alert": "stress" if stress else "ok",
+            },
+        })
+
+    @patch("titantrade.executor.place_market_buy", return_value={"id": "core-buy"})
+    @patch("titantrade.executor.get_positions", return_value=[])
+    @patch("titantrade.executor.get_account", return_value={
+        "portfolio_value": "100000", "cash": "50000",
+    })
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=500.0)
+    @patch("titantrade.executor.is_market_open", return_value=True)
+    def test_buys_core_ticker_when_below_target(
+        self, mock_open, mock_price, mock_account, mock_pos, mock_buy,
+        fake_config, tmp_state_dir,
+    ):
+        """No SPY position, target is 30% of $100k = $30k → buy $30k of SPY
+        at $500 = 60 shares. This is the always-deployed baseline.
+        """
+        self._write_sentry(tmp_state_dir, stress=False)
+        trade = manage_core_position(fake_config)
+        assert trade is not None
+        assert trade["ticker"] == "SPY"
+        assert trade["action"] == "BUY"
+        assert trade["shares"] == 60  # $30k / $500
+        mock_buy.assert_called_once()
+
+    @patch("titantrade.executor.place_market_buy")
+    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.executor.get_account", return_value={
+        "portfolio_value": "100000", "cash": "50000",
+    })
+    @patch("titantrade.executor.is_market_open", return_value=True)
+    def test_no_rebalance_when_within_band(
+        self, mock_open, mock_account, mock_pos, mock_buy,
+        fake_config, tmp_state_dir,
+    ):
+        """Already holding $32k SPY against $30k target → drift $2k, band is
+        $5k. No rebalance.
+        """
+        self._write_sentry(tmp_state_dir, stress=False)
+        mock_pos.return_value = [
+            {"symbol": "SPY", "qty": "64", "market_value": "32000",
+             "current_price": "500.00"},
+        ]
+        trade = manage_core_position(fake_config)
+        assert trade is None
+        mock_buy.assert_not_called()
+
+    @patch("titantrade.executor.place_market_sell", return_value={"id": "sell"})
+    @patch("titantrade.executor.place_market_buy", return_value={"id": "buy"})
+    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=0)
+    @patch("titantrade.executor.close_position_at_market", return_value={"id": "close"})
+    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.executor.get_account", return_value={
+        "portfolio_value": "100000", "cash": "5000",  # Most capital in SPY
+    })
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=30.0)
+    @patch("titantrade.executor.is_market_open", return_value=True)
+    def test_stress_swaps_spy_for_hedge(
+        self, mock_open, mock_price, mock_account, mock_pos,
+        mock_close, mock_cancel, mock_buy, mock_sell,
+        fake_config, tmp_state_dir,
+    ):
+        """When market_stress=True, the manager should close SPY (the wrong
+        core for the regime) — the proceeds flow back as cash and the next
+        cycle can buy SH. This test verifies just the close half.
+        """
+        self._write_sentry(tmp_state_dir, stress=True)
+        mock_pos.return_value = [
+            {"symbol": "SPY", "qty": "60", "market_value": "30000",
+             "current_price": "500.00"},
+        ]
+        manage_core_position(fake_config)
+        # SPY was closed to make room for SH
+        mock_close.assert_called_once_with("SPY", fake_config)
+
+    @patch("titantrade.executor.place_market_buy")
+    @patch("titantrade.executor.get_positions", return_value=[])
+    @patch("titantrade.executor.get_account", return_value={
+        "portfolio_value": "100000", "cash": "50000",
+    })
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=500.0)
+    @patch("titantrade.executor.is_market_open", return_value=False)
+    def test_off_hours_no_op(
+        self, mock_open, mock_price, mock_account, mock_pos, mock_buy,
+        fake_config, tmp_state_dir,
+    ):
+        """Off-hours: defer. Market orders need market hours, and bracket
+        cancels/replaces hang in pending_cancel anyway. Even with all the
+        other inputs valid (price quote, cash, etc.) we must return early
+        on the is_market_open check — that's the entire safety contract.
+        """
+        self._write_sentry(tmp_state_dir, stress=False)
+        trade = manage_core_position(fake_config)
+        assert trade is None
+        mock_buy.assert_not_called()
+        # Critically: we should NOT have even queried the account if we
+        # bailed early. (If get_account was hit, the function ran past the
+        # off-hours gate.)
+        mock_account.assert_not_called()
+
+    @patch("titantrade.executor.place_market_buy")
+    @patch("titantrade.executor.get_positions", return_value=[])
+    @patch("titantrade.executor.get_account", return_value={
+        "portfolio_value": "100000", "cash": "2000",  # Below 5% floor
+    })
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=500.0)
+    @patch("titantrade.executor.is_market_open", return_value=True)
+    def test_respects_cash_floor(
+        self, mock_open, mock_price, mock_account, mock_pos, mock_buy,
+        fake_config, tmp_state_dir,
+    ):
+        """When cash is at or below MIN_CASH_RESERVE_PCT, the core manager
+        won't buy more — the existing AI overlays already have us fully
+        deployed.
+        """
+        self._write_sentry(tmp_state_dir, stress=False)
+        trade = manage_core_position(fake_config)
+        # No buy because cash $2k < $5k floor
+        assert trade is None
+        mock_buy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Pyramid-into-winners (ride the wave)
+# ---------------------------------------------------------------------------
+
+class TestPyramidIntoWinners:
+    def _winning_position(self, gain_pct=0.07):
+        entry = 100.0
+        current = entry * (1 + gain_pct)
+        return {
+            "symbol": "FOO", "qty": "100",
+            "avg_entry_price": str(entry),
+            "current_price": str(current),
+            "market_value": str(100 * current),
+        }
+
+    def _thesis(self):
+        return {
+            "ticker": "FOO", "thesis": "BULLISH",
+            "selected_for_trading": True,
+            "target_entry_price": 100.0,
+            "stop_loss_price": 95.0,
+            "take_profit_price": 115.0,
+        }
+
+    @patch("titantrade.executor.place_market_buy", return_value={"id": "pyramid-1"})
+    def test_pyramids_at_5pct_gain(
+        self, mock_buy, fake_config, tmp_state_dir,
+    ):
+        trade = maybe_pyramid_position(
+            "FOO", self._thesis(), self._winning_position(gain_pct=0.07),
+            {"signal": "CONTINUE"}, portfolio_value=100_000, cfg=fake_config,
+        )
+        assert trade is not None
+        assert trade["trigger"] == "pyramid"
+        # Original notional = $10000, pyramid 50% = $5000, at $107 = 46 shares
+        mock_buy.assert_called_once()
+        sold_args = mock_buy.call_args.args
+        assert sold_args[0] == "FOO"
+        assert sold_args[1] == 46  # int(5000 / 107)
+
+    @patch("titantrade.executor.place_market_buy")
+    def test_does_not_fire_below_trigger(
+        self, mock_buy, fake_config, tmp_state_dir,
+    ):
+        # 3% gain — below 5% trigger
+        trade = maybe_pyramid_position(
+            "FOO", self._thesis(), self._winning_position(gain_pct=0.03),
+            {"signal": "CONTINUE"}, portfolio_value=100_000, cfg=fake_config,
+        )
+        assert trade is None
+        mock_buy.assert_not_called()
+
+    @patch("titantrade.executor.place_market_buy", return_value={"id": "pyr"})
+    def test_only_fires_once_per_position(
+        self, mock_buy, fake_config, tmp_state_dir,
+    ):
+        from titantrade.executor import _save_trailing_state
+        _save_trailing_state({"FOO": {"pyramid_added": True}})
+
+        trade = maybe_pyramid_position(
+            "FOO", self._thesis(), self._winning_position(gain_pct=0.10),
+            {"signal": "CONTINUE"}, portfolio_value=100_000, cfg=fake_config,
+        )
+        assert trade is None
+        mock_buy.assert_not_called()
+
+    @patch("titantrade.executor.place_market_buy")
+    def test_skips_if_sentry_aborting(
+        self, mock_buy, fake_config, tmp_state_dir,
+    ):
+        trade = maybe_pyramid_position(
+            "FOO", self._thesis(), self._winning_position(gain_pct=0.08),
+            {"signal": "ABORT"}, portfolio_value=100_000, cfg=fake_config,
+        )
+        assert trade is None
+        mock_buy.assert_not_called()
+
+    @patch("titantrade.executor.place_market_buy")
+    def test_skips_if_thesis_flipped(
+        self, mock_buy, fake_config, tmp_state_dir,
+    ):
+        thesis = self._thesis()
+        thesis["thesis"] = "BEARISH"
+        trade = maybe_pyramid_position(
+            "FOO", thesis, self._winning_position(gain_pct=0.08),
+            {"signal": "CONTINUE"}, portfolio_value=100_000, cfg=fake_config,
+        )
+        assert trade is None
+        mock_buy.assert_not_called()
+
+    @patch("titantrade.executor.place_market_buy")
+    def test_respects_concentration_cap(
+        self, mock_buy, fake_config, tmp_state_dir,
+    ):
+        """Position already at pyramid_max_total_pct shouldn't add more."""
+        # 300 shares at $107 = $32.1k = 32% of $100k — exceeds 30% cap
+        pos = self._winning_position(gain_pct=0.07)
+        pos["qty"] = "300"
+        pos["market_value"] = str(300 * 107)
+        trade = maybe_pyramid_position(
+            "FOO", self._thesis(), pos,
+            {"signal": "CONTINUE"}, portfolio_value=100_000, cfg=fake_config,
+        )
+        assert trade is None  # Would push above cap
+        mock_buy.assert_not_called()
