@@ -1696,3 +1696,435 @@ class TestPyramidIntoWinners:
         )
         assert trade is None  # Would push above cap
         mock_buy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Regression: same-cycle TP1 + pyramid wash-trade collision
+# ---------------------------------------------------------------------------
+
+class TestPyramidWashTradeGuard:
+    """Production bug: TP1 sells 18 shares, then pyramid tries to buy 16 in
+    the same cycle, Alpaca rejects as a wash trade ("code 40310000, potential
+    wash trade detected"). Pyramid must defer when TP1 just fired.
+    """
+
+    @patch("titantrade.executor.place_market_buy")
+    def test_pyramid_defers_when_tp1_fired_recently(
+        self, mock_buy, fake_config, tmp_state_dir,
+    ):
+        from datetime import datetime, timezone
+        from titantrade.executor import maybe_pyramid_position, _save_trailing_state
+
+        # Seed state: TP1 just fired 1 minute ago
+        recent = datetime.now(timezone.utc).isoformat()
+        _save_trailing_state({"FOO": {"tp1_taken": True, "tp1_timestamp": recent}})
+
+        position = {
+            "symbol": "FOO", "qty": "35",  # 35 shares after TP1 sold 18 of 53
+            "avg_entry_price": "100.00", "current_price": "108.00",
+            "market_value": str(35 * 108),
+        }
+        thesis = {
+            "ticker": "FOO", "thesis": "BULLISH",
+            "selected_for_trading": True,
+            "target_entry_price": 100.0,
+            "stop_loss_price": 95.0,
+            "take_profit_price": 115.0,
+        }
+        result = maybe_pyramid_position(
+            "FOO", thesis, position, {"signal": "CONTINUE"},
+            portfolio_value=100_000, cfg=fake_config,
+        )
+        assert result is None
+        mock_buy.assert_not_called()
+
+    @patch("titantrade.executor.place_market_buy", return_value={"id": "p1"})
+    def test_pyramid_fires_when_tp1_old_enough(
+        self, mock_buy, fake_config, tmp_state_dir,
+    ):
+        """Once 30+ minutes have passed since TP1, the wash-trade window has
+        closed and pyramid can fire normally.
+        """
+        from datetime import datetime, timezone, timedelta
+        from titantrade.executor import maybe_pyramid_position, _save_trailing_state
+
+        old = (datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat()
+        _save_trailing_state({"FOO": {"tp1_taken": True, "tp1_timestamp": old}})
+
+        position = {
+            "symbol": "FOO", "qty": "35",
+            "avg_entry_price": "100.00", "current_price": "108.00",
+            "market_value": str(35 * 108),
+        }
+        thesis = {
+            "ticker": "FOO", "thesis": "BULLISH",
+            "selected_for_trading": True,
+            "target_entry_price": 100.0,
+            "stop_loss_price": 95.0,
+            "take_profit_price": 115.0,
+        }
+        # Note: this is contrived — in production, pyramid_added would be True
+        # from the same cycle as TP1. But the contract we're testing is the
+        # 30-min cooldown window, not the once-per-position state.
+        result = maybe_pyramid_position(
+            "FOO", thesis, position, {"signal": "CONTINUE"},
+            portfolio_value=100_000, cfg=fake_config,
+        )
+        assert result is not None
+        mock_buy.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Regression: bearish exit off-hours gate
+# ---------------------------------------------------------------------------
+
+class TestBearishExitOffHours:
+    """Production bug: BEARISH thesis + held position fired
+    cancel_all_orders_for_ticker + close_position_at_market during off-hours,
+    which 403'd with "insufficient qty available" because the cancel sat in
+    pending_cancel. DVN and FANG failed exactly this way.
+
+    Fix: when market is closed, defer the bearish exit. The existing
+    stop-loss on the book continues to protect the position.
+    """
+
+    def _e2e_state(self, tmp_state_dir):
+        write_state_file(tmp_state_dir, "weekly_thesis.json", {
+            "theses": [
+                {
+                    "ticker": "DVN", "thesis": "BEARISH",
+                    "confidence": 0.75, "selected_for_trading": True,
+                    "review_action": "NEW",
+                    "reasoning": "Thesis flipped bearish",
+                },
+            ],
+        })
+        write_state_file(tmp_state_dir, "sentry_signals.json", {
+            "signals": [{"ticker": "DVN", "signal": "CONTINUE"}],
+            "market_health": {"market_stress": False},
+        })
+        write_state_file(tmp_state_dir, "data_bundle.json", {"stocks": {}})
+
+    @patch("titantrade.executor.close_position_at_market")
+    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=0)
+    @patch("titantrade.executor.get_position")
+    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.executor.get_account", return_value={
+        "portfolio_value": "100000", "cash": "20000", "buying_power": "40000",
+    })
+    @patch("titantrade.executor.resubmit_expired_brackets", return_value=[])
+    @patch("titantrade.executor.check_gap_down_protection", return_value=[])
+    @patch("titantrade.executor.close_orphaned_positions", return_value=[])
+    @patch("titantrade.executor.manage_core_position", return_value=None)
+    @patch("titantrade.executor.load_stock_sectors", return_value=None)
+    @patch("titantrade.executor.is_market_open", return_value=False)
+    def test_bearish_exit_defers_off_hours(
+        self,
+        mock_open, mock_load_sec, mock_core, mock_orphan, mock_gap,
+        mock_resub, mock_account, mock_oo, mock_get_positions,
+        mock_get_pos, mock_cancel, mock_close,
+        fake_config, tmp_state_dir,
+    ):
+        self._e2e_state(tmp_state_dir)
+        fake_config = _config_with_watchlist(fake_config, ["DVN"])
+        position = {"symbol": "DVN", "qty": "260", "current_price": "47.00",
+                    "avg_entry_price": "47.16"}
+        mock_get_positions.return_value = [position]
+        mock_get_pos.return_value = position
+
+        from titantrade.executor import execute_trades
+        execute_trades(fake_config)
+
+        # Off-hours: NO cancel, NO close — the existing stop protects
+        mock_cancel.assert_not_called()
+        mock_close.assert_not_called()
+
+    @patch("titantrade.executor.time.sleep", return_value=None)
+    @patch("titantrade.executor.close_position_at_market", return_value={"id": "c1"})
+    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=0)
+    @patch("titantrade.executor.get_position")
+    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.executor.get_account", return_value={
+        "portfolio_value": "100000", "cash": "20000", "buying_power": "40000",
+    })
+    @patch("titantrade.executor.resubmit_expired_brackets", return_value=[])
+    @patch("titantrade.executor.check_gap_down_protection", return_value=[])
+    @patch("titantrade.executor.close_orphaned_positions", return_value=[])
+    @patch("titantrade.executor.manage_core_position", return_value=None)
+    @patch("titantrade.executor.load_stock_sectors", return_value=None)
+    @patch("titantrade.executor.is_market_open", return_value=True)
+    def test_bearish_exit_fires_market_open(
+        self,
+        mock_open, mock_load_sec, mock_core, mock_orphan, mock_gap,
+        mock_resub, mock_account, mock_oo, mock_get_positions,
+        mock_get_pos, mock_cancel, mock_close, mock_sleep,
+        fake_config, tmp_state_dir,
+    ):
+        """Market-open: cancel + close fires normally (with the 2s settle delay)."""
+        self._e2e_state(tmp_state_dir)
+        fake_config = _config_with_watchlist(fake_config, ["DVN"])
+        position = {"symbol": "DVN", "qty": "260", "current_price": "47.00",
+                    "avg_entry_price": "47.16"}
+        mock_get_positions.return_value = [position]
+        mock_get_pos.return_value = position
+
+        from titantrade.executor import execute_trades
+        execute_trades(fake_config)
+
+        mock_cancel.assert_called_once_with("DVN", fake_config)
+        mock_close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Regression: asymmetric stop walking (DVN got 0.25× ATR stop in production)
+# ---------------------------------------------------------------------------
+
+class TestStopWalksBothDirections:
+    """Production bug from the week-1 logs:
+
+        Resubmit entry adapted for DVN (up, conf 0.72): $49.20 → $47.16
+        Bracket BUY: 260.0 DVN entry=$47.16 stop=$46.74 tp=52.5
+
+    Entry walked DOWN by $2.04 but stop stayed at $46.74. Result: risk
+    collapsed from $2.46 (5%, ~1.5× ATR) to $0.42 (0.9%, 0.25× ATR) —
+    guaranteed noise-stop. The fix walks stop+TP in EITHER direction by
+    the same delta as entry.
+    """
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=47.16)
+    @patch("titantrade.executor.place_bracket_order", return_value={"id": "br"})
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    def test_entry_walking_down_walks_stop_down_too(
+        self, mock_orders, mock_bracket, mock_price,
+        fake_config, sample_positions, tmp_state_dir, monkeypatch,
+    ):
+        monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: "Energy")
+
+        thesis = {
+            "ticker": "DVN", "thesis": "BULLISH",
+            "confidence": 0.72,
+            "target_entry_price": 49.20,
+            "stop_loss_price": 46.74,    # 5% below original target
+            "take_profit_price": 52.50,
+            "selected_for_trading": True,
+        }
+        bundle = {
+            "stocks": {"DVN": {
+                "technical_indicators": {
+                    "price_vs_sma": {
+                        "above_sma_50": True, "above_sma_200": True,
+                        "golden_cross": False, "pct_from_sma_50": 1.5,
+                        "sma_20": 47.0, "sma_50": 46.5,
+                    },
+                },
+                "atr_14": 1.66,
+            }},
+        }
+        _handle_bullish_entry(
+            ticker="DVN", thesis=thesis,
+            portfolio_value=100_000, cash_balance=50_000,
+            positions=sample_positions, data_bundle=bundle,
+            sentry=None, cfg=fake_config,
+        )
+
+        assert mock_bracket.called
+        call = mock_bracket.call_args_list[0]
+        entry = call.kwargs.get("entry_limit_price") or call.args[2]
+        stop = call.kwargs.get("stop_loss_price") or call.args[3]
+
+        # Entry should be near 47.16 (current * 1.001 = 47.21)
+        assert 47.0 <= entry <= 47.5
+        # Stop should have walked DOWN: original stop $46.74, delta ≈ -2.04
+        # → new stop ≈ $44.70. The OLD bug would leave it at $46.74.
+        assert stop < 46.0, (
+            f"Stop should walk down with entry. Got entry={entry}, stop={stop}. "
+            f"Old bug: stop stays at thesis level ($46.74) → tiny risk."
+        )
+        # Risk should still be ~5% (1.5x ATR) — preserved from original thesis
+        risk_pct = (entry - stop) / entry
+        assert 0.04 < risk_pct < 0.06, f"Risk:reward not preserved: {risk_pct:.2%}"
+
+
+# ---------------------------------------------------------------------------
+# Regression: BEARISH + ADJUST should NOT exit (production FANG case)
+# ---------------------------------------------------------------------------
+
+class TestBearishAdjustSuppressesExit:
+    """Production case: FANG had thesis=BEARISH but review_action=ADJUST
+    (analyst wanted to tighten stop, not exit). The bearish-exit fired
+    anyway, contradicting the analyst's intent. Now ADJUST takes precedence.
+    """
+
+    def _state(self, tmp_state_dir, review_action: str):
+        write_state_file(tmp_state_dir, "weekly_thesis.json", {
+            "theses": [
+                {
+                    "ticker": "FANG", "thesis": "BEARISH",
+                    "confidence": 0.70,
+                    "review_action": review_action,
+                    "stop_loss_price": 198.50,
+                    "selected_for_trading": True,
+                    "reasoning": "Bearish view, but tighten stop instead of exit",
+                },
+            ],
+        })
+        write_state_file(tmp_state_dir, "sentry_signals.json", {
+            "signals": [{"ticker": "FANG", "signal": "CONTINUE"}],
+            "market_health": {"market_stress": False},
+        })
+        write_state_file(tmp_state_dir, "data_bundle.json", {"stocks": {}})
+
+    @patch("titantrade.executor.close_position_at_market")
+    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=0)
+    @patch("titantrade.executor.get_position")
+    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.executor.get_account", return_value={
+        "portfolio_value": "100000", "cash": "30000", "buying_power": "60000",
+    })
+    @patch("titantrade.executor.resubmit_expired_brackets", return_value=[])
+    @patch("titantrade.executor.check_gap_down_protection", return_value=[])
+    @patch("titantrade.executor.close_orphaned_positions", return_value=[])
+    @patch("titantrade.executor.manage_core_position", return_value=None)
+    @patch("titantrade.executor.load_stock_sectors", return_value=None)
+    @patch("titantrade.executor.is_market_open", return_value=True)
+    def test_bearish_with_adjust_does_not_exit(
+        self,
+        mock_open, mock_load, mock_core, mock_orphan, mock_gap,
+        mock_resub, mock_account, mock_oo, mock_get_positions, mock_get_pos,
+        mock_cancel, mock_close,
+        fake_config, tmp_state_dir,
+    ):
+        self._state(tmp_state_dir, review_action="ADJUST")
+        fake_config = _config_with_watchlist(fake_config, ["FANG"])
+        position = {
+            "symbol": "FANG", "qty": "22",
+            "avg_entry_price": "200.00", "current_price": "199.00",
+            "unrealized_plpc": "-0.005",
+        }
+        mock_get_positions.return_value = [position]
+        mock_get_pos.return_value = position
+
+        from titantrade.executor import execute_trades
+        execute_trades(fake_config)
+
+        # BEARISH + ADJUST → defer to ADJUST flow, NOT exit at market
+        mock_close.assert_not_called()
+        # ADJUST flow will run cancel_all + place_native_stop, BUT we're not
+        # asserting on that here (it's tested elsewhere). The key contract:
+        # close_position_at_market was NOT called.
+
+    @patch("titantrade.executor.time.sleep", return_value=None)
+    @patch("titantrade.executor.close_position_at_market", return_value={"id": "c1"})
+    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=0)
+    @patch("titantrade.executor.get_position")
+    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.executor.get_account", return_value={
+        "portfolio_value": "100000", "cash": "30000", "buying_power": "60000",
+    })
+    @patch("titantrade.executor.resubmit_expired_brackets", return_value=[])
+    @patch("titantrade.executor.check_gap_down_protection", return_value=[])
+    @patch("titantrade.executor.close_orphaned_positions", return_value=[])
+    @patch("titantrade.executor.manage_core_position", return_value=None)
+    @patch("titantrade.executor.load_stock_sectors", return_value=None)
+    @patch("titantrade.executor.is_market_open", return_value=True)
+    def test_bearish_without_adjust_does_exit(
+        self,
+        mock_open, mock_load, mock_core, mock_orphan, mock_gap,
+        mock_resub, mock_account, mock_oo, mock_get_positions, mock_get_pos,
+        mock_cancel, mock_close, mock_sleep,
+        fake_config, tmp_state_dir,
+    ):
+        """Sanity: when there's no ADJUST instruction, the bearish exit still
+        fires normally. This complements the suppression test.
+        """
+        self._state(tmp_state_dir, review_action="NEW")  # not ADJUST
+        fake_config = _config_with_watchlist(fake_config, ["FANG"])
+        position = {
+            "symbol": "FANG", "qty": "22",
+            "avg_entry_price": "200.00", "current_price": "199.00",
+        }
+        mock_get_positions.return_value = [position]
+        mock_get_pos.return_value = position
+
+        from titantrade.executor import execute_trades
+        execute_trades(fake_config)
+
+        mock_close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Regression: bearish exit restores stop on close failure
+# ---------------------------------------------------------------------------
+
+class TestBearishExitRestoresStopOnFailure:
+    """Production case: DVN bearish exit cancelled the stop, then
+    close_position_at_market 403'd. Position left naked until next run.
+    Fix: capture existing stop before cancel; restore it if close fails.
+    """
+
+    @patch("titantrade.executor.time.sleep", return_value=None)
+    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "restored"})
+    @patch("titantrade.executor.close_position_at_market", side_effect=RuntimeError("403 qty race"))
+    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=1)
+    @patch("titantrade.executor.get_position")
+    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.executor.get_open_orders")
+    @patch("titantrade.executor.get_account", return_value={
+        "portfolio_value": "100000", "cash": "30000", "buying_power": "60000",
+    })
+    @patch("titantrade.executor.resubmit_expired_brackets", return_value=[])
+    @patch("titantrade.executor.check_gap_down_protection", return_value=[])
+    @patch("titantrade.executor.close_orphaned_positions", return_value=[])
+    @patch("titantrade.executor.manage_core_position", return_value=None)
+    @patch("titantrade.executor.load_stock_sectors", return_value=None)
+    @patch("titantrade.executor.is_market_open", return_value=True)
+    def test_failed_close_restores_stop(
+        self,
+        mock_open, mock_load, mock_core, mock_orphan, mock_gap,
+        mock_resub, mock_account, mock_oo, mock_get_positions, mock_get_pos,
+        mock_cancel, mock_close, mock_place_stop, mock_sleep,
+        fake_config, tmp_state_dir,
+    ):
+        write_state_file(tmp_state_dir, "weekly_thesis.json", {
+            "theses": [{
+                "ticker": "DVN", "thesis": "BEARISH",
+                "confidence": 0.75, "selected_for_trading": True,
+                "review_action": "NEW",
+                "stop_loss_price": 46.74,
+                "reasoning": "thesis flipped",
+            }],
+        })
+        write_state_file(tmp_state_dir, "sentry_signals.json", {
+            "signals": [{"ticker": "DVN", "signal": "CONTINUE"}],
+            "market_health": {"market_stress": False},
+        })
+        write_state_file(tmp_state_dir, "data_bundle.json", {"stocks": {}})
+        fake_config = _config_with_watchlist(fake_config, ["DVN"])
+
+        # Pre-cancel: an existing stop @ $46.74 is on the book
+        mock_oo.return_value = [{
+            "type": "stop_limit", "side": "sell",
+            "stop_price": "46.74", "id": "stop-1",
+        }]
+        position = {
+            "symbol": "DVN", "qty": "260",
+            "avg_entry_price": "47.16", "current_price": "47.00",
+        }
+        mock_get_positions.return_value = [position]
+        mock_get_pos.return_value = position
+
+        from titantrade.executor import execute_trades
+        execute_trades(fake_config)
+
+        # Close was attempted (and failed)
+        mock_close.assert_called_once()
+        # Stop was restored on failure
+        mock_place_stop.assert_called_once()
+        restore_args = mock_place_stop.call_args.args
+        assert restore_args[0] == "DVN"
+        assert float(restore_args[1]) == 260.0
+        assert float(restore_args[2]) == 46.74

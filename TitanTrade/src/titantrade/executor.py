@@ -926,11 +926,15 @@ def _handle_bullish_entry(
             f"${entry_price:.2f} → ${new_entry:.2f} (current {cur_str})"
         )
         entry_price = new_entry
-        # Recompute stop/TP to preserve risk:reward when entry moves up.
+        # Recompute stop/TP to preserve risk:reward when entry moves IN EITHER
+        # DIRECTION. Production bug: when entry walked DOWN (range/up regime,
+        # current < target), stop stayed at thesis level and risk:reward
+        # collapsed. DVN got entry $49.20→$47.16 with stop $46.74 unchanged →
+        # risk = 0.9% = 0.25× ATR = guaranteed noise-stop. We now walk stop +
+        # TP in either direction by the same delta as entry.
         original_target = thesis.get("target_entry_price")
-        if original_target and original_target > 0 and entry_price > original_target:
-            # Walk stop+TP up by the same delta we walked entry.
-            delta = entry_price - original_target
+        if original_target and original_target > 0 and entry_price != original_target:
+            delta = entry_price - original_target  # negative if walking down
             stop_price = round(stop_price + delta, 2)
             if take_profit_price:
                 take_profit_price = round(take_profit_price + delta, 2)
@@ -1196,6 +1200,12 @@ def resubmit_expired_brackets(
     # appending a "(xN)" count when the same skip fired multiple times.
     _skip_seen: set[tuple[str, str]] = set()
     _skip_counts: dict[tuple[str, str], int] = {}
+    # Track tickers we've already evaluated for cooldown-override this cycle.
+    # The resubmit loop iterates per expired bracket (often 4+ for the same
+    # ticker), and a naive implementation would re-check, re-log, re-notify
+    # for each one. Production logs showed GS firing the override message
+    # 4× per run with 4× Discord pings.
+    _cooldown_override_seen: dict[str, bool] = {}
 
     def _log_skip(ticker: str, reason: str) -> None:
         key = (ticker, reason)
@@ -1238,29 +1248,40 @@ def resubmit_expired_brackets(
         # above the original stop and the thesis is still BULLISH.
         in_cooldown, hours_since = _is_in_cooldown(ticker)
         if in_cooldown:
-            sentry_signal = sentry_by_ticker.get(ticker)
-            try:
-                from titantrade.daily_sentry import _fetch_current_price
-                current_price = _fetch_current_price(ticker, cfg)
-            except Exception:
-                current_price = None
-            if cooldown_override_allowed(
-                ticker, thesis, sentry_signal, hours_since, current_price,
-            ):
-                log.warning(
-                    f"Cooldown OVERRIDE for {ticker} (resubmit): "
-                    f"{hours_since:.1f}h since ABORT, sentry CONTINUE + "
-                    f"price recovered. Allowing resubmit."
-                )
+            # Dedup per cycle: if we already evaluated this ticker's override
+            # earlier in the resubmit loop, reuse the decision instead of
+            # re-fetching the price, re-running the policy, re-logging, and
+            # re-notifying. Production showed 4× per ticker per run otherwise.
+            if ticker in _cooldown_override_seen:
+                override_ok = _cooldown_override_seen[ticker]
+            else:
+                sentry_signal = sentry_by_ticker.get(ticker)
                 try:
-                    from titantrade.notifier import notify_cooldown_override
-                    notify_cooldown_override(
-                        ticker=ticker, hours_since_abort=hours_since,
-                        current_price=current_price or 0,
-                        stop_price=float(thesis.get("stop_loss_price") or 0),
+                    from titantrade.daily_sentry import _fetch_current_price
+                    current_price = _fetch_current_price(ticker, cfg)
+                except Exception:
+                    current_price = None
+                override_ok = cooldown_override_allowed(
+                    ticker, thesis, sentry_signal, hours_since, current_price,
+                )
+                _cooldown_override_seen[ticker] = override_ok
+                if override_ok:
+                    log.warning(
+                        f"Cooldown OVERRIDE for {ticker} (resubmit): "
+                        f"{hours_since:.1f}h since ABORT, sentry CONTINUE + "
+                        f"price recovered. Allowing resubmit."
                     )
-                except Exception as exc:  # noqa: BLE001
-                    log.warning(f"Cooldown override notify failed for {ticker}: {exc}")
+                    try:
+                        from titantrade.notifier import notify_cooldown_override
+                        notify_cooldown_override(
+                            ticker=ticker, hours_since_abort=hours_since,
+                            current_price=current_price or 0,
+                            stop_price=float(thesis.get("stop_loss_price") or 0),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning(f"Cooldown override notify failed for {ticker}: {exc}")
+            if override_ok:
+                pass  # Fall through to the rest of the resubmit logic
             else:
                 _log_skip(
                     ticker,
@@ -1305,9 +1326,11 @@ def resubmit_expired_brackets(
                 f"Resubmit entry adapted for {ticker} ({regime}, conf {confidence:.2f}): "
                 f"${entry_price:.2f} → ${new_entry:.2f}"
             )
-            # Walk stop/TP up by the same delta to preserve risk:reward.
-            if new_entry > original_entry:
-                delta = new_entry - original_entry
+            # Walk stop/TP in EITHER direction by the same delta to preserve
+            # risk:reward. Production bug (DVN): walked entry down without
+            # walking stop down → stop too tight to survive noise.
+            if new_entry != original_entry:
+                delta = new_entry - original_entry  # negative if walking down
                 stop_price = round(stop_price + delta, 2)
                 if take_profit_price:
                     take_profit_price = round(take_profit_price + delta, 2)
@@ -1466,6 +1489,25 @@ def maybe_pyramid_position(
     ts = state.get(ticker, {}) or {}
     if ts.get("pyramid_added"):
         return None
+
+    # Same-cycle wash-trade guard: if TP1 just sold this ticker, Alpaca will
+    # reject an immediate market-buy on the opposite side as a wash trade
+    # ("code 40310000, potential wash trade detected"). Wait until the next
+    # cycle so the partial sell settles first. The pyramid trigger persists
+    # — we'll just take the add at the next executor run.
+    tp1_ts_str = ts.get("tp1_timestamp")
+    if tp1_ts_str:
+        try:
+            tp1_ts = datetime.fromisoformat(tp1_ts_str)
+            age_min = (datetime.now(timezone.utc) - tp1_ts).total_seconds() / 60
+            if age_min < 30:
+                log.info(
+                    f"Pyramid deferred for {ticker}: TP1 fired {age_min:.0f}min "
+                    f"ago — avoiding wash-trade rejection. Will retry next cycle."
+                )
+                return None
+        except (ValueError, TypeError):
+            pass
 
     if thesis.get("thesis") != "BULLISH" or not thesis.get("selected_for_trading"):
         return None
@@ -2418,10 +2460,60 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
         # ------------------------------------------------------------------
         # 3. BEARISH + holding = exit (thesis flipped since entry)
         # ------------------------------------------------------------------
-        elif direction == "BEARISH" and ticker in held_tickers:
+        # IMPORTANT: ADJUST review_action takes precedence. Production case:
+        # FANG had thesis=BEARISH but review_action=ADJUST (analyst wanted to
+        # tighten the stop, NOT exit at market). The old code fired the
+        # bearish exit anyway, contradicting the analyst's intent. Now we
+        # let section 4a (ADJUST) handle it — section 3 is for true thesis
+        # flips where the analyst wants out, not for stop-tightening events.
+        elif (
+            direction == "BEARISH"
+            and ticker in held_tickers
+            and thesis.get("review_action") != "ADJUST"
+        ):
+            # Off-hours guard: cancel_all + close_position_at_market is the
+            # same pending_cancel → qty-race pattern that ADJUST and orphan-
+            # close already gate. Without this, the cancel sits in
+            # pending_cancel and the close fails with code 40310000
+            # ("insufficient qty available"). Production showed DVN and FANG
+            # failing exactly this way during the Sunday-night executor run.
+            # The position is still protected by its existing stop on the
+            # book — deferring to the next market-hours run is safe.
+            if not market_open:
+                log.info(
+                    f"BEARISH exit for {ticker} deferred — market closed. "
+                    f"Existing stop remains active. Will retry at next "
+                    f"market-hours run."
+                )
+                continue
+
             log.info(f"Thesis flipped BEARISH for {ticker} - closing position")
+            # Capture the existing stop BEFORE we cancel it. If the close
+            # fails (qty race, network blip, etc.), we restore the stop so
+            # the position isn't left naked while we wait for the next run.
+            existing_stop_price = 0.0
+            try:
+                open_orders_pre = get_open_orders(ticker, cfg)
+                existing_stop = next(
+                    (
+                        o for o in open_orders_pre
+                        if o.get("type") in ("stop", "stop_limit")
+                        and o.get("side") == "sell"
+                    ),
+                    None,
+                )
+                if existing_stop:
+                    existing_stop_price = float(existing_stop.get("stop_price", 0))
+            except Exception as exc:  # noqa: BLE001
+                log.warning(f"Could not read existing stop for {ticker}: {exc}")
+
             try:
                 cancel_all_orders_for_ticker(ticker, cfg)
+                # Wait briefly for cancels to settle before the close attempt.
+                # During market hours this is near-instant; if it takes more
+                # than a few seconds something is wrong and the close will
+                # surface the qty-race error naturally.
+                time.sleep(2)
                 position = get_position(ticker, cfg)
                 if position:
                     qty = float(position.get("qty", 0))
@@ -2438,6 +2530,28 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                     executed.append(trade)
             except Exception as exc:
                 log.error(f"Bearish exit failed for {ticker}: {exc}")
+                # Safety net: re-place the stop we cancelled so the position
+                # isn't naked while we wait for the next run.
+                if existing_stop_price > 0:
+                    pos_check = get_position(ticker, cfg)
+                    if pos_check:
+                        qty_to_protect = float(pos_check.get("qty", 0))
+                        if qty_to_protect > 0:
+                            try:
+                                place_native_stop_loss(
+                                    ticker, qty_to_protect, existing_stop_price, cfg,
+                                )
+                                log.warning(
+                                    f"BEARISH exit failed for {ticker} — restored "
+                                    f"stop @ ${existing_stop_price:.2f} to keep "
+                                    f"position protected"
+                                )
+                            except Exception as restore_exc:
+                                log.error(
+                                    f"CRITICAL: {ticker} bearish exit failed AND "
+                                    f"stop restore also failed: {restore_exc}. "
+                                    f"Position is NAKED until next run."
+                                )
 
         # ------------------------------------------------------------------
         # 4a. ADJUST review action: update stop/TP levels for held position
