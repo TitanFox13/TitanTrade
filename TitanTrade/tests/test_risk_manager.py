@@ -126,6 +126,23 @@ class TestCashReserve:
         result = max_investable_amount(1_000_000, 500_000)
         assert result == 450_000
 
+    def test_committed_cash_reduces_investable(self):
+        # FIX: cash already committed to pending (unfilled) buy orders must be
+        # netted out, else simultaneous brackets over-commit into margin.
+        # 50k cash, 5k reserve, 30k committed to pending buys -> 15k investable.
+        result = max_investable_amount(100_000, 50_000, committed_cash=30_000)
+        assert result == 15_000
+
+    def test_committed_cash_can_zero_out_investable(self):
+        # Pending commitments that exceed free cash leave nothing to deploy —
+        # this is what prevents the account from going negative/margin.
+        result = max_investable_amount(100_000, 50_000, committed_cash=46_000)
+        assert result == 0
+
+    def test_committed_cash_defaults_to_zero(self):
+        # Backwards compatible: omitting committed_cash behaves as before.
+        assert max_investable_amount(100_000, 50_000) == 45_000
+
 
 # ---------------------------------------------------------------------------
 # Gate 5: Volatility-Adjusted Position Sizing
@@ -334,6 +351,28 @@ class TestPreTradeCheck:
         )
         assert result["allowed"] is False
         assert "cash_reserve" in result["failed_gates"]
+
+    def test_committed_cash_fails_reserve_gate(
+        self, tmp_state_dir, fake_config, bullish_thesis, sample_positions
+    ):
+        """FIX: $50k cash looks deployable, but if $46k is already committed to
+        pending buy orders only $4k is truly free — below the 5% reserve. The
+        gate must fail so we don't stack entries into margin/negative cash.
+        """
+        result = pre_trade_check(
+            ticker="AAPL",
+            thesis=bullish_thesis,
+            portfolio_value=100_000,
+            cash_balance=50_000,
+            positions=sample_positions,
+            stock_atr=3.0,
+            earnings_blocked=False,
+            cfg=fake_config,
+            committed_cash=46_000,
+        )
+        assert result["allowed"] is False
+        assert "cash_reserve" in result["failed_gates"]
+        assert "committed" in result["gate_results"]["cash_reserve"]["detail"]
 
     def test_all_gates_evaluated_even_on_failure(
         self, tmp_state_dir, fake_config, bullish_thesis, sample_positions

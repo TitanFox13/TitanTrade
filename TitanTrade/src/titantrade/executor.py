@@ -133,6 +133,40 @@ def cancel_all_orders_for_ticker(ticker: str, cfg: Config) -> int:
     return count
 
 
+def open_buy_commitment(cfg: Config, exclude_ticker: str | None = None) -> float:
+    """Sum the dollar notional of all open (pending, unfilled) BUY orders.
+
+    Entry brackets are day-limit orders that don't consume cash until they
+    fill, so settled ``cash`` overstates what's truly free to deploy. Feeding
+    this into the cash-reserve gate (``committed_cash``) stops N simultaneously
+    pending brackets from each passing the reserve check against the same cash
+    and then collectively filling into margin / negative cash.
+
+    ``exclude_ticker`` drops that symbol's pending buys from the total — used
+    when re-sizing an entry for a ticker whose own prior bracket we're about to
+    replace, so we don't double-count it against itself.
+    """
+    try:
+        orders = get_open_orders(None, cfg)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"Could not read open orders for commitment calc: {exc}")
+        return 0.0
+    total = 0.0
+    for o in orders:
+        if o.get("side") != "buy":
+            continue
+        if exclude_ticker and o.get("symbol") == exclude_ticker:
+            continue
+        try:
+            qty = float(o.get("qty") or 0)
+            # Limit entries carry limit_price; fall back to stop/notional.
+            price = float(o.get("limit_price") or o.get("stop_price") or 0)
+            total += qty * price
+        except (ValueError, TypeError):
+            continue
+    return total
+
+
 def _is_fractional(qty: float) -> bool:
     """Return True if quantity has a fractional component."""
     return qty != int(qty)
@@ -207,7 +241,26 @@ def place_bracket_order(
 
     Alpaca bracket orders require time_in_force = "day" (not gtc).
     The parent order and its legs are linked as OCO (one-cancels-other).
+
+    Alpaca rejects fractional bracket/OTO orders ("fractional orders must be
+    simple orders", HTTP 422). Whole-share callers should never hit this, but
+    we floor + validate here as a hard boundary so a sizing bug upstream can
+    never push a fractional qty to the broker (the production URI 0.19-share
+    bug). A floored qty below 1 share is unfillable as a bracket — raise so the
+    caller skips rather than silently shrinking the order.
     """
+    if _is_fractional(qty):
+        floored = float(int(qty))
+        log.warning(
+            f"Bracket qty for {ticker} was fractional ({qty}) — flooring to "
+            f"{floored} (brackets require whole shares)"
+        )
+        qty = floored
+    if qty < 1:
+        raise ValueError(
+            f"Bracket order for {ticker} requires >= 1 whole share, got {qty}"
+        )
+
     url = f"{cfg.alpaca.base_url}/v2/orders"
 
     order_class = "bracket" if take_profit_price else "oto"
@@ -239,6 +292,27 @@ def place_bracket_order(
     )
     resp = fetch_with_retry("POST", url, headers=_headers(cfg), json_body=body)
     return resp.json()
+
+
+def _available_qty_from_error(exc: HTTPError) -> float | None:
+    """Parse the broker-reported ``available`` qty from a 40310000 error body.
+
+    Alpaca's insufficient-qty 403 includes the true available quantity, e.g.
+    ``{"code":40310000,"available":"103", ...}``. When our intended qty is
+    stale (the classic TP1 / gap-down race), this is the number of shares we
+    can actually place a stop on right now. Returns the float or None if the
+    body doesn't carry a usable value.
+    """
+    data = exc.data if isinstance(exc.data, dict) else None
+    if not data:
+        return None
+    raw = data.get("available")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        return None
 
 
 # How long to wait for a cancel to reach the ``canceled`` state before giving
@@ -294,32 +368,61 @@ def place_native_stop_loss(
     Uses a stop-limit with a 1% buffer below the stop for slippage protection.
 
     Error handling:
-      - On Alpaca 40310000 ("insufficient qty available"), we POLL
-        ``qty_available`` until it meets ``qty`` (up to 30 s), then retry
-        the same stop-limit. This replaces an older 2-second blind sleep
-        that sometimes wasn't long enough in production — leaving held
-        positions without a stop for a ~6-hour window until the next
-        executor run.
+      - On Alpaca 40310000 ("insufficient qty available"), we POLL the
+        blocking order named in ``related_orders`` until it reaches a terminal
+        state (up to 120 s), then retry the same stop-limit. This replaces an
+        older 2-second blind sleep that sometimes wasn't long enough in
+        production — leaving held positions without a stop for a ~6-hour
+        window until the next executor run.
+      - If the retry STILL reports insufficient qty (or Alpaca never named a
+        blocking order to poll), we clamp to the broker-reported ``available``
+        quantity and place a stop on whatever shares actually exist. A stop on
+        100 of 103 intended shares beats no stop at all — this is the
+        last-resort guarantee that a position is never left bare (the FCX
+        TP1/gap-down race that stranded positions with no stop in production).
       - On any other 4xx we fall back to a plain stop order — historically
         Alpaca paper accounts have rejected stop-limit for some asset types.
     """
     url = f"{cfg.alpaca.base_url}/v2/orders"
-    stop_limit_body = {
-        "symbol": ticker,
-        "qty": str(qty),
-        "side": "sell",
-        "type": "stop_limit",
-        "stop_price": str(round(stop_price, 2)),
-        "limit_price": str(round(stop_price * 0.99, 2)),
-        "time_in_force": "gtc",
-    }
-    log.info(f"Stop-limit SELL: {qty} {ticker} stop=${stop_price}")
+
+    def _post_stop_limit(stop_qty: float) -> dict[str, Any]:
+        body = {
+            "symbol": ticker,
+            "qty": str(stop_qty),
+            "side": "sell",
+            "type": "stop_limit",
+            "stop_price": str(round(stop_price, 2)),
+            "limit_price": str(round(stop_price * 0.99, 2)),
+            "time_in_force": "gtc",
+        }
+        log.info(f"Stop-limit SELL: {stop_qty} {ticker} stop=${stop_price}")
+        return fetch_with_retry(
+            "POST", url, headers=_headers(cfg), json_body=body
+        ).json()
+
+    def _clamp_and_retry(exc: HTTPError) -> dict[str, Any]:
+        """Last resort: re-place the stop on the broker-reported available qty
+        so the position is never stranded without a stop."""
+        available = _available_qty_from_error(exc)
+        # Whole-share stops for clarity; available may come back as e.g. "103".
+        clamped = float(int(available)) if available and available >= 1 else 0.0
+        if clamped <= 0 or clamped >= qty:
+            # Nothing safe to clamp to (available is 0, unparseable, or not
+            # actually smaller than what we asked for) — propagate.
+            raise exc
+        log.warning(
+            f"Stop for {ticker}: clamping requested {qty} → broker-available "
+            f"{clamped} shares and retrying so the position is not left bare"
+        )
+        resp = _post_stop_limit(clamped)
+        log.warning(
+            f"Stop for {ticker} placed on {clamped} available shares "
+            f"(requested {qty}) — remainder is held by an in-flight order"
+        )
+        return resp
 
     try:
-        resp = fetch_with_retry(
-            "POST", url, headers=_headers(cfg), json_body=stop_limit_body
-        )
-        return resp.json()
+        return _post_stop_limit(qty)
     except HTTPError as exc:
         if exc.error_code == ALPACA_INSUFFICIENT_QTY:
             # Qty race — a recent cancel hasn't reached the ``canceled`` state
@@ -328,11 +431,13 @@ def place_native_stop_loss(
             related = exc.data.get("related_orders") if isinstance(exc.data, dict) else None
             blocking_id = related[0] if isinstance(related, list) and related else None
             if not blocking_id:
-                log.error(
+                # Can't poll — but Alpaca told us how many shares ARE available.
+                # Clamp to that rather than leaving the position unprotected.
+                log.warning(
                     f"Qty race for {ticker} but Alpaca did not name a blocking "
-                    f"order — cannot poll. Body: {exc.body[:200]}"
+                    f"order — clamping to available qty. Body: {exc.body[:200]}"
                 )
-                raise
+                return _clamp_and_retry(exc)
 
             log.warning(
                 f"Qty race for {ticker} (code 40310000) — blocked by order "
@@ -356,15 +461,22 @@ def place_native_stop_loss(
                 f"'{final_status}' after {waited:.1f}s — retrying stop-limit"
             )
             try:
-                resp = fetch_with_retry(
-                    "POST", url, headers=_headers(cfg), json_body=stop_limit_body
-                )
+                resp = _post_stop_limit(qty)
                 log.info(
                     f"Stop-limit for {ticker} succeeded after cancel settled "
                     f"({waited:.1f}s)"
                 )
-                return resp.json()
+                return resp
             except HTTPError as exc2:
+                if exc2.error_code == ALPACA_INSUFFICIENT_QTY:
+                    # Cancel settled but qty is still short (the sell that
+                    # reduced the position is itself still settling). Clamp to
+                    # whatever is available now — never return bare.
+                    log.error(
+                        f"Stop-limit for {ticker} still short after cancel "
+                        f"settled: {exc2.error_message} — clamping to available"
+                    )
+                    return _clamp_and_retry(exc2)
                 log.error(
                     f"Stop-limit for {ticker} failed after cancel settled: "
                     f"code={exc2.error_code} msg={exc2.error_message}"
@@ -916,6 +1028,43 @@ def _handle_bullish_entry(
             f"Skipping {ticker} bullish entry: downtrend regime "
             f"(price below SMA-50 and SMA-200). Wait for trend reversal."
         )
+        # Surface the analyst↔executor disagreement instead of skipping
+        # silently. The weekly analyst keeps ranking this ticker into the
+        # buy set (selected_for_trading=True, thesis=BULLISH) while the
+        # technical trend gate refuses to bottom-fish it — the persistent HCA
+        # case from production. Recording it as a near-miss with a synthetic
+        # ``trend_regime`` gate makes the conflict visible on the dashboard so
+        # a human can re-evaluate the pick (or the watchlist), rather than the
+        # selection slot being burned every cycle with no trace.
+        try:
+            context = _build_trade_context(ticker, data_bundle, sentry)
+            _append_near_miss({
+                "id": f"nm_{uuid.uuid4().hex[:8]}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "ticker": ticker,
+                "confidence": thesis.get("confidence", 0),
+                "thesis": thesis.get("thesis", ""),
+                "target_entry_price": entry_price,
+                "stop_loss_price": stop_price,
+                "take_profit_price": take_profit_price,
+                "reasoning": thesis.get("reasoning", ""),
+                "failed_gates": ["trend_regime"],
+                "gate_results": {
+                    "trend_regime": {
+                        "passed": False,
+                        "detail": (
+                            "Analyst-selected BULLISH but price is below both "
+                            "SMA-50 and SMA-200 (downtrend) — entry gate refuses "
+                            "to bottom-fish. Analyst/technical disagreement."
+                        ),
+                    },
+                },
+                "total_gates_failed": 1,
+                "context": context,
+            })
+            log.info(f"NEAR MISS recorded for {ticker}: downtrend regime vs BULLISH selection")
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"Could not record downtrend near-miss for {ticker}: {exc}")
         return None
 
     new_entry = _choose_entry_price(thesis, current_price, regime, confidence)
@@ -977,6 +1126,11 @@ def _handle_bullish_entry(
         .get("level")
     )
 
+    # Cash already committed to other pending buy orders must not be
+    # double-spent — keeps simultaneous entries from collectively breaching
+    # the cash reserve and pushing the account into margin.
+    committed_cash = open_buy_commitment(cfg, exclude_ticker=ticker)
+
     check = pre_trade_check(
         ticker=ticker,
         thesis=thesis,
@@ -989,6 +1143,7 @@ def _handle_bullish_entry(
         economic_calendar=economic_calendar,
         correlation_matrix=correlation_matrix,
         vix=vix_level,
+        committed_cash=committed_cash,
     )
 
     if not check["allowed"]:
@@ -1373,6 +1528,11 @@ def resubmit_expired_brackets(
             data_bundle.get("market_context", {}).get("vix", {}).get("level")
         )
 
+        # Net out cash already committed to other pending buys (this ticker's
+        # own expired bracket is already gone from the book, so don't exclude
+        # it — but any *other* pending entry must be reserved against).
+        committed_cash = open_buy_commitment(cfg, exclude_ticker=ticker)
+
         check = pre_trade_check(
             ticker=ticker,
             thesis=thesis,
@@ -1383,13 +1543,29 @@ def resubmit_expired_brackets(
             earnings_blocked=earnings_blocked,
             cfg=cfg,
             vix=vix_level,
+            committed_cash=committed_cash,
         )
 
         if not check["allowed"]:
             log.info(f"Resubmission blocked for {ticker}: {check['reason']}")
             continue
 
-        shares = check["shares"]
+        # Brackets require WHOLE shares — Alpaca rejects fractional bracket/OTO
+        # orders ("fractional orders must be simple orders", HTTP 422). The
+        # cash-reserve / overlay-cap reduction inside pre_trade_check can shave
+        # the size down to a fraction (production: URI sized to 0.19 shares
+        # when only ~$190 of investable cash remained against a ~$990 stock,
+        # then the bracket 422'd). Floor here and skip cleanly if there isn't
+        # room for even one whole share — resubmit again next cycle when cash
+        # frees up.
+        shares = float(int(check["shares"]))
+        if shares < 1:
+            log.info(
+                f"Resubmission skipped for {ticker}: sized to "
+                f"{check['shares']} share(s) — below 1 whole share for a "
+                f"bracket (insufficient investable cash this cycle)"
+            )
+            continue
 
         place_bracket_order(
             ticker=ticker,
@@ -1468,8 +1644,10 @@ def maybe_pyramid_position(
     operator — current behavior caps every entry at one bracket plus trail.
     Now: at +``pyramid_trigger_pct`` (5%) gain with the trailing stop active
     (so downside is bounded), we add ``pyramid_size_fraction`` (50%) of the
-    original notional as a market-buy, capped at ``pyramid_max_total_pct``
-    of portfolio.
+    original notional via a marketable LIMIT buy (a market buy is rejected as
+    a wash trade while the protective stop rests on the book), capped at
+    ``pyramid_max_total_pct`` of portfolio, then extend the stop to cover the
+    enlarged position.
 
     Pyramids fire exactly once per position (tracked via
     ``trailing_state[ticker]["pyramid_added"]``). Safety preconditions:
@@ -1562,11 +1740,81 @@ def maybe_pyramid_position(
         f"PYRAMID for {ticker}: position +{gain_pct:.1%}, adding {add_qty} "
         f"shares @ ~${current_price:.2f} on top of {int(qty)} existing"
     )
+
+    # WHY A LIMIT BUY, NOT A MARKET BUY:
+    # The position is always protected by a resting sell stop. Alpaca rejects a
+    # MARKET buy placed while an opposite-side stop/limit is open as a
+    # "potential wash trade" (code 40310000, "use complex/limit/stop_limit
+    # orders"). In production this made EVERY pyramid fail. A marketable LIMIT
+    # buy is accepted alongside the resting stop, so we never have to drop the
+    # protective stop to add. Price the limit slightly through the market
+    # (current * 1.003) for a near-immediate fill.
+    limit_price = round(current_price * 1.003, 2)
     try:
-        place_market_buy(ticker, add_qty, cfg)
+        buy_order = place_limit_buy(
+            ticker, add_qty, limit_price, cfg, time_in_force="day",
+        )
     except Exception as exc:
-        log.error(f"Pyramid market-buy failed for {ticker}: {exc}")
+        log.error(f"Pyramid limit-buy failed for {ticker}: {exc}")
         return None
+
+    # Wait for the add to fill before touching the stop. A marketable limit
+    # fills within seconds during market hours.
+    buy_id = buy_order.get("id") if isinstance(buy_order, dict) else None
+    fill_status = _wait_for_order_canceled(buy_id, cfg) if buy_id else None
+    if fill_status != "filled":
+        # Didn't fill in the polling window (price ran away, or off-hours queue).
+        # Cancel the resting add so we don't get a surprise UNPROTECTED fill
+        # later — the existing stop only covers the original shares. We'll
+        # retry the pyramid on a future cycle if conditions still hold.
+        if buy_id:
+            try:
+                cancel_order(buy_id, cfg)
+            except Exception as cexc:  # noqa: BLE001
+                log.warning(f"Pyramid {ticker}: failed to cancel unfilled add {buy_id}: {cexc}")
+        log.info(
+            f"Pyramid deferred for {ticker}: add order did not fill "
+            f"(status={fill_status}) — leaving existing stop in place, will retry"
+        )
+        return None
+
+    # Add filled. Extend the protective stop to cover the FULL position so the
+    # newly-added shares aren't left bare until the next trailing cycle. Cancel
+    # the old (partial-coverage) stop and re-place one for the full qty at the
+    # same protective price. Sell-to-sell cancel+replace is not a wash trade,
+    # and place_native_stop_loss clamps to available qty as a backstop.
+    new_total_qty = qty + add_qty
+    try:
+        open_orders = get_open_orders(ticker, cfg)
+        existing_stop = next(
+            (
+                o for o in open_orders
+                if o.get("type") in ("stop", "stop_limit")
+                and o.get("side") == "sell"
+            ),
+            None,
+        )
+        protective_price = (
+            float(existing_stop.get("stop_price", 0)) if existing_stop else 0.0
+        ) or float(thesis.get("stop_loss_price") or 0) or round(entry_price * 1.005, 2)
+        if existing_stop:
+            cancel_order(existing_stop["id"], cfg)
+            _wait_for_order_canceled(existing_stop["id"], cfg)
+        place_native_stop_loss(ticker, new_total_qty, protective_price, cfg)
+        log.info(
+            f"Pyramid {ticker}: stop extended to {new_total_qty} shares "
+            f"@ ${protective_price:.2f} (covers added {add_qty})"
+        )
+    except Exception as exc:  # noqa: BLE001
+        # The add filled but we couldn't extend the stop. The original stop (if
+        # it was never cancelled) still covers the original shares; the added
+        # shares ride to the next trailing cycle, which re-places a full-qty
+        # stop. Surface loudly.
+        log.error(
+            f"Pyramid {ticker}: add filled but stop extension to "
+            f"{new_total_qty} shares failed: {exc} — added shares protected at "
+            f"next trailing cycle"
+        )
 
     try:
         from titantrade.notifier import notify_pyramid_added
@@ -1671,10 +1919,22 @@ def manage_trailing_stop(
                 # Brief wait for cancels to settle (market is open per the
                 # gate above; cancels should be near-instant).
                 time.sleep(2)
-                place_market_sell(ticker, tp1_qty, cfg)
-                # Re-place stop at breakeven (entry + small buffer) on the
-                # remaining qty. Poll once for the position to update.
-                time.sleep(2)
+                sell_order = place_market_sell(ticker, tp1_qty, cfg)
+                # CRITICAL: wait for the partial sell to actually FILL before
+                # reading the position to size the breakeven stop. The old
+                # `time.sleep(2)` then read RACED the fill — the position still
+                # reported the pre-sell qty, so we requested a stop for more
+                # shares than were available (403), and when the restore path
+                # also used the stale qty the position was left with NO stop
+                # (the production FCX bare-position bug). Polling the sell order
+                # to a terminal state ('filled') removes the race; and
+                # place_native_stop_loss clamps to broker-available qty as a
+                # final backstop so the position is never left bare.
+                sell_id = sell_order.get("id") if isinstance(sell_order, dict) else None
+                if sell_id:
+                    _wait_for_order_canceled(sell_id, cfg)  # terminal incl. 'filled'
+                else:
+                    time.sleep(2)
                 new_pos = get_position(ticker, cfg)
                 if new_pos:
                     remaining_qty = float(new_pos.get("qty", 0))
@@ -1713,16 +1973,31 @@ def manage_trailing_stop(
                     return
             except Exception as exc:
                 log.error(f"TP1 partial sell failed for {ticker}: {exc}")
-                # Restoration attempt: re-place the original stop so the
-                # position isn't left bare. The original stop price comes
-                # from the thesis.
+                # Restoration: size the stop off the CURRENT position, not the
+                # stale pre-sell `qty`. Requesting the stale (larger) qty is
+                # exactly what 403'd and stranded FCX with no stop in
+                # production. Re-read the position, then lean on
+                # place_native_stop_loss's available-qty clamp as a final
+                # guarantee the position isn't left bare.
                 try:
-                    if thesis.get("stop_loss_price"):
+                    cur = get_position(ticker, cfg)
+                    protect_qty = float(cur.get("qty", 0)) if cur else 0.0
+                    restore_stop = (
+                        thesis.get("stop_loss_price")
+                        or round(entry_price * 1.005, 2)
+                    )
+                    if protect_qty > 0 and restore_stop:
                         place_native_stop_loss(
-                            ticker, qty, thesis["stop_loss_price"], cfg,
+                            ticker, protect_qty, restore_stop, cfg,
                         )
                         log.warning(
-                            f"{ticker}: restored thesis stop after TP1 failure"
+                            f"{ticker}: restored stop on {protect_qty} shares "
+                            f"after TP1 failure"
+                        )
+                    else:
+                        log.error(
+                            f"CRITICAL: {ticker} TP1 failed and no position "
+                            f"qty to protect (qty={protect_qty})"
                         )
                 except Exception as rexc:
                     log.error(f"CRITICAL: {ticker} stop restore failed: {rexc}")
@@ -2168,6 +2443,14 @@ def check_gap_down_protection(cfg: Config) -> list[dict[str, Any]]:
                 )
                 try:
                     cancel_order(order["id"], cfg)
+                    # Wait for the cancel to RELEASE the held qty before the
+                    # market sell. The stop-limit we just cancelled holds all
+                    # the shares (held_for_orders); firing the sell immediately
+                    # 403s with "insufficient qty (available: 0)". This was the
+                    # production bug where gap-down protection failed to fire on
+                    # FCX precisely when it was needed most. Polling the order
+                    # to a terminal state guarantees the shares are free.
+                    _wait_for_order_canceled(order["id"], cfg)
                     place_market_sell(ticker, qty, cfg)
                     trade = _trade_record(
                         ticker=ticker,

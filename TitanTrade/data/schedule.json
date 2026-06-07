@@ -9,6 +9,13 @@
       "enabled": true
     },
     {
+      "id": "weekday_fetch",
+      "name": "Daily Data Bundle Refresh",
+      "command": "fetch",
+      "cron": {"day_of_week": "mon-fri", "hour": 13, "minute": 0},
+      "enabled": true
+    },
+    {
       "id": "weekday_gapcheck",
       "name": "Gap-Down Check",
       "command": "gapcheck",

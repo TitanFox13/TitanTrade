@@ -15,11 +15,12 @@ from titantrade.executor import check_gap_down_protection
 class TestGapDownDetection:
     @patch("titantrade.executor._append_trade")
     @patch("titantrade.executor.place_market_sell", return_value={"id": "sell_1"})
+    @patch("titantrade.executor._wait_for_order_canceled", return_value="canceled")
     @patch("titantrade.executor.cancel_order")
     @patch("titantrade.executor.get_open_orders")
     @patch("titantrade.executor.get_positions")
     def test_detects_gap_through_stop_limit(
-        self, mock_pos, mock_orders, mock_cancel, mock_sell, mock_append,
+        self, mock_pos, mock_orders, mock_cancel, mock_wait, mock_sell, mock_append,
         fake_config, tmp_state_dir,
     ):
         mock_pos.return_value = [
@@ -38,6 +39,10 @@ class TestGapDownDetection:
         assert len(result) == 1
         assert result[0]["trigger"] == "gap_down_protection"
         mock_cancel.assert_called_once_with("stop_1", fake_config)
+        # FIX: must wait for the cancel to release the held qty BEFORE the
+        # market sell, else the sell 403s "insufficient qty (available: 0)" —
+        # the production bug where gap-down protection failed to fire on FCX.
+        mock_wait.assert_called_once_with("stop_1", fake_config)
         mock_sell.assert_called_once_with("AAPL", 50, fake_config)
 
     @patch("titantrade.executor.place_market_sell")

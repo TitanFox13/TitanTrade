@@ -519,32 +519,34 @@ class TestPlaceNativeStopLoss:
         for call in mock_get_order.call_args_list:
             assert call.args[0] == "blocking-order-1"
 
-    @patch("titantrade.executor.time.time")
-    @patch("titantrade.executor.time.sleep")
-    @patch("titantrade.executor.get_order")
+    @patch("titantrade.executor._wait_for_order_canceled", return_value=None)
     @patch("titantrade.executor.fetch_with_retry")
     def test_qty_race_times_out_if_cancel_never_completes(
-        self, mock_fetch, mock_get_order, mock_sleep, mock_time, fake_config,
+        self, mock_fetch, mock_wait, fake_config,
     ):
-        """If the blocking order stays in pending_cancel past the timeout
-        (e.g. off-hours), we raise rather than retrying forever.
+        """If the blocking order never reaches a terminal state (e.g. an
+        off-hours pending_cancel), we raise rather than retrying forever.
+
+        Patching ``_wait_for_order_canceled`` directly (instead of mocking the
+        global ``time.time`` with a fixed side_effect) makes this robust: the
+        prior version exhausted its time.time() sequence because pytest's log
+        capture also calls the globally-patched time.time per log record.
         """
+        # available "0" in the race body means there's nothing to clamp to,
+        # so a timeout must propagate the original error.
         mock_fetch.side_effect = [_make_qty_race_error("stuck-order")]
-        # Order forever stuck in pending_cancel
-        mock_get_order.return_value = {"id": "stuck-order", "status": "pending_cancel"}
-        # time.time() jumps past the 120s deadline quickly
-        mock_time.side_effect = [0.0, 0.0, 121.0, 121.0, 121.0, 121.0]
 
         with pytest.raises(HTTPError) as exc_info:
             place_native_stop_loss("FCX", 121, 64.50, fake_config)
 
         assert exc_info.value.error_code == 40310000
         assert mock_fetch.call_count == 1  # one initial attempt; gave up polling
+        mock_wait.assert_called_once_with("stuck-order", fake_config)
 
     @patch("titantrade.executor.fetch_with_retry")
-    def test_qty_race_without_related_orders_raises(self, mock_fetch, fake_config):
-        """If Alpaca returns 40310000 without naming the blocking order in
-        related_orders, we can't poll — must raise."""
+    def test_qty_race_without_related_orders_or_available_raises(self, mock_fetch, fake_config):
+        """If Alpaca returns 40310000 without naming the blocking order AND
+        without an ``available`` qty to clamp to, we can't recover — raise."""
         bad_error = HTTPError(
             status_code=403,
             body='{"code":40310000,"message":"insufficient qty","symbol":"FCX"}',
@@ -556,6 +558,36 @@ class TestPlaceNativeStopLoss:
         with pytest.raises(HTTPError) as exc_info:
             place_native_stop_loss("FCX", 121, 64.50, fake_config)
         assert exc_info.value.error_code == 40310000
+
+    @patch("titantrade.executor.fetch_with_retry")
+    def test_qty_race_without_related_orders_clamps_to_available(self, mock_fetch, fake_config):
+        """FIX (bare-position guard): when Alpaca reports a positive
+        ``available`` qty but names no blocking order to poll, we must NOT give
+        up — we clamp the stop to the available shares and retry. A stop on 103
+        of 121 shares beats leaving the position bare (the FCX production race).
+        """
+        race = HTTPError(
+            status_code=403,
+            body=(
+                '{"code":40310000,"available":"103","existing_qty":"103",'
+                '"held_for_orders":"0",'
+                '"message":"insufficient qty available for order (requested: 121, available: 103)",'
+                '"symbol":"FCX"}'
+            ),
+            url="https://paper-api.alpaca.markets/v2/orders",
+            method="POST",
+        )
+        mock_fetch.side_effect = [race, _make_response({"id": "clamped-stop", "status": "accepted"})]
+
+        result = place_native_stop_loss("FCX", 121, 64.50, fake_config)
+
+        assert result["id"] == "clamped-stop"
+        assert mock_fetch.call_count == 2
+        # The retry placed a stop for the broker-reported available qty (103),
+        # not the original stale 121.
+        retry_body = mock_fetch.call_args_list[1].kwargs["json_body"]
+        assert retry_body["qty"] == "103.0"
+        assert retry_body["type"] == "stop_limit"
 
     @patch("titantrade.executor.fetch_with_retry")
     def test_falls_back_to_plain_stop_on_non_qty_error(self, mock_fetch, fake_config):
@@ -827,6 +859,10 @@ def _stub_e2e_mocks(monkeypatch, *, market_open: bool, position: dict, open_orde
     _patch("place_native_stop_loss", return_value={"id": "new-stop"})
     _patch("place_limit_sell", return_value={"id": "restored-tp"})
     _patch("manage_trailing_stop", return_value=None)
+    # Section 4b also runs the pyramid check on held BULLISH positions; stub it
+    # so these stop-placement E2E tests stay focused and hermetic (the real one
+    # would place a limit buy over the network).
+    _patch("maybe_pyramid_position", return_value=None)
     _patch("_maybe_alert_stuck_in_cash", return_value=None)
     _patch("_maybe_alert_ticker_churn", return_value=None)
     return mocks
@@ -1615,23 +1651,76 @@ class TestPyramidIntoWinners:
             "take_profit_price": 115.0,
         }
 
-    @patch("titantrade.executor.place_market_buy", return_value={"id": "pyramid-1"})
-    def test_pyramids_at_5pct_gain(
-        self, mock_buy, fake_config, tmp_state_dir,
+    # An existing protective stop on the book — the pyramid must extend it to
+    # cover the added shares (and must NEVER place a market buy against it).
+    def _existing_stop(self, qty="100"):
+        return [{
+            "id": "stop-old", "type": "stop_limit", "side": "sell",
+            "stop_price": "95.00", "qty": qty,
+        }]
+
+    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "stop-new"})
+    @patch("titantrade.executor.cancel_order")
+    @patch("titantrade.executor._wait_for_order_canceled", return_value="filled")
+    @patch("titantrade.executor.get_open_orders")
+    @patch("titantrade.executor.place_limit_buy", return_value={"id": "pyr-buy"})
+    @patch("titantrade.executor.place_market_buy")
+    def test_pyramids_at_5pct_gain_via_limit_buy(
+        self, mock_market_buy, mock_limit_buy, mock_orders, mock_wait,
+        mock_cancel, mock_stop, fake_config, tmp_state_dir,
     ):
+        """FIX: pyramid adds with a marketable LIMIT buy (never a market buy,
+        which Alpaca rejects as a wash trade while the protective sell stop is
+        on the book — the bug that made every pyramid fail), then extends the
+        stop to cover the full position.
+        """
+        mock_orders.return_value = self._existing_stop(qty="100")
+
         trade = maybe_pyramid_position(
             "FOO", self._thesis(), self._winning_position(gain_pct=0.07),
             {"signal": "CONTINUE"}, portfolio_value=100_000, cfg=fake_config,
         )
         assert trade is not None
         assert trade["trigger"] == "pyramid"
-        # Original notional = $10000, pyramid 50% = $5000, at $107 = 46 shares
-        mock_buy.assert_called_once()
-        sold_args = mock_buy.call_args.args
-        assert sold_args[0] == "FOO"
-        assert sold_args[1] == 46  # int(5000 / 107)
 
-    @patch("titantrade.executor.place_market_buy")
+        # CORE FIX: the add is a LIMIT buy, NOT a market buy.
+        mock_market_buy.assert_not_called()
+        mock_limit_buy.assert_called_once()
+        buy_args = mock_limit_buy.call_args
+        assert buy_args.args[0] == "FOO"
+        # Original notional $10000 × 50% = $5000, at $107 = 46 shares
+        assert buy_args.args[1] == 46
+        assert buy_args.args[2] == pytest.approx(107.0 * 1.003, abs=0.01)  # marketable limit
+        assert buy_args.kwargs.get("time_in_force") == "day"
+
+        # After the add fills, the stop is extended to cover the FULL position
+        # (100 existing + 46 added = 146) so the new shares aren't left bare.
+        mock_cancel.assert_called_once_with("stop-old", fake_config)
+        mock_stop.assert_called_once()
+        stop_args = mock_stop.call_args.args
+        assert stop_args[0] == "FOO"
+        assert stop_args[1] == 146  # full coverage
+        assert stop_args[2] == pytest.approx(95.0, abs=0.01)  # existing stop price
+
+    @patch("titantrade.executor.cancel_order")
+    @patch("titantrade.executor._wait_for_order_canceled", return_value="canceled")
+    @patch("titantrade.executor.place_limit_buy", return_value={"id": "pyr-buy"})
+    def test_unfilled_add_is_cancelled_and_no_trade(
+        self, mock_limit_buy, mock_wait, mock_cancel, fake_config, tmp_state_dir,
+    ):
+        """If the add limit doesn't fill (poll returns a non-'filled' terminal
+        state), we cancel the resting buy so it can't fill later UNPROTECTED,
+        and record no trade.
+        """
+        trade = maybe_pyramid_position(
+            "FOO", self._thesis(), self._winning_position(gain_pct=0.07),
+            {"signal": "CONTINUE"}, portfolio_value=100_000, cfg=fake_config,
+        )
+        assert trade is None
+        mock_limit_buy.assert_called_once()
+        mock_cancel.assert_called_once_with("pyr-buy", fake_config)
+
+    @patch("titantrade.executor.place_limit_buy")
     def test_does_not_fire_below_trigger(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1643,7 +1732,7 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.executor.place_market_buy", return_value={"id": "pyr"})
+    @patch("titantrade.executor.place_limit_buy")
     def test_only_fires_once_per_position(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1657,7 +1746,7 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.executor.place_market_buy")
+    @patch("titantrade.executor.place_limit_buy")
     def test_skips_if_sentry_aborting(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1668,7 +1757,7 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.executor.place_market_buy")
+    @patch("titantrade.executor.place_limit_buy")
     def test_skips_if_thesis_flipped(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1681,7 +1770,7 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.executor.place_market_buy")
+    @patch("titantrade.executor.place_limit_buy")
     def test_respects_concentration_cap(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1703,12 +1792,13 @@ class TestPyramidIntoWinners:
 # ---------------------------------------------------------------------------
 
 class TestPyramidWashTradeGuard:
-    """Production bug: TP1 sells 18 shares, then pyramid tries to buy 16 in
-    the same cycle, Alpaca rejects as a wash trade ("code 40310000, potential
-    wash trade detected"). Pyramid must defer when TP1 just fired.
+    """Production bug: TP1 sells, then pyramid tried a MARKET buy in the same
+    cycle and Alpaca rejected it as a wash trade ("code 40310000"). Two layers
+    of defense now: (1) the add is a limit buy, not a market buy; (2) pyramid
+    still defers for 30 min after TP1 to avoid churning the just-sold position.
     """
 
-    @patch("titantrade.executor.place_market_buy")
+    @patch("titantrade.executor.place_limit_buy")
     def test_pyramid_defers_when_tp1_fired_recently(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1738,12 +1828,18 @@ class TestPyramidWashTradeGuard:
         assert result is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.executor.place_market_buy", return_value={"id": "p1"})
+    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "stop-new"})
+    @patch("titantrade.executor.cancel_order")
+    @patch("titantrade.executor._wait_for_order_canceled", return_value="filled")
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.executor.place_limit_buy", return_value={"id": "p1"})
+    @patch("titantrade.executor.place_market_buy")
     def test_pyramid_fires_when_tp1_old_enough(
-        self, mock_buy, fake_config, tmp_state_dir,
+        self, mock_market_buy, mock_limit_buy, mock_orders, mock_wait,
+        mock_cancel, mock_stop, fake_config, tmp_state_dir,
     ):
-        """Once 30+ minutes have passed since TP1, the wash-trade window has
-        closed and pyramid can fire normally.
+        """Once 30+ minutes have passed since TP1, the cooldown window has
+        closed and the pyramid fires — via a limit buy, never a market buy.
         """
         from datetime import datetime, timezone, timedelta
         from titantrade.executor import maybe_pyramid_position, _save_trailing_state
@@ -1763,15 +1859,13 @@ class TestPyramidWashTradeGuard:
             "stop_loss_price": 95.0,
             "take_profit_price": 115.0,
         }
-        # Note: this is contrived — in production, pyramid_added would be True
-        # from the same cycle as TP1. But the contract we're testing is the
-        # 30-min cooldown window, not the once-per-position state.
         result = maybe_pyramid_position(
             "FOO", thesis, position, {"signal": "CONTINUE"},
             portfolio_value=100_000, cfg=fake_config,
         )
         assert result is not None
-        mock_buy.assert_called_once()
+        mock_market_buy.assert_not_called()
+        mock_limit_buy.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

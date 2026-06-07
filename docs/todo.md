@@ -1,5 +1,18 @@
 # TitanTrade TODO
 
+## Phase 1.19: Execution-safety hardening (2026-06-07) — go-live blockers
+From a 14-day paper-log review (see Decision 035). All six found bugs fixed:
+- [x] TP1 race fixed: poll the partial sell to `filled` before sizing the breakeven stop; restore handler sizes off the live position, not the stale pre-sell qty
+- [x] `place_native_stop_loss` clamps to broker-reported `available` qty as a last resort — a position is never left bare (the FCX `CRITICAL stop restore failed` case)
+- [x] Pyramid adds via marketable LIMIT buy (was a market buy → 100% wash-trade reject); stop extended to cover the enlarged position after fill
+- [x] Gap-down protection waits for the cancel to release held qty before the market sell (was 403-ing on `available: 0`)
+- [x] Fractional bracket guard: `place_bracket_order` floors/raises; resubmit skips when sized < 1 whole share (the URI 0.19-share → 422 bug)
+- [x] Committed-cash reserve: cash-reserve gate nets out pending buy-order notional so simultaneous brackets can't fill into margin/negative cash
+- [x] Daily `weekday_fetch` job (13:00 UTC) so the data bundle is refreshed daily, not just weekly (was aging to 120h)
+- [x] Analyst↔executor downtrend conflict (HCA) recorded as a near-miss instead of a silent per-cycle skip
+- [x] 12 new tests (437 total passing); de-flaked the brittle qty-race-timeout test
+- [ ] Follow-up: make Pass-2 selection trend-aware so it stops ranking downtrend names into the buy set (deferred — changes non-deterministic AI output)
+
 ## Phase 1: Core Infrastructure
 - [x] Project structure and configuration
 - [x] Config management (env vars, watchlist)

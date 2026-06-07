@@ -47,6 +47,12 @@ def _run_full() -> str:
     return f"{len(trades)} trades executed"
 
 
+def _run_fetch() -> str:
+    from .data_fetcher import main as fetch_main
+    fetch_main()
+    return "data bundle refreshed"
+
+
 def _run_sentry() -> str:
     from .daily_sentry import main as sentry_main
     sentry_main()
@@ -115,6 +121,7 @@ def _run_daily_summary() -> str:
 
 COMMANDS: dict[str, callable] = {
     "full": _run_full,
+    "fetch": _run_fetch,
     "sentry": _run_sentry,
     "execute": _run_execute,
     "sentry_execute": _run_sentry_execute,

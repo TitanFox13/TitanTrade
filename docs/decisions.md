@@ -873,3 +873,36 @@ After Decisions 032-033 rewired the executor's risk gates, sizing, entry style, 
 - 389 tests passing (was 382 after Decision 033).
 - New tests verify position-context rendering in the sentry prompt and news-dedup-key normalization edge cases.
 - Existing news-only-ABORT-downgrade test continues to enforce the policy at the executor layer (defense-in-depth: prompt asks Gemini not to do it, executor catches it if Gemini does anyway).
+
+## Decision 035: Execution-Safety Hardening — Stop Coverage, Pyramid, Cash Reserve, Data Freshness
+**Date**: 2026-06-07
+**Decision**: Fix six execution bugs surfaced by a 14-day paper-trading log review, three of which could leave a real-money position unprotected or over-leveraged. These are go-live blockers; the strategy logic was sound but the order-management plumbing was not.
+
+**Context** — the production log showed:
+- `CRITICAL: FCX stop restore failed` — after a TP1 partial sell, the breakeven-stop placement raced the sell's settlement, requested a stop for the stale (pre-sell) qty, 403'd, and the restore path *also* used the stale qty and failed → position left with **no stop**. The gap-down failsafe then also failed (`insufficient qty available: 0`) because it market-sold against a just-cancelled stop still holding the shares.
+- `Pyramid market-buy failed … potential wash trade detected` on **every** pyramid attempt — a market buy placed while the protective sell stop rested on the book is rejected by Alpaca.
+- `Bracket resubmission failed … fractional orders must be simple orders` — the cash-reserve reduction sized URI to 0.19 shares and posted it as a bracket (HTTP 422).
+- `Cash: $-6,379.77`, buying power 2-3× portfolio — simultaneously-pending bracket entries each passed the 5% cash-reserve gate against the same settled cash, then collectively filled into margin.
+- `Data bundle is 120h old` — the bundle was only refreshed by the weekly Sunday pipeline; trend-regime/ATR decisions ran on 5-day-old data by Friday.
+- HCA was selected BULLISH by the analyst every week but blocked every cycle by the downtrend trend-gate — a silent, repeating analyst↔executor conflict.
+
+**Implementation** (all in `executor.py` unless noted):
+1. **TP1 stop-replace race** (`manage_trailing_stop`): poll the partial sell to a terminal (`filled`) state before re-reading the position to size the breakeven stop, instead of a blind `sleep(2)`. The restore-on-failure handler now re-reads the *live* position qty rather than the stale pre-sell qty.
+2. **Bare-position backstop** (`place_native_stop_loss`): on a persistent `insufficient qty` (40310000) — whether or not Alpaca names a blocking order to poll — clamp the stop to the broker-reported `available` qty and retry. A stop on 103 of 121 shares beats no stop. This is the last-resort guarantee a position is never left bare.
+3. **Pyramid via marketable limit buy** (`maybe_pyramid_position`): add with a LIMIT buy (`current × 1.003`, day TIF) — accepted alongside the resting stop — instead of a market buy (wash-trade reject). After the add fills, cancel+replace the protective stop to cover the full enlarged position; if the add doesn't fill in the poll window, cancel it so no surprise unprotected fill.
+4. **Gap-down protection** (`check_gap_down_protection`): wait for the cancelled stop to reach a terminal state (releasing the held qty) before the protective market sell, so it no longer 403s exactly when it's needed.
+5. **Fractional bracket guard**: `place_bracket_order` floors fractional qty and raises below 1 whole share; `resubmit_expired_brackets` floors `check["shares"]` and skips cleanly when there isn't room for one whole share (no more 422).
+6. **Committed-cash reserve** (`risk_manager.max_investable_amount` / `pre_trade_check` + `executor.open_buy_commitment`): the cash-reserve gate now nets out the notional of already-pending buy orders, so N simultaneous brackets can't each clear the reserve against the same cash and collectively breach it into margin.
+7. **Daily data refresh** (`scheduler.py` + `data/schedule.json`): added a `fetch` command and a weekday `weekday_fetch` job (13:00 UTC, before the morning sentry/execute) so the data bundle is refreshed daily, not just weekly.
+8. **Analyst↔executor conflict surfaced** (`_handle_bullish_entry`): a BULLISH+selected ticker blocked by the downtrend regime is now recorded as a near-miss (synthetic `trend_regime` gate) so the disagreement is visible on the dashboard rather than silently burning a selection slot each cycle.
+
+**Trade-offs**:
+- The committed-cash reserve will, by design, decline some entries that the old gate would have allowed — that's the point (it's what prevented negative cash). It can slightly reduce deployment in cash-tight windows.
+- Pyramiding now depends on a marketable limit filling within the poll window; if it doesn't, the add is cancelled and retried next cycle rather than forced. Acceptable — pyramids are opportunistic.
+- The daily fetch adds one FMP data pull per weekday (no LLM/token cost).
+- The downtrend near-miss is recorded each cycle the conflict persists; the existing near-miss archival cap bounds file growth. The deeper fix (making Pass-2 selection trend-aware) is left as a follow-up because it changes non-deterministic AI output.
+
+**Validation**:
+- 437 tests passing (was 425), all external calls mocked — zero real orders, zero tokens.
+- New regression tests reproduce each production failure mode: stop-clamp-to-available, TP1 restore sizing off the live position, pyramid limit-buy (never market-buy) + unfilled-add cancel, gap-down cancel-settle ordering, fractional-bracket guard + resubmit skip, committed-cash reserve blocking, and the downtrend near-miss.
+- Pre-existing brittle test (`test_qty_race_times_out_if_cancel_never_completes`) de-flaked by patching `_wait_for_order_canceled` instead of the global `time.time` (pytest's log capture was consuming the mocked clock).

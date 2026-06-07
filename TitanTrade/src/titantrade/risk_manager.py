@@ -138,13 +138,26 @@ def check_drawdown_circuit_breaker(portfolio_value: float) -> tuple[bool, float]
 # Cash reserve enforcement
 # ---------------------------------------------------------------------------
 
-def max_investable_amount(portfolio_value: float, cash_balance: float) -> float:
+def max_investable_amount(
+    portfolio_value: float,
+    cash_balance: float,
+    committed_cash: float = 0.0,
+) -> float:
     """How much cash can we deploy while maintaining the minimum reserve?
 
     Returns the maximum dollar amount available for new positions.
+
+    ``committed_cash`` is the notional of already-pending (unfilled) BUY
+    orders. Entry brackets are day-limit orders that don't consume cash until
+    they fill, so the raw ``cash_balance`` overstates what's truly free: N
+    pending brackets can each pass this gate against the same settled cash,
+    then all fill and drive the account into margin / negative cash (the
+    production bug where cash hit -$6,379 with buying power at 2-3x portfolio).
+    Subtracting committed cash makes the reserve hold across simultaneously
+    pending entries.
     """
     min_cash = portfolio_value * (MIN_CASH_RESERVE_PCT / 100)
-    available = max(cash_balance - min_cash, 0)
+    available = max(cash_balance - min_cash - max(committed_cash, 0.0), 0)
     return available
 
 
@@ -498,6 +511,7 @@ def pre_trade_check(
     economic_calendar: list[dict[str, Any]] | None = None,
     correlation_matrix: dict[str, dict[str, float]] | None = None,
     vix: float | None = None,
+    committed_cash: float = 0.0,
 ) -> dict[str, Any]:
     """Run all risk checks before allowing a trade.
 
@@ -560,10 +574,13 @@ def pre_trade_check(
         if drawdown > MAX_DRAWDOWN_PCT * 0.7:
             result["flags"].append(f"WARNING: Drawdown at {drawdown:.1f}% (breaker at {MAX_DRAWDOWN_PCT}%)")
 
-    # Gate 4: Cash reserve
-    investable = max_investable_amount(portfolio_value, cash_balance)
+    # Gate 4: Cash reserve (net of cash already committed to pending buy orders)
+    investable = max_investable_amount(portfolio_value, cash_balance, committed_cash)
     if investable <= 0:
-        _fail("cash_reserve", f"Insufficient cash after maintaining {MIN_CASH_RESERVE_PCT}% reserve")
+        detail = f"Insufficient cash after maintaining {MIN_CASH_RESERVE_PCT}% reserve"
+        if committed_cash > 0:
+            detail += f" (${committed_cash:,.0f} already committed to pending orders)"
+        _fail("cash_reserve", detail)
     else:
         _pass("cash_reserve", f"${investable:,.2f} available after reserve")
 

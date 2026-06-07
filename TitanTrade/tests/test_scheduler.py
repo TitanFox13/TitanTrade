@@ -66,8 +66,15 @@ class TestCommandRegistry:
             assert callable(fn), f"Command {name} is not callable"
 
     def test_expected_commands_exist(self):
-        expected = {"full", "sentry", "execute", "sentry_execute", "pricecheck", "gapcheck", "resubmit", "daily_summary"}
+        expected = {"full", "fetch", "sentry", "execute", "sentry_execute", "pricecheck", "gapcheck", "resubmit", "daily_summary"}
         assert set(COMMANDS.keys()) == expected
+
+    def test_fetch_command_registered(self):
+        """A daily `fetch` job keeps the data bundle fresh — without it the
+        bundle only refreshed weekly and aged to 120h+ between Sunday runs,
+        making trend-regime/ATR decisions run on stale data."""
+        assert "fetch" in COMMANDS
+        assert callable(COMMANDS["fetch"])
 
 
 class TestExecuteJob:

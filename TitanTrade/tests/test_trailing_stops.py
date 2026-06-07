@@ -276,6 +276,7 @@ class TestTrancheTpFirstTake:
             "take_profit_price": 120.0,
         }
 
+    @patch("titantrade.executor._wait_for_order_canceled", return_value="filled")
     @patch("titantrade.executor.time.sleep", return_value=None)
     @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new-stop"})
     @patch("titantrade.executor.place_market_sell", return_value={"id": "tp1-sell"})
@@ -285,7 +286,7 @@ class TestTrancheTpFirstTake:
     def test_partial_sell_and_breakeven_stop(
         self,
         mock_get_open, mock_get_pos, mock_cancel_all, mock_market_sell,
-        mock_place_stop, mock_sleep,
+        mock_place_stop, mock_sleep, mock_wait,
         position_at_tp1, thesis_with_tp, fake_config, tmp_state_dir,
     ):
         # After partial sell, position has 20 shares remaining
@@ -301,6 +302,10 @@ class TestTrancheTpFirstTake:
         sell_args = mock_market_sell.call_args.args
         assert sell_args[0] == "FOO"
         assert sell_args[1] == 10  # 30 * 0.333 = 10
+        # FIX: the breakeven stop is sized only AFTER the partial sell has been
+        # polled to a terminal ('filled') state — the position read that sizes
+        # the stop must not race the fill (the FCX bare-position bug).
+        mock_wait.assert_called_once_with("tp1-sell", fake_config)
         # Stop was re-placed at breakeven on the remaining 20 shares
         stop_calls = mock_place_stop.call_args_list
         assert len(stop_calls) >= 1

@@ -115,8 +115,9 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - Stop-limit orders with 1% buffer to prevent catastrophic slippage
 - Stops live on Alpaca's servers, fire 24/7 even if bot is offline
 - Orphan detection: every run checks held positions have a stop order
-- **Bracket resubmission**: expired day-only brackets are auto-resubmitted next morning with dynamically adjusted entry prices based on current market conditions
-- **Gap-down protection**: detects unfilled stop-limit orders after overnight gaps and immediately market-sells the unprotected position
+- **Bracket resubmission**: expired day-only brackets are auto-resubmitted next morning with dynamically adjusted entry prices based on current market conditions (resubmits floor to whole shares — a sub-1-share size is skipped, never sent as a fractional bracket that Alpaca rejects with HTTP 422)
+- **Gap-down protection**: detects unfilled stop-limit orders after overnight gaps and immediately market-sells the unprotected position. The stale stop's cancel is polled to a terminal state *before* the market sell so the sell isn't rejected for still-held qty (Decision 035)
+- **Never-bare guarantee** (Decision 035): after a partial sell (TP1), the sell is polled to `filled` before the breakeven stop is sized; `place_native_stop_loss` clamps to the broker-reported `available` qty if momentarily short. A position is never left without a stop after a partial sell or stop replace.
 
 ### Trailing Stops
 - Activates once a position gains 5%+ from entry price
@@ -125,10 +126,15 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - Never trails below the original thesis stop (doesn't widen risk)
 - Cancels the existing stop and replaces with a higher one each execution cycle
 
+### Pyramiding Into Winners
+- Adds to a position once per ticker when it's working (+5% gain with the trailing stop active, so combined downside is bounded)
+- Adds 50% of the original notional, capped at the per-ticker concentration limit (30% of portfolio)
+- Uses a **marketable limit buy**, never a market buy — a market buy placed while the protective sell stop rests on the book is rejected by Alpaca as a wash trade (Decision 035). After the add fills, the stop is extended to cover the enlarged position.
+
 ### Portfolio-Level Protection
 - Peak portfolio tracking for drawdown calculation
 - Sector concentration monitoring
-- Cash reserve enforcement before any new entry
+- Cash reserve enforcement before any new entry — **nets out cash already committed to pending buy orders** so simultaneous entries can't collectively breach the reserve into margin (Decision 035)
 - Weekly position reviews: CONTINUE, ADJUST (update levels), or CLOSE (explicit exit)
 - Pass 2 selection filter (only top 3-5 new trades execute)
 
@@ -203,6 +209,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - Docker container with Python 3.12 and uv package manager
 - **Built-in scheduler** (APScheduler): all cron jobs run inside the API container
 - No host-level cron required — schedule defined in `data/schedule.json`
+- **Daily data refresh**: a `weekday_fetch` job (13:00 UTC, before the morning sentry/execute) rebuilds `data_bundle.json` every weekday so trend-regime/ATR decisions never run on stale data — previously the bundle only refreshed in the weekly Sunday pipeline and aged to 120h+ by Friday (Decision 035)
 - State persists via bind-mounted volumes (`./data`, `./state`, `./logs`)
 - Scheduler screen in Flutter app: view status, enable/disable, manual trigger
 - CLI commands still available: `docker compose run --rm titantrade <command>`

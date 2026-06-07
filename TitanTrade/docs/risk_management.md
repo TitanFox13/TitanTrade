@@ -34,11 +34,10 @@ Eight hard gates between the AI and the brokerage, enforced in code:
 - Only resets when portfolio recovers or next weekly analyst runs
 - Prevents cascading losses in correlated selloffs
 
-#### Gate 4: Cash Reserve (20% minimum)
-- Always maintain 20% of portfolio in cash
-- Cash provides optionality for opportunities
-- Prevents going all-in even with 10 BULLISH theses
+#### Gate 4: Cash Reserve (5% minimum, net of pending commitments)
+- Always maintain 5% of portfolio in cash (lowered from 20% — see Decision 032; cash is transit, not a destination)
 - Position sizes reduced to fit within available cash
+- **Committed-cash netting** (Decision 035): the gate subtracts the notional of already-pending (unfilled) BUY orders before checking the reserve. Entry brackets are day-limit orders that don't consume cash until they fill, so raw settled cash overstates what's free — without this, N simultaneously-pending brackets each passed the reserve against the same cash and then collectively filled into margin (production: cash hit −$6,379, buying power 2-3× portfolio). `open_buy_commitment()` sums pending buy notional; `max_investable_amount(pv, cash, committed_cash)` and `pre_trade_check(..., committed_cash=...)` net it out.
 
 #### Gate 5: Volatility-Adjusted Position Sizing
 - Uses ATR (Average True Range) instead of fixed percentage
@@ -70,8 +69,10 @@ Eight hard gates between the AI and the brokerage, enforced in code:
 - Stop-limit with 1% buffer (prevents unlimited slippage)
 - Every execution run checks for orphaned positions without stops
 - Bracket orders ensure stop is atomically placed with entry
-- **Trailing stops**: once a position gains 5%+, the stop ratchets up to trail 3% below the high-water mark
-- **Gap-down protection**: if a stop-limit fails to fill due to a price gap, the position is immediately market-sold
+- **Trailing stops**: once a position gains 5%+, the stop ratchets up to trail 2.5×ATR below the high-water mark (Decision 033)
+- **Gap-down protection**: if a stop-limit fails to fill due to a price gap, the position is immediately market-sold. The cancel of the stale stop-limit is polled to a terminal state *before* the protective market sell so the sell isn't rejected for held qty (Decision 035).
+- **Never-bare guarantee** (Decision 035): on a partial sell (TP1), the sell is polled to `filled` before the breakeven stop is sized, and `place_native_stop_loss` clamps to the broker-reported `available` qty if its intended qty is momentarily short. The combination ensures a position is never left without a stop after a partial sell or stop cancel+replace.
+- **Pyramiding** adds via a marketable limit buy (not a market buy, which Alpaca rejects as a wash trade while the protective stop rests on the book), then extends the stop to cover the enlarged position (Decision 035).
 
 ## Daily Protection (Sentry)
 
