@@ -6,9 +6,10 @@ Branch `refactor/backend-modularization`; see Decision 036. Each step kept 424 t
 - [x] Extract all 10 modules: `broker`, `trade_state`, `trailing_state`, `pricing`, `cooldown`, `alerts`, `core_allocation`, `protection`, `entries`, `positions`
 - [x] **executor.py 3,267 → 691 LOC (−79%)** — now a pure orchestrator; clean dependency DAG (no module imports executor)
 - [x] Test patch-target retargeting (re-export for orchestrator callers; home-module for direct tests); conftest STATE_DIR loop with `raising=False`
-- [ ] Polish: de-duplicate shared entry-adaptation / bracket-validation logic in `entries.py`
-- [ ] Polish: decompose the long `execute_trades` + `_handle_bullish_entry` functions
-- [ ] Redeploy + re-verify on server
+- [x] De-duplicate shared entry-adaptation / bracket-validation / data-accessor / near-miss logic (pricing.py + trade_state.py helpers)
+- [x] Decompose worst function: `execute_trades` 572 → 406 via `_manage_held_bullish`
+- [x] Redeploy + re-verify on server (commit `68f4c62`)
+- [ ] Optional further decomposition (cohesive, safety-critical — do fresh, not rushed): bearish-exit + ADJUST inline blocks in `execute_trades`; `_handle_bullish_entry` (259 LOC); `resubmit_expired_brackets` (284 LOC)
 
 ## Phase 1.19: Execution-safety hardening (2026-06-07) — go-live blockers
 From a 14-day paper-log review (see Decision 035). All six found bugs fixed:
