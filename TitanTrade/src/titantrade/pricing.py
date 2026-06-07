@@ -109,3 +109,78 @@ def _choose_entry_price(
     # Range: keep the thesis target, but cap at current_price so we don't
     # accidentally pay above market if the thesis is stale-low.
     return round(min(target, current_price), 2) if target else round(current_price, 2)
+
+
+# ---------------------------------------------------------------------------
+# Data-bundle accessors (shared by the entry paths and executor)
+# ---------------------------------------------------------------------------
+
+def stock_atr(ticker: str, data_bundle: dict[str, Any]) -> float | None:
+    """ATR-14 for ``ticker`` from the data bundle, or None."""
+    return data_bundle.get("stocks", {}).get(ticker, {}).get("atr_14")
+
+
+def earnings_blocked(ticker: str, data_bundle: dict[str, Any]) -> bool:
+    """Whether ``ticker`` is inside its earnings blackout per the data bundle."""
+    return (
+        data_bundle.get("stocks", {}).get(ticker, {})
+        .get("earnings", {}).get("is_blocked", False)
+    )
+
+
+def vix_level(data_bundle: dict[str, Any]) -> float | None:
+    """Current VIX level from the data bundle's market context, or None."""
+    return data_bundle.get("market_context", {}).get("vix", {}).get("level")
+
+
+# ---------------------------------------------------------------------------
+# Entry-level adaptation + bracket validation (shared by new-entry & resubmit)
+# ---------------------------------------------------------------------------
+
+def adapt_entry_levels(
+    thesis: dict[str, Any],
+    entry_price: float,
+    stop_price: float,
+    take_profit_price: float | None,
+    current_price: float | None,
+    regime: str,
+    confidence: float,
+) -> tuple[float, float, float | None, float | None]:
+    """Adapt the entry to the current price/regime and walk stop + TP by the
+    same delta (measured from the thesis target) to preserve risk:reward.
+
+    Returns ``(entry, stop, take_profit, new_entry)`` where ``new_entry`` is the
+    adapted price if adaptation occurred (so the caller can log it) or ``None``
+    if levels are unchanged. Behavior-identical to the inline logic that used to
+    live in both ``_handle_bullish_entry`` and ``resubmit_expired_brackets``.
+    """
+    new_entry = _choose_entry_price(thesis, current_price, regime, confidence)
+    if not new_entry or new_entry == entry_price:
+        return entry_price, stop_price, take_profit_price, None
+    entry_price = new_entry
+    original_target = thesis.get("target_entry_price")
+    if original_target and original_target > 0 and entry_price != original_target:
+        delta = entry_price - original_target  # negative if walking down
+        stop_price = round(stop_price + delta, 2)
+        if take_profit_price:
+            take_profit_price = round(take_profit_price + delta, 2)
+    return entry_price, stop_price, take_profit_price, new_entry
+
+
+def bracket_levels_invalid(
+    entry_price: float | None,
+    stop_price: float | None,
+    take_profit_price: float | None,
+) -> str | None:
+    """Return a human-readable reason a (entry, stop, tp) triple is an invalid
+    NEW bracket, or None if valid. Alpaca rejects stop >= entry (HTTP 422); a
+    stop above entry means the thesis is for *managing* a held position, not
+    opening one. Used by both entry paths."""
+    if stop_price is not None and entry_price is not None and stop_price >= entry_price - 0.01:
+        return (
+            f"stop ${stop_price:.2f} >= entry ${entry_price:.2f} "
+            f"(thesis is for managing an existing position, not a new entry)"
+        )
+    if take_profit_price is not None and stop_price is not None and take_profit_price <= stop_price:
+        return f"take_profit ${take_profit_price:.2f} <= stop ${stop_price:.2f} (bracket math invalid)"
+    return None

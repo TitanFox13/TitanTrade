@@ -5,8 +5,6 @@ Extracted from executor.py (behavior-preserving).
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 from titantrade.config import Config
@@ -18,8 +16,12 @@ from titantrade.broker import (
 )
 from titantrade.trade_state import (
     _load, _append_trade, _append_near_miss, _trade_record, _build_trade_context,
+    _build_near_miss_record,
 )
-from titantrade.pricing import compute_trend_regime, _choose_entry_price
+from titantrade.pricing import (
+    compute_trend_regime, adapt_entry_levels, bracket_levels_invalid,
+    stock_atr, earnings_blocked, vix_level,
+)
 from titantrade.cooldown import (
     _is_in_cooldown, cooldown_override_allowed, REENTRY_COOLDOWN_HOURS,
 )
@@ -153,94 +155,49 @@ def _handle_bullish_entry(
         # a human can re-evaluate the pick (or the watchlist), rather than the
         # selection slot being burned every cycle with no trace.
         try:
-            context = _build_trade_context(ticker, data_bundle, sentry)
-            _append_near_miss({
-                "id": f"nm_{uuid.uuid4().hex[:8]}",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "ticker": ticker,
-                "confidence": thesis.get("confidence", 0),
-                "thesis": thesis.get("thesis", ""),
-                "target_entry_price": entry_price,
-                "stop_loss_price": stop_price,
-                "take_profit_price": take_profit_price,
-                "reasoning": thesis.get("reasoning", ""),
-                "failed_gates": ["trend_regime"],
-                "gate_results": {
-                    "trend_regime": {
-                        "passed": False,
-                        "detail": (
-                            "Analyst-selected BULLISH but price is below both "
-                            "SMA-50 and SMA-200 (downtrend) — entry gate refuses "
-                            "to bottom-fish. Analyst/technical disagreement."
-                        ),
-                    },
-                },
-                "total_gates_failed": 1,
-                "context": context,
-            })
+            _append_near_miss(_build_near_miss_record(
+                ticker, thesis, entry_price, stop_price, take_profit_price,
+                ["trend_regime"],
+                {"trend_regime": {
+                    "passed": False,
+                    "detail": (
+                        "Analyst-selected BULLISH but price is below both "
+                        "SMA-50 and SMA-200 (downtrend) — entry gate refuses "
+                        "to bottom-fish. Analyst/technical disagreement."
+                    ),
+                }},
+                _build_trade_context(ticker, data_bundle, sentry),
+            ))
             log.info(f"NEAR MISS recorded for {ticker}: downtrend regime vs BULLISH selection")
         except Exception as exc:  # noqa: BLE001
             log.warning(f"Could not record downtrend near-miss for {ticker}: {exc}")
         return None
 
-    new_entry = _choose_entry_price(thesis, current_price, regime, confidence)
-    if new_entry and new_entry != entry_price:
-        cur_str = f"${current_price:.2f}" if current_price else "n/a"
+    # Adapt entry to current price/regime, walking stop+TP to preserve R:R
+    # (shared with resubmit_expired_brackets — see pricing.adapt_entry_levels).
+    cur_str = f"${current_price:.2f}" if current_price else "n/a"
+    prev_entry = entry_price
+    entry_price, stop_price, take_profit_price, new_entry = adapt_entry_levels(
+        thesis, entry_price, stop_price, take_profit_price, current_price, regime, confidence,
+    )
+    if new_entry is not None:
         log.info(
             f"Entry adapted for {ticker} ({regime}, conf {confidence:.2f}): "
-            f"${entry_price:.2f} → ${new_entry:.2f} (current {cur_str})"
+            f"${prev_entry:.2f} → ${entry_price:.2f} (current {cur_str})"
         )
-        entry_price = new_entry
-        # Recompute stop/TP to preserve risk:reward when entry moves IN EITHER
-        # DIRECTION. Production bug: when entry walked DOWN (range/up regime,
-        # current < target), stop stayed at thesis level and risk:reward
-        # collapsed. DVN got entry $49.20→$47.16 with stop $46.74 unchanged →
-        # risk = 0.9% = 0.25× ATR = guaranteed noise-stop. We now walk stop +
-        # TP in either direction by the same delta as entry.
-        original_target = thesis.get("target_entry_price")
-        if original_target and original_target > 0 and entry_price != original_target:
-            delta = entry_price - original_target  # negative if walking down
-            stop_price = round(stop_price + delta, 2)
-            if take_profit_price:
-                take_profit_price = round(take_profit_price + delta, 2)
 
-    # Bracket sanity check — Alpaca rejects with HTTP 422 if the math is off.
-    # This happens when ADJUST has raised the stop above the original entry
-    # to lock in profit on a position we already hold; that thesis is for
-    # managing the position, not opening a new one.
-    if stop_price >= entry_price - 0.01:
-        log.info(
-            f"Skipping {ticker} bullish entry: stop ${stop_price:.2f} >= "
-            f"entry ${entry_price:.2f} (thesis is for managing existing "
-            f"position, not new entry)"
-        )
-        return None
-    if take_profit_price is not None and take_profit_price <= stop_price:
-        log.info(
-            f"Skipping {ticker} bullish entry: take_profit "
-            f"${take_profit_price:.2f} <= stop ${stop_price:.2f}"
-        )
+    # Bracket sanity check — Alpaca rejects invalid (entry, stop, tp) with 422.
+    invalid = bracket_levels_invalid(entry_price, stop_price, take_profit_price)
+    if invalid:
+        log.info(f"Skipping {ticker} bullish entry: {invalid}")
         return None
 
-    # Look up ATR from data bundle (for vol-adjusted sizing)
-    stock_atr = (
-        data_bundle.get("stocks", {}).get(ticker, {}).get("atr_14")
-    )
-
-    # Look up earnings block status
-    earnings_blocked = (
-        data_bundle.get("stocks", {}).get(ticker, {})
-        .get("earnings", {}).get("is_blocked", False)
-    )
-
-    # ---- Run ALL risk gates via the risk manager ----
+    # ---- Risk-gate inputs from the data bundle ----
+    atr = stock_atr(ticker, data_bundle)
+    is_earnings_blocked = earnings_blocked(ticker, data_bundle)
     economic_calendar = data_bundle.get("economic_calendar", [])
     correlation_matrix = data_bundle.get("correlation_matrix", {})
-    vix_level = (
-        data_bundle.get("market_context", {})
-        .get("vix", {})
-        .get("level")
-    )
+    vix = vix_level(data_bundle)
 
     # Cash already committed to other pending buy orders must not be
     # double-spent — keeps simultaneous entries from collectively breaching
@@ -253,12 +210,12 @@ def _handle_bullish_entry(
         portfolio_value=portfolio_value,
         cash_balance=cash_balance,
         positions=positions,
-        stock_atr=stock_atr,
-        earnings_blocked=earnings_blocked,
+        stock_atr=atr,
+        earnings_blocked=is_earnings_blocked,
         cfg=cfg,
         economic_calendar=economic_calendar,
         correlation_matrix=correlation_matrix,
-        vix=vix_level,
+        vix=vix,
         committed_cash=committed_cash,
     )
 
@@ -273,23 +230,11 @@ def _handle_bullish_entry(
 
         # Record near-miss if blocked by 2 or fewer gates
         if len(failed) <= 2:
-            context = _build_trade_context(ticker, data_bundle, sentry)
-            near_miss = {
-                "id": f"nm_{uuid.uuid4().hex[:8]}",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "ticker": ticker,
-                "confidence": thesis.get("confidence", 0),
-                "thesis": thesis.get("thesis", ""),
-                "target_entry_price": entry_price,
-                "stop_loss_price": stop_price,
-                "take_profit_price": take_profit_price,
-                "reasoning": thesis.get("reasoning", ""),
-                "failed_gates": failed,
-                "gate_results": check.get("gate_results", {}),
-                "total_gates_failed": len(failed),
-                "context": context,
-            }
-            _append_near_miss(near_miss)
+            _append_near_miss(_build_near_miss_record(
+                ticker, thesis, entry_price, stop_price, take_profit_price,
+                failed, check.get("gate_results", {}),
+                _build_trade_context(ticker, data_bundle, sentry),
+            ))
             log.info(f"NEAR MISS recorded for {ticker}: {len(failed)} gate(s) failed")
 
         return None
@@ -591,58 +536,27 @@ def resubmit_expired_brackets(
             _log_skip(ticker, "downtrend regime — wait for trend reversal")
             continue
 
-        new_entry = _choose_entry_price(thesis, current_price, regime, confidence)
-        if new_entry and new_entry != entry_price:
+        # Adapt entry to current price/regime (shared helper — same logic the
+        # first-entry path uses; walks stop+TP from the thesis target).
+        prev_entry = entry_price
+        entry_price, stop_price, take_profit_price, new_entry = adapt_entry_levels(
+            thesis, entry_price, stop_price, take_profit_price, current_price, regime, confidence,
+        )
+        if new_entry is not None:
             log.info(
                 f"Resubmit entry adapted for {ticker} ({regime}, conf {confidence:.2f}): "
-                f"${entry_price:.2f} → ${new_entry:.2f}"
+                f"${prev_entry:.2f} → ${entry_price:.2f}"
             )
-            # Walk stop/TP in EITHER direction by the same delta to preserve
-            # risk:reward. Production bug (DVN): walked entry down without
-            # walking stop down → stop too tight to survive noise.
-            if new_entry != original_entry:
-                delta = new_entry - original_entry  # negative if walking down
-                stop_price = round(stop_price + delta, 2)
-                if take_profit_price:
-                    take_profit_price = round(take_profit_price + delta, 2)
-            entry_price = new_entry
 
-        # Sanity-check the bracket math before sending it to the broker.
-        # Alpaca requires:
-        #   stop_loss.stop_price <= base_price (entry) - 0.01
-        #   take_profit.limit_price > stop_loss.stop_price
-        # When ADJUST raises the stop above the original entry to lock in
-        # profit on a position we already hold, the (entry, stop, tp) triple
-        # from the thesis becomes invalid for a NEW bracket entry. The thesis
-        # is for *managing* the existing position, not *opening* a new one,
-        # so skip resubmission entirely.
-        if stop_price is not None and entry_price is not None:
-            if stop_price >= entry_price - 0.01:
-                log.info(
-                    f"Skipping resubmission for {ticker}: stop ${stop_price:.2f} "
-                    f">= entry ${entry_price:.2f} (thesis is for managing existing "
-                    f"position, not new entry)"
-                )
-                continue
-        if (
-            take_profit_price is not None
-            and stop_price is not None
-            and take_profit_price <= stop_price
-        ):
-            log.info(
-                f"Skipping resubmission for {ticker}: take_profit ${take_profit_price:.2f} "
-                f"<= stop ${stop_price:.2f} (bracket math invalid)"
-            )
+        # Skip if the (entry, stop, tp) triple is an invalid NEW bracket.
+        invalid = bracket_levels_invalid(entry_price, stop_price, take_profit_price)
+        if invalid:
+            log.info(f"Skipping resubmission for {ticker}: {invalid}")
             continue
 
-        stock_atr = data_bundle.get("stocks", {}).get(ticker, {}).get("atr_14")
-        earnings_blocked = (
-            data_bundle.get("stocks", {}).get(ticker, {})
-            .get("earnings", {}).get("is_blocked", False)
-        )
-        vix_level = (
-            data_bundle.get("market_context", {}).get("vix", {}).get("level")
-        )
+        atr = stock_atr(ticker, data_bundle)
+        is_earnings_blocked = earnings_blocked(ticker, data_bundle)
+        vix = vix_level(data_bundle)
 
         # Net out cash already committed to other pending buys (this ticker's
         # own expired bracket is already gone from the book, so don't exclude
@@ -655,10 +569,10 @@ def resubmit_expired_brackets(
             portfolio_value=portfolio_value,
             cash_balance=cash_balance,
             positions=positions,
-            stock_atr=stock_atr,
-            earnings_blocked=earnings_blocked,
+            stock_atr=atr,
+            earnings_blocked=is_earnings_blocked,
             cfg=cfg,
-            vix=vix_level,
+            vix=vix,
             committed_cash=committed_cash,
         )
 

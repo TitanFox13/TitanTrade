@@ -148,3 +148,33 @@ def _trade_record(
         "reasoning": reasoning,
         **extra,
     }
+
+
+def _build_near_miss_record(
+    ticker: str,
+    thesis: dict[str, Any],
+    entry_price: float | None,
+    stop_price: float | None,
+    take_profit_price: float | None,
+    failed_gates: list[str],
+    gate_results: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a near-miss record (a blocked/declined entry worth surfacing on the
+    dashboard). Shared by the downtrend and multi-gate block paths in
+    ``_handle_bullish_entry``."""
+    return {
+        "id": f"nm_{uuid.uuid4().hex[:8]}",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "ticker": ticker,
+        "confidence": thesis.get("confidence", 0),
+        "thesis": thesis.get("thesis", ""),
+        "target_entry_price": entry_price,
+        "stop_loss_price": stop_price,
+        "take_profit_price": take_profit_price,
+        "reasoning": thesis.get("reasoning", ""),
+        "failed_gates": failed_gates,
+        "gate_results": gate_results,
+        "total_gates_failed": len(failed_gates),
+        "context": context,
+    }
