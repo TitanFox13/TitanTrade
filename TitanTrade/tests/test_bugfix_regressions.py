@@ -105,13 +105,13 @@ class TestTp1RestoreNeverLeavesBare:
     must re-read the live position and size the stop off that.
     """
 
-    @patch("titantrade.executor.time.sleep", return_value=None)
-    @patch("titantrade.executor._wait_for_order_canceled", return_value="filled")
-    @patch("titantrade.executor.place_native_stop_loss")
-    @patch("titantrade.executor.place_market_sell", return_value={"id": "tp1-sell"})
-    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=1)
-    @patch("titantrade.executor.get_open_orders", return_value=[])
-    @patch("titantrade.executor.get_position")
+    @patch("titantrade.positions.time.sleep", return_value=None)
+    @patch("titantrade.positions._wait_for_order_canceled", return_value="filled")
+    @patch("titantrade.positions.place_native_stop_loss")
+    @patch("titantrade.positions.place_market_sell", return_value={"id": "tp1-sell"})
+    @patch("titantrade.positions.cancel_all_orders_for_ticker", return_value=1)
+    @patch("titantrade.positions.get_open_orders", return_value=[])
+    @patch("titantrade.positions.get_position")
     def test_restore_uses_current_position_qty(
         self, mock_get_pos, mock_open, mock_cancel, mock_sell, mock_stop,
         mock_wait, mock_sleep, fake_config, tmp_state_dir,

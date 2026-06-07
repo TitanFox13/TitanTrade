@@ -1191,7 +1191,7 @@ class TestWaitForOrderCanceled:
     @patch("titantrade.executor.time.sleep")
     @patch("titantrade.broker.get_order")
     def test_returns_when_order_canceled(self, mock_get, mock_sleep, fake_config):
-        from titantrade.executor import _wait_for_order_canceled
+        from titantrade.broker import _wait_for_order_canceled
         mock_get.side_effect = [
             {"status": "pending_cancel"},
             {"status": "pending_cancel"},
@@ -1204,7 +1204,7 @@ class TestWaitForOrderCanceled:
     @patch("titantrade.broker.get_order")
     def test_returns_when_filled(self, mock_get, mock_sleep, fake_config):
         """A bracket child order can become 'filled' instead of canceled."""
-        from titantrade.executor import _wait_for_order_canceled
+        from titantrade.broker import _wait_for_order_canceled
         mock_get.return_value = {"status": "filled"}
         assert _wait_for_order_canceled("oid", fake_config) == "filled"
 
@@ -1212,7 +1212,7 @@ class TestWaitForOrderCanceled:
     @patch("titantrade.broker.get_order", return_value=None)
     def test_treats_missing_order_as_canceled(self, mock_get, mock_sleep, fake_config):
         """A 404 (order has been GC'd) means it's no longer holding qty."""
-        from titantrade.executor import _wait_for_order_canceled
+        from titantrade.broker import _wait_for_order_canceled
         assert _wait_for_order_canceled("oid", fake_config) == "canceled"
 
     @patch("titantrade.executor.time.time")
@@ -1221,7 +1221,7 @@ class TestWaitForOrderCanceled:
     def test_returns_none_on_timeout(
         self, mock_get, mock_sleep, mock_time, fake_config,
     ):
-        from titantrade.executor import _wait_for_order_canceled
+        from titantrade.broker import _wait_for_order_canceled
         mock_get.return_value = {"status": "pending_cancel"}
         mock_time.side_effect = [0.0, 0.0, 200.0, 200.0]
         assert _wait_for_order_canceled("oid", fake_config) is None
@@ -1659,11 +1659,11 @@ class TestPyramidIntoWinners:
             "stop_price": "95.00", "qty": qty,
         }]
 
-    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "stop-new"})
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor._wait_for_order_canceled", return_value="filled")
-    @patch("titantrade.executor.get_open_orders")
-    @patch("titantrade.executor.place_limit_buy", return_value={"id": "pyr-buy"})
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "stop-new"})
+    @patch("titantrade.positions.cancel_order")
+    @patch("titantrade.positions._wait_for_order_canceled", return_value="filled")
+    @patch("titantrade.positions.get_open_orders")
+    @patch("titantrade.positions.place_limit_buy", return_value={"id": "pyr-buy"})
     @patch("titantrade.broker.place_market_buy")
     def test_pyramids_at_5pct_gain_via_limit_buy(
         self, mock_market_buy, mock_limit_buy, mock_orders, mock_wait,
@@ -1702,9 +1702,9 @@ class TestPyramidIntoWinners:
         assert stop_args[1] == 146  # full coverage
         assert stop_args[2] == pytest.approx(95.0, abs=0.01)  # existing stop price
 
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor._wait_for_order_canceled", return_value="canceled")
-    @patch("titantrade.executor.place_limit_buy", return_value={"id": "pyr-buy"})
+    @patch("titantrade.positions.cancel_order")
+    @patch("titantrade.positions._wait_for_order_canceled", return_value="canceled")
+    @patch("titantrade.positions.place_limit_buy", return_value={"id": "pyr-buy"})
     def test_unfilled_add_is_cancelled_and_no_trade(
         self, mock_limit_buy, mock_wait, mock_cancel, fake_config, tmp_state_dir,
     ):
@@ -1720,7 +1720,7 @@ class TestPyramidIntoWinners:
         mock_limit_buy.assert_called_once()
         mock_cancel.assert_called_once_with("pyr-buy", fake_config)
 
-    @patch("titantrade.executor.place_limit_buy")
+    @patch("titantrade.positions.place_limit_buy")
     def test_does_not_fire_below_trigger(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1732,11 +1732,11 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.executor.place_limit_buy")
+    @patch("titantrade.positions.place_limit_buy")
     def test_only_fires_once_per_position(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
-        from titantrade.executor import _save_trailing_state
+        from titantrade.trailing_state import _save_trailing_state
         _save_trailing_state({"FOO": {"pyramid_added": True}})
 
         trade = maybe_pyramid_position(
@@ -1746,7 +1746,7 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.executor.place_limit_buy")
+    @patch("titantrade.positions.place_limit_buy")
     def test_skips_if_sentry_aborting(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1757,7 +1757,7 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.executor.place_limit_buy")
+    @patch("titantrade.positions.place_limit_buy")
     def test_skips_if_thesis_flipped(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1770,7 +1770,7 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.executor.place_limit_buy")
+    @patch("titantrade.positions.place_limit_buy")
     def test_respects_concentration_cap(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1798,12 +1798,13 @@ class TestPyramidWashTradeGuard:
     still defers for 30 min after TP1 to avoid churning the just-sold position.
     """
 
-    @patch("titantrade.executor.place_limit_buy")
+    @patch("titantrade.positions.place_limit_buy")
     def test_pyramid_defers_when_tp1_fired_recently(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
         from datetime import datetime, timezone
-        from titantrade.executor import maybe_pyramid_position, _save_trailing_state
+        from titantrade.positions import maybe_pyramid_position
+        from titantrade.trailing_state import _save_trailing_state
 
         # Seed state: TP1 just fired 1 minute ago
         recent = datetime.now(timezone.utc).isoformat()
@@ -1828,11 +1829,11 @@ class TestPyramidWashTradeGuard:
         assert result is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "stop-new"})
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor._wait_for_order_canceled", return_value="filled")
-    @patch("titantrade.executor.get_open_orders", return_value=[])
-    @patch("titantrade.executor.place_limit_buy", return_value={"id": "p1"})
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "stop-new"})
+    @patch("titantrade.positions.cancel_order")
+    @patch("titantrade.positions._wait_for_order_canceled", return_value="filled")
+    @patch("titantrade.positions.get_open_orders", return_value=[])
+    @patch("titantrade.positions.place_limit_buy", return_value={"id": "p1"})
     @patch("titantrade.broker.place_market_buy")
     def test_pyramid_fires_when_tp1_old_enough(
         self, mock_market_buy, mock_limit_buy, mock_orders, mock_wait,
@@ -1842,7 +1843,8 @@ class TestPyramidWashTradeGuard:
         closed and the pyramid fires — via a limit buy, never a market buy.
         """
         from datetime import datetime, timezone, timedelta
-        from titantrade.executor import maybe_pyramid_position, _save_trailing_state
+        from titantrade.positions import maybe_pyramid_position
+        from titantrade.trailing_state import _save_trailing_state
 
         old = (datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat()
         _save_trailing_state({"FOO": {"tp1_taken": True, "tp1_timestamp": old}})

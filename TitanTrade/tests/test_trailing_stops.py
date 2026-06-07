@@ -10,8 +10,8 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from titantrade.executor import (
-    manage_trailing_stop,
+from titantrade.positions import manage_trailing_stop
+from titantrade.trailing_state import (
     _load_trailing_state,
     _save_trailing_state,
     _cleanup_trailing_state,
@@ -63,9 +63,9 @@ def existing_stop_order():
 
 
 class TestTrailingStopActivation:
-    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new_stop"})
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor.get_position", return_value={"symbol": "AAPL", "qty": "50"})
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "new_stop"})
+    @patch("titantrade.positions.cancel_order")
+    @patch("titantrade.positions.get_position", return_value={"symbol": "AAPL", "qty": "50"})
     def test_activates_at_5pct_gain(
         self, mock_get_pos, mock_cancel, mock_place,
         position_up_6pct, thesis_with_stop, existing_stop_order,
@@ -80,8 +80,8 @@ class TestTrailingStopActivation:
         new_stop_price = mock_place.call_args[0][2]
         assert new_stop_price > 176.23  # Higher than original
 
-    @patch("titantrade.executor.place_native_stop_loss")
-    @patch("titantrade.executor.cancel_order")
+    @patch("titantrade.positions.place_native_stop_loss")
+    @patch("titantrade.positions.cancel_order")
     def test_does_not_activate_below_threshold(
         self, mock_cancel, mock_place,
         position_up_3pct, thesis_with_stop, existing_stop_order,
@@ -94,8 +94,8 @@ class TestTrailingStopActivation:
         mock_cancel.assert_not_called()
         mock_place.assert_not_called()
 
-    @patch("titantrade.executor.place_native_stop_loss")
-    @patch("titantrade.executor.cancel_order")
+    @patch("titantrade.positions.place_native_stop_loss")
+    @patch("titantrade.positions.cancel_order")
     def test_saves_state_even_when_inactive(
         self, mock_cancel, mock_place,
         position_up_3pct, thesis_with_stop, existing_stop_order,
@@ -111,9 +111,9 @@ class TestTrailingStopActivation:
 
 
 class TestTrailingStopRatchet:
-    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new"})
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor.get_position", return_value={"symbol": "AAPL", "qty": "50"})
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "new"})
+    @patch("titantrade.positions.cancel_order")
+    @patch("titantrade.positions.get_position", return_value={"symbol": "AAPL", "qty": "50"})
     def test_trails_pct_fallback_when_no_atr(
         self, mock_get_pos, mock_cancel, mock_place,
         position_up_6pct, thesis_with_stop, existing_stop_order,
@@ -132,9 +132,9 @@ class TestTrailingStopRatchet:
         expected = round(hwm * (1 - fake_config.trading.trailing_distance_pct), 2)
         assert new_stop == expected
 
-    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new"})
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor.get_position", return_value={"symbol": "AAPL", "qty": "50"})
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "new"})
+    @patch("titantrade.positions.cancel_order")
+    @patch("titantrade.positions.get_position", return_value={"symbol": "AAPL", "qty": "50"})
     def test_trails_atr_distance_when_atr_supplied(
         self, mock_get_pos, mock_cancel, mock_place,
         position_up_6pct, thesis_with_stop, existing_stop_order,
@@ -155,9 +155,9 @@ class TestTrailingStopRatchet:
         expected = round(hwm - atr * fake_config.trading.trailing_atr_multiplier, 2)
         assert new_stop == expected
 
-    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new"})
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor.get_position", return_value={"symbol": "AAPL", "qty": "50"})
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "new"})
+    @patch("titantrade.positions.cancel_order")
+    @patch("titantrade.positions.get_position", return_value={"symbol": "AAPL", "qty": "50"})
     def test_never_trails_below_entry(
         self, mock_get_pos, mock_cancel, mock_place,
         thesis_with_stop, existing_stop_order,
@@ -177,9 +177,9 @@ class TestTrailingStopRatchet:
         new_stop = mock_place.call_args[0][2]
         assert new_stop >= 185.50  # Never below entry
 
-    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new"})
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor.get_position", return_value={"symbol": "AAPL", "qty": "50"})
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "new"})
+    @patch("titantrade.positions.cancel_order")
+    @patch("titantrade.positions.get_position", return_value={"symbol": "AAPL", "qty": "50"})
     def test_never_trails_below_original_stop(
         self, mock_get_pos, mock_cancel, mock_place,
         thesis_with_stop, existing_stop_order,
@@ -193,8 +193,8 @@ class TestTrailingStopRatchet:
         new_stop = mock_place.call_args[0][2]
         assert new_stop >= thesis_with_stop["stop_loss_price"]
 
-    @patch("titantrade.executor.place_native_stop_loss")
-    @patch("titantrade.executor.cancel_order")
+    @patch("titantrade.positions.place_native_stop_loss")
+    @patch("titantrade.positions.cancel_order")
     def test_skips_if_existing_stop_already_higher(
         self, mock_cancel, mock_place,
         position_up_6pct, thesis_with_stop,
@@ -217,9 +217,9 @@ class TestTrailingStopRatchet:
 
 
 class TestTrailingStopState:
-    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new"})
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor.get_position", return_value={"symbol": "AAPL", "qty": "50"})
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "new"})
+    @patch("titantrade.positions.cancel_order")
+    @patch("titantrade.positions.get_position", return_value={"symbol": "AAPL", "qty": "50"})
     def test_updates_hwm(
         self, mock_get_pos, mock_cancel, mock_place,
         position_up_6pct, thesis_with_stop, existing_stop_order,
@@ -276,13 +276,13 @@ class TestTrancheTpFirstTake:
             "take_profit_price": 120.0,
         }
 
-    @patch("titantrade.executor._wait_for_order_canceled", return_value="filled")
-    @patch("titantrade.executor.time.sleep", return_value=None)
-    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new-stop"})
-    @patch("titantrade.executor.place_market_sell", return_value={"id": "tp1-sell"})
-    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=1)
-    @patch("titantrade.executor.get_position")
-    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.positions._wait_for_order_canceled", return_value="filled")
+    @patch("titantrade.positions.time.sleep", return_value=None)
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "new-stop"})
+    @patch("titantrade.positions.place_market_sell", return_value={"id": "tp1-sell"})
+    @patch("titantrade.positions.cancel_all_orders_for_ticker", return_value=1)
+    @patch("titantrade.positions.get_position")
+    @patch("titantrade.positions.get_open_orders", return_value=[])
     def test_partial_sell_and_breakeven_stop(
         self,
         mock_get_open, mock_get_pos, mock_cancel_all, mock_market_sell,
@@ -318,10 +318,10 @@ class TestTrancheTpFirstTake:
         state = _load_trailing_state()
         assert state["FOO"]["tp1_taken"] is True
 
-    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new-stop"})
-    @patch("titantrade.executor.place_market_sell")
-    @patch("titantrade.executor.cancel_all_orders_for_ticker")
-    @patch("titantrade.executor.get_position")
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "new-stop"})
+    @patch("titantrade.positions.place_market_sell")
+    @patch("titantrade.positions.cancel_all_orders_for_ticker")
+    @patch("titantrade.positions.get_position")
     def test_tp1_does_not_fire_below_trigger(
         self,
         mock_get_pos, mock_cancel_all, mock_market_sell, mock_place_stop,
@@ -335,12 +335,12 @@ class TestTrancheTpFirstTake:
         manage_trailing_stop("FOO", thesis_with_tp, pos, [], fake_config, stock_atr=2.0)
         mock_market_sell.assert_not_called()
 
-    @patch("titantrade.executor.time.sleep", return_value=None)
-    @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "new-stop"})
-    @patch("titantrade.executor.place_market_sell", return_value={"id": "tp1-sell"})
-    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=1)
-    @patch("titantrade.executor.get_position")
-    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.positions.time.sleep", return_value=None)
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "new-stop"})
+    @patch("titantrade.positions.place_market_sell", return_value={"id": "tp1-sell"})
+    @patch("titantrade.positions.cancel_all_orders_for_ticker", return_value=1)
+    @patch("titantrade.positions.get_position")
+    @patch("titantrade.positions.get_open_orders", return_value=[])
     def test_tp1_only_fires_once(
         self,
         mock_get_open, mock_get_pos, mock_cancel_all, mock_market_sell,
