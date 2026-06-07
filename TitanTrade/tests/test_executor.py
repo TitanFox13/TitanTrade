@@ -1508,13 +1508,13 @@ class TestManageCorePosition:
             },
         })
 
-    @patch("titantrade.executor.place_market_buy", return_value={"id": "core-buy"})
-    @patch("titantrade.executor.get_positions", return_value=[])
-    @patch("titantrade.executor.get_account", return_value={
+    @patch("titantrade.core_allocation.place_market_buy", return_value={"id": "core-buy"})
+    @patch("titantrade.core_allocation.get_positions", return_value=[])
+    @patch("titantrade.core_allocation.get_account", return_value={
         "portfolio_value": "100000", "cash": "50000",
     })
     @patch("titantrade.daily_sentry._fetch_current_price", return_value=500.0)
-    @patch("titantrade.executor.is_market_open", return_value=True)
+    @patch("titantrade.core_allocation.is_market_open", return_value=True)
     def test_buys_core_ticker_when_below_target(
         self, mock_open, mock_price, mock_account, mock_pos, mock_buy,
         fake_config, tmp_state_dir,
@@ -1530,12 +1530,12 @@ class TestManageCorePosition:
         assert trade["shares"] == 60  # $30k / $500
         mock_buy.assert_called_once()
 
-    @patch("titantrade.executor.place_market_buy")
-    @patch("titantrade.executor.get_positions")
-    @patch("titantrade.executor.get_account", return_value={
+    @patch("titantrade.core_allocation.place_market_buy")
+    @patch("titantrade.core_allocation.get_positions")
+    @patch("titantrade.core_allocation.get_account", return_value={
         "portfolio_value": "100000", "cash": "50000",
     })
-    @patch("titantrade.executor.is_market_open", return_value=True)
+    @patch("titantrade.core_allocation.is_market_open", return_value=True)
     def test_no_rebalance_when_within_band(
         self, mock_open, mock_account, mock_pos, mock_buy,
         fake_config, tmp_state_dir,
@@ -1552,16 +1552,16 @@ class TestManageCorePosition:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.executor.place_market_sell", return_value={"id": "sell"})
-    @patch("titantrade.executor.place_market_buy", return_value={"id": "buy"})
-    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=0)
-    @patch("titantrade.executor.close_position_at_market", return_value={"id": "close"})
-    @patch("titantrade.executor.get_positions")
-    @patch("titantrade.executor.get_account", return_value={
+    @patch("titantrade.core_allocation.place_market_sell", return_value={"id": "sell"})
+    @patch("titantrade.core_allocation.place_market_buy", return_value={"id": "buy"})
+    @patch("titantrade.core_allocation.cancel_all_orders_for_ticker", return_value=0)
+    @patch("titantrade.core_allocation.close_position_at_market", return_value={"id": "close"})
+    @patch("titantrade.core_allocation.get_positions")
+    @patch("titantrade.core_allocation.get_account", return_value={
         "portfolio_value": "100000", "cash": "5000",  # Most capital in SPY
     })
     @patch("titantrade.daily_sentry._fetch_current_price", return_value=30.0)
-    @patch("titantrade.executor.is_market_open", return_value=True)
+    @patch("titantrade.core_allocation.is_market_open", return_value=True)
     def test_stress_swaps_spy_for_hedge(
         self, mock_open, mock_price, mock_account, mock_pos,
         mock_close, mock_cancel, mock_buy, mock_sell,
@@ -1580,13 +1580,13 @@ class TestManageCorePosition:
         # SPY was closed to make room for SH
         mock_close.assert_called_once_with("SPY", fake_config)
 
-    @patch("titantrade.executor.place_market_buy")
-    @patch("titantrade.executor.get_positions", return_value=[])
-    @patch("titantrade.executor.get_account", return_value={
+    @patch("titantrade.core_allocation.place_market_buy")
+    @patch("titantrade.core_allocation.get_positions", return_value=[])
+    @patch("titantrade.core_allocation.get_account", return_value={
         "portfolio_value": "100000", "cash": "50000",
     })
     @patch("titantrade.daily_sentry._fetch_current_price", return_value=500.0)
-    @patch("titantrade.executor.is_market_open", return_value=False)
+    @patch("titantrade.core_allocation.is_market_open", return_value=False)
     def test_off_hours_no_op(
         self, mock_open, mock_price, mock_account, mock_pos, mock_buy,
         fake_config, tmp_state_dir,
@@ -1605,13 +1605,13 @@ class TestManageCorePosition:
         # off-hours gate.)
         mock_account.assert_not_called()
 
-    @patch("titantrade.executor.place_market_buy")
-    @patch("titantrade.executor.get_positions", return_value=[])
-    @patch("titantrade.executor.get_account", return_value={
+    @patch("titantrade.core_allocation.place_market_buy")
+    @patch("titantrade.core_allocation.get_positions", return_value=[])
+    @patch("titantrade.core_allocation.get_account", return_value={
         "portfolio_value": "100000", "cash": "2000",  # Below 5% floor
     })
     @patch("titantrade.daily_sentry._fetch_current_price", return_value=500.0)
-    @patch("titantrade.executor.is_market_open", return_value=True)
+    @patch("titantrade.core_allocation.is_market_open", return_value=True)
     def test_respects_cash_floor(
         self, mock_open, mock_price, mock_account, mock_pos, mock_buy,
         fake_config, tmp_state_dir,
@@ -1664,7 +1664,7 @@ class TestPyramidIntoWinners:
     @patch("titantrade.executor._wait_for_order_canceled", return_value="filled")
     @patch("titantrade.executor.get_open_orders")
     @patch("titantrade.executor.place_limit_buy", return_value={"id": "pyr-buy"})
-    @patch("titantrade.executor.place_market_buy")
+    @patch("titantrade.broker.place_market_buy")
     def test_pyramids_at_5pct_gain_via_limit_buy(
         self, mock_market_buy, mock_limit_buy, mock_orders, mock_wait,
         mock_cancel, mock_stop, fake_config, tmp_state_dir,
@@ -1833,7 +1833,7 @@ class TestPyramidWashTradeGuard:
     @patch("titantrade.executor._wait_for_order_canceled", return_value="filled")
     @patch("titantrade.executor.get_open_orders", return_value=[])
     @patch("titantrade.executor.place_limit_buy", return_value={"id": "p1"})
-    @patch("titantrade.executor.place_market_buy")
+    @patch("titantrade.broker.place_market_buy")
     def test_pyramid_fires_when_tp1_old_enough(
         self, mock_market_buy, mock_limit_buy, mock_orders, mock_wait,
         mock_cancel, mock_stop, fake_config, tmp_state_dir,

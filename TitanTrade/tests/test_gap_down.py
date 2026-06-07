@@ -13,12 +13,12 @@ from titantrade.executor import check_gap_down_protection
 
 
 class TestGapDownDetection:
-    @patch("titantrade.executor._append_trade")
-    @patch("titantrade.executor.place_market_sell", return_value={"id": "sell_1"})
-    @patch("titantrade.executor._wait_for_order_canceled", return_value="canceled")
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor.get_open_orders")
-    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.protection._append_trade")
+    @patch("titantrade.protection.place_market_sell", return_value={"id": "sell_1"})
+    @patch("titantrade.protection._wait_for_order_canceled", return_value="canceled")
+    @patch("titantrade.protection.cancel_order")
+    @patch("titantrade.protection.get_open_orders")
+    @patch("titantrade.protection.get_positions")
     def test_detects_gap_through_stop_limit(
         self, mock_pos, mock_orders, mock_cancel, mock_wait, mock_sell, mock_append,
         fake_config, tmp_state_dir,
@@ -45,10 +45,10 @@ class TestGapDownDetection:
         mock_wait.assert_called_once_with("stop_1", fake_config)
         mock_sell.assert_called_once_with("AAPL", 50, fake_config)
 
-    @patch("titantrade.executor.place_market_sell")
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor.get_open_orders")
-    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.protection.place_market_sell")
+    @patch("titantrade.protection.cancel_order")
+    @patch("titantrade.protection.get_open_orders")
+    @patch("titantrade.protection.get_positions")
     def test_no_gap_when_price_above_limit(
         self, mock_pos, mock_orders, mock_cancel, mock_sell,
         fake_config, tmp_state_dir,
@@ -70,8 +70,8 @@ class TestGapDownDetection:
         mock_cancel.assert_not_called()
         mock_sell.assert_not_called()
 
-    @patch("titantrade.executor.get_open_orders", return_value=[])
-    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.protection.get_open_orders", return_value=[])
+    @patch("titantrade.protection.get_positions")
     def test_no_stop_orders_no_action(
         self, mock_pos, mock_orders, fake_config, tmp_state_dir,
     ):
@@ -81,15 +81,15 @@ class TestGapDownDetection:
         result = check_gap_down_protection(fake_config)
         assert len(result) == 0
 
-    @patch("titantrade.executor.get_positions", return_value=[])
+    @patch("titantrade.protection.get_positions", return_value=[])
     def test_no_positions_no_action(self, mock_pos, fake_config, tmp_state_dir):
         result = check_gap_down_protection(fake_config)
         assert len(result) == 0
 
-    @patch("titantrade.executor.place_market_sell")
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor.get_open_orders")
-    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.protection.place_market_sell")
+    @patch("titantrade.protection.cancel_order")
+    @patch("titantrade.protection.get_open_orders")
+    @patch("titantrade.protection.get_positions")
     def test_ignores_buy_stop_orders(
         self, mock_pos, mock_orders, mock_cancel, mock_sell,
         fake_config, tmp_state_dir,
@@ -110,11 +110,11 @@ class TestGapDownDetection:
         result = check_gap_down_protection(fake_config)
         assert len(result) == 0
 
-    @patch("titantrade.executor._append_trade")
-    @patch("titantrade.executor.place_market_sell", return_value={"id": "s1"})
-    @patch("titantrade.executor.cancel_order")
-    @patch("titantrade.executor.get_open_orders")
-    @patch("titantrade.executor.get_positions")
+    @patch("titantrade.protection._append_trade")
+    @patch("titantrade.protection.place_market_sell", return_value={"id": "s1"})
+    @patch("titantrade.protection.cancel_order")
+    @patch("titantrade.protection.get_open_orders")
+    @patch("titantrade.protection.get_positions")
     def test_uses_99pct_margin(
         self, mock_pos, mock_orders, mock_cancel, mock_sell, mock_append,
         fake_config, tmp_state_dir,
