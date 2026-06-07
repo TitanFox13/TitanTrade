@@ -54,6 +54,9 @@ def tmp_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr("titantrade.risk_manager.STATE_DIR", state)
     monkeypatch.setattr("titantrade.executor.STATE_DIR", state)
     monkeypatch.setattr("titantrade.daily_sentry.STATE_DIR", state)
+    # State helpers extracted from executor read STATE_DIR in their own modules.
+    monkeypatch.setattr("titantrade.cooldown.STATE_DIR", state)
+    monkeypatch.setattr("titantrade.trailing_state.STATE_DIR", state)
     return state
 
 
