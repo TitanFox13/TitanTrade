@@ -81,9 +81,8 @@ def _repair_truncated_json(text: str) -> str:
     # Close any unterminated string by finding the last unescaped quote state
     in_string = False
     escape_next = False
-    last_quote_pos = -1
 
-    for i, ch in enumerate(text):
+    for ch in text:
         if escape_next:
             escape_next = False
             continue
@@ -92,7 +91,6 @@ def _repair_truncated_json(text: str) -> str:
             continue
         if ch == '"':
             in_string = not in_string
-            last_quote_pos = i
 
     # If we ended inside a string, close it
     if in_string:
@@ -167,7 +165,6 @@ def parse_ai_json(
 # Schema validators for specific AI outputs
 # ---------------------------------------------------------------------------
 
-THESIS_REQUIRED_FIELDS = {"ticker", "thesis"}
 THESIS_DEFAULTS = {
     "thesis": "NEUTRAL",
     "confidence": 0.5,

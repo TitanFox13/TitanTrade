@@ -23,33 +23,6 @@ log = get_logger("earnings")
 DEFAULT_BLOCK_DAYS = 2
 
 
-def fetch_earnings_date(ticker: str, cfg: Config) -> str | None:
-    """Fetch the next upcoming earnings date from FMP.
-
-    Returns ISO date string (YYYY-MM-DD) or None if not found.
-    """
-    url = "https://financialmodelingprep.com/stable/earnings-calendar"
-    today = datetime.now(timezone.utc).date()
-    params = {
-        "from": today.isoformat(),
-        "to": (today + timedelta(days=60)).isoformat(),
-        "apikey": cfg.fmp.key,
-    }
-
-    try:
-        resp = fetch_with_retry("GET", url, params=params)
-        data = resp.json()
-    except Exception as exc:
-        log.warning(f"Failed to fetch earnings calendar: {exc}")
-        return None
-
-    for entry in data:
-        if entry.get("symbol") == ticker:
-            return entry.get("date")
-
-    return None
-
-
 def fetch_all_earnings_dates(
     tickers: list[str], cfg: Config
 ) -> dict[str, str | None]:

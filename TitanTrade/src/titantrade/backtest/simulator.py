@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from titantrade.indicators import atr as compute_atr, sma
+from titantrade.indicators import atr as compute_atr
 from titantrade.risk_manager import confidence_scaled_risk
 
 

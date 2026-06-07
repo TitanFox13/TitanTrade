@@ -11,12 +11,8 @@ from typing import Any
 
 from titantrade.indicators import (
     atr as compute_atr,
-    bollinger_bands,
     compute_all_indicators,
-    macd,
-    rsi,
     sma,
-    volume_trend,
 )
 
 
@@ -48,7 +44,6 @@ def generate_synthetic_thesis(
     above_200 = pvs.get("above_sma_200")
     golden_cross = pvs.get("golden_cross")
     sma_200 = pvs.get("sma_200")
-    sma_50 = pvs.get("sma_50")
     vol_ratio = vol.get("volume_ratio_5d_20d")
 
     # Check market regime (optional)

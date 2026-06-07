@@ -125,7 +125,6 @@ def compute_stats(
         }
 
     wins = [p for p in pairs if p["pnl_pct"] > 0]
-    losses = [p for p in pairs if p["pnl_pct"] <= 0]
 
     # Per-ticker stats
     ticker_stats: dict[str, dict[str, Any]] = {}
@@ -202,7 +201,6 @@ def compute_confidence_calibration(
 
     for pair in pairs:
         # Try to find matching confidence
-        entry_date = pair["entry_date"][:10] if pair.get("entry_date") else ""
         ticker = pair["ticker"]
 
         # Look for a thesis near the entry date

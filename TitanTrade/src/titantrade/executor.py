@@ -540,21 +540,6 @@ def close_position_at_market(ticker: str, cfg: Config) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Risk / sizing
-# ---------------------------------------------------------------------------
-
-def calculate_shares(
-    portfolio_value: float,
-    entry_price: float,
-    risk_fraction: float,
-) -> float:
-    """Return shares to buy within the risk fraction of portfolio."""
-    budget = portfolio_value * risk_fraction
-    shares = round(budget / entry_price, 2)
-    return max(shares, 0.0)
-
-
-# ---------------------------------------------------------------------------
 # Re-entry cooldown (prevents whipsaw after ABORT)
 # ---------------------------------------------------------------------------
 
@@ -2476,71 +2461,6 @@ def check_gap_down_protection(cfg: Config) -> list[dict[str, Any]]:
     return closed
 
 
-# ---------------------------------------------------------------------------
-# Dynamic entry price adjustment for bracket resubmission
-# ---------------------------------------------------------------------------
-
-def _adjust_entry_price(
-    thesis: dict[str, Any],
-    current_price: float,
-) -> tuple[float, float, float | None] | None:
-    """Adjust entry/stop/TP prices for bracket resubmission based on current price.
-
-    Returns (adjusted_entry, adjusted_stop, adjusted_tp) or None to skip.
-    """
-    original_entry = thesis.get("target_entry_price", 0)
-    original_stop = thesis.get("stop_loss_price", 0)
-    original_tp = thesis.get("take_profit_price")
-
-    if not original_entry or not original_stop or not current_price:
-        return None
-
-    # Don't chase: skip if price is >5% above original entry
-    if current_price > original_entry * 1.05:
-        return None
-
-    # Skip if price is below original stop (thesis invalidated)
-    if current_price < original_stop:
-        return None
-
-    # If current price is at or below original entry, use the original levels
-    if current_price <= original_entry:
-        return original_entry, original_stop, original_tp
-
-    # Price has moved above original entry — adjust
-    # Preserve the original risk ratio
-    original_risk_pct = (original_entry - original_stop) / original_entry
-
-    # Use support level if available and close to current price
-    tech_levels = thesis.get("key_technical_levels", {})
-    support = tech_levels.get("support")
-    resistance = tech_levels.get("resistance")
-
-    if support and abs(current_price - support) / current_price < 0.01:
-        # Price is within 1% of support — use support as entry
-        adjusted_entry = round(support, 2)
-    else:
-        # Small discount below current price (don't market-buy, still use limit)
-        adjusted_entry = round(current_price * 0.995, 2)
-
-    # Maintain same risk ratio on the adjusted entry
-    adjusted_stop = round(adjusted_entry * (1 - original_risk_pct), 2)
-
-    # Never widen risk below the original stop
-    adjusted_stop = max(adjusted_stop, original_stop)
-
-    # Adjust take-profit proportionally, or use resistance
-    adjusted_tp = None
-    if original_tp and original_tp > adjusted_entry:
-        if resistance and resistance > adjusted_entry:
-            adjusted_tp = round(resistance, 2)
-        else:
-            original_rr = (original_tp - original_entry) / (original_entry - original_stop)
-            adjusted_tp = round(adjusted_entry + original_rr * (adjusted_entry - adjusted_stop), 2)
-
-    return adjusted_entry, adjusted_stop, adjusted_tp
-
-
 def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     """Core execution: read thesis + sentry, run risk gates, place/cancel broker orders.
 
@@ -2845,7 +2765,6 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
             if position:
                 qty = float(position.get("qty", 0))
                 new_stop = thesis.get("stop_loss_price")
-                new_tp = thesis.get("take_profit_price")
                 if new_stop and qty > 0:
                     # Idempotency: if an existing stop is already at the target
                     # price, don't cancel+replace. Running cancel→place on every

@@ -13,14 +13,6 @@ def _closes(bars: list[dict[str, Any]]) -> list[float]:
     return [b["close"] for b in bars]
 
 
-def _highs(bars: list[dict[str, Any]]) -> list[float]:
-    return [b["high"] for b in bars]
-
-
-def _lows(bars: list[dict[str, Any]]) -> list[float]:
-    return [b["low"] for b in bars]
-
-
 def _volumes(bars: list[dict[str, Any]]) -> list[float]:
     return [b["volume"] for b in bars]
 

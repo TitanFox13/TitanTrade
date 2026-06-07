@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from titantrade.config import Config, STATE_DIR
-from titantrade.indicators import atr
 from titantrade.logger import get_logger
 from titantrade.market_context import get_stock_sector
 

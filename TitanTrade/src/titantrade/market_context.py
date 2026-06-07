@@ -15,20 +15,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from titantrade.config import Config, STATE_DIR
-from titantrade.indicators import atr, compute_all_indicators, rsi, sma
+from titantrade.indicators import compute_all_indicators
 from titantrade.logger import get_logger
 from titantrade.retry import fetch_with_retry
 
 log = get_logger("market_context")
-
-# Tickers we track for macro context
-MARKET_TICKERS = {
-    "spy": "SPY",       # S&P 500 ETF
-    "qqq": "QQQ",       # Nasdaq 100 ETF
-    "dia": "DIA",       # Dow Jones ETF
-    "iwm": "IWM",       # Russell 2000 (small caps)
-    "vix": "^VIX",      # CBOE Volatility Index
-}
 
 # Sector ETFs for rotation analysis
 SECTOR_ETFS = {

@@ -22,7 +22,6 @@ from titantrade.daily_sentry import (
     MARKET_DROP_ALERT_PCT,
     PRICE_MOVE_ABORT_PCT,
     PRICE_MOVE_HARD_ABORT_PCT,
-    _fetch_current_price,
     _fetch_spy_quote,
 )
 from titantrade.executor import (
@@ -31,7 +30,6 @@ from titantrade.executor import (
     _trade_record,
     cancel_all_orders_for_ticker,
     close_position_at_market,
-    get_position,
     get_positions,
 )
 from titantrade.logger import get_logger, log_decision
