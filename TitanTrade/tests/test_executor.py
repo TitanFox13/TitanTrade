@@ -486,8 +486,8 @@ def _make_response(data: dict[str, Any]) -> MagicMock:
 
 class TestPlaceNativeStopLoss:
     @patch("titantrade.executor.time.sleep")
-    @patch("titantrade.executor.get_order")
-    @patch("titantrade.executor.fetch_with_retry")
+    @patch("titantrade.broker.get_order")
+    @patch("titantrade.broker.fetch_with_retry")
     def test_retries_on_qty_race_after_blocking_order_canceled(
         self, mock_fetch, mock_get_order, mock_sleep, fake_config,
     ):
@@ -519,8 +519,8 @@ class TestPlaceNativeStopLoss:
         for call in mock_get_order.call_args_list:
             assert call.args[0] == "blocking-order-1"
 
-    @patch("titantrade.executor._wait_for_order_canceled", return_value=None)
-    @patch("titantrade.executor.fetch_with_retry")
+    @patch("titantrade.broker._wait_for_order_canceled", return_value=None)
+    @patch("titantrade.broker.fetch_with_retry")
     def test_qty_race_times_out_if_cancel_never_completes(
         self, mock_fetch, mock_wait, fake_config,
     ):
@@ -543,7 +543,7 @@ class TestPlaceNativeStopLoss:
         assert mock_fetch.call_count == 1  # one initial attempt; gave up polling
         mock_wait.assert_called_once_with("stuck-order", fake_config)
 
-    @patch("titantrade.executor.fetch_with_retry")
+    @patch("titantrade.broker.fetch_with_retry")
     def test_qty_race_without_related_orders_or_available_raises(self, mock_fetch, fake_config):
         """If Alpaca returns 40310000 without naming the blocking order AND
         without an ``available`` qty to clamp to, we can't recover — raise."""
@@ -559,7 +559,7 @@ class TestPlaceNativeStopLoss:
             place_native_stop_loss("FCX", 121, 64.50, fake_config)
         assert exc_info.value.error_code == 40310000
 
-    @patch("titantrade.executor.fetch_with_retry")
+    @patch("titantrade.broker.fetch_with_retry")
     def test_qty_race_without_related_orders_clamps_to_available(self, mock_fetch, fake_config):
         """FIX (bare-position guard): when Alpaca reports a positive
         ``available`` qty but names no blocking order to poll, we must NOT give
@@ -589,7 +589,7 @@ class TestPlaceNativeStopLoss:
         assert retry_body["qty"] == "103.0"
         assert retry_body["type"] == "stop_limit"
 
-    @patch("titantrade.executor.fetch_with_retry")
+    @patch("titantrade.broker.fetch_with_retry")
     def test_falls_back_to_plain_stop_on_non_qty_error(self, mock_fetch, fake_config):
         """For non-40310000 4xx errors, the plain-stop fallback is still useful
         (some paper-account asset types reject stop_limit).
@@ -613,7 +613,7 @@ class TestPlaceNativeStopLoss:
         assert mock_fetch.call_args_list[0].kwargs["json_body"]["type"] == "stop_limit"
         assert mock_fetch.call_args_list[1].kwargs["json_body"]["type"] == "stop"
 
-    @patch("titantrade.executor.fetch_with_retry")
+    @patch("titantrade.broker.fetch_with_retry")
     def test_success_first_try_no_retry(self, mock_fetch, fake_config):
         """When Alpaca accepts the stop-limit on the first try, no retry happens."""
         mock_fetch.return_value = _make_response({"id": "order-123", "status": "accepted"})
@@ -1163,19 +1163,19 @@ class TestBracketMathSanity:
 # ---------------------------------------------------------------------------
 
 class TestMarketHoursHelper:
-    @patch("titantrade.executor.fetch_with_retry")
+    @patch("titantrade.broker.fetch_with_retry")
     def test_is_market_open_true(self, mock_fetch, fake_config):
         from titantrade.executor import is_market_open
         mock_fetch.return_value = _make_response({"is_open": True})
         assert is_market_open(fake_config) is True
 
-    @patch("titantrade.executor.fetch_with_retry")
+    @patch("titantrade.broker.fetch_with_retry")
     def test_is_market_open_false(self, mock_fetch, fake_config):
         from titantrade.executor import is_market_open
         mock_fetch.return_value = _make_response({"is_open": False})
         assert is_market_open(fake_config) is False
 
-    @patch("titantrade.executor.fetch_with_retry")
+    @patch("titantrade.broker.fetch_with_retry")
     def test_is_market_open_assumes_open_on_error(self, mock_fetch, fake_config):
         """Clock fetch failing must not block all trading — assume open."""
         from titantrade.executor import is_market_open
@@ -1189,7 +1189,7 @@ class TestMarketHoursHelper:
 
 class TestWaitForOrderCanceled:
     @patch("titantrade.executor.time.sleep")
-    @patch("titantrade.executor.get_order")
+    @patch("titantrade.broker.get_order")
     def test_returns_when_order_canceled(self, mock_get, mock_sleep, fake_config):
         from titantrade.executor import _wait_for_order_canceled
         mock_get.side_effect = [
@@ -1201,7 +1201,7 @@ class TestWaitForOrderCanceled:
         assert mock_get.call_count == 3
 
     @patch("titantrade.executor.time.sleep")
-    @patch("titantrade.executor.get_order")
+    @patch("titantrade.broker.get_order")
     def test_returns_when_filled(self, mock_get, mock_sleep, fake_config):
         """A bracket child order can become 'filled' instead of canceled."""
         from titantrade.executor import _wait_for_order_canceled
@@ -1209,7 +1209,7 @@ class TestWaitForOrderCanceled:
         assert _wait_for_order_canceled("oid", fake_config) == "filled"
 
     @patch("titantrade.executor.time.sleep")
-    @patch("titantrade.executor.get_order", return_value=None)
+    @patch("titantrade.broker.get_order", return_value=None)
     def test_treats_missing_order_as_canceled(self, mock_get, mock_sleep, fake_config):
         """A 404 (order has been GC'd) means it's no longer holding qty."""
         from titantrade.executor import _wait_for_order_canceled
@@ -1217,7 +1217,7 @@ class TestWaitForOrderCanceled:
 
     @patch("titantrade.executor.time.time")
     @patch("titantrade.executor.time.sleep")
-    @patch("titantrade.executor.get_order")
+    @patch("titantrade.broker.get_order")
     def test_returns_none_on_timeout(
         self, mock_get, mock_sleep, mock_time, fake_config,
     ):

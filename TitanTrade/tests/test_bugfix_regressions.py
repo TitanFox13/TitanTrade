@@ -44,7 +44,7 @@ def _resp(data):
 # ---------------------------------------------------------------------------
 
 class TestBracketFractionalGuard:
-    @patch("titantrade.executor.fetch_with_retry")
+    @patch("titantrade.broker.fetch_with_retry")
     def test_floors_fractional_qty_before_posting(self, mock_fetch, fake_config):
         mock_fetch.return_value = _resp({"id": "br-1", "status": "accepted"})
         place_bracket_order("AAPL", 5.9, 100.0, 95.0, 110.0, fake_config)
