@@ -915,14 +915,13 @@ After Decisions 032-033 rewired the executor's risk gates, sizing, entry style, 
 
 **Key constraint discovered**: the test suite is deeply coupled to `executor`'s namespace (123+ `@patch("titantrade.executor.X")` targets). Mitigation: moved symbols are **re-imported into `executor.py`**, so `titantrade.executor.X` keeps resolving for callers that remain in executor (Python resolves patched names in the caller's namespace). Where a moved function's *internal* dependency is patched by a test (e.g. `place_native_stop_loss` calling `fetch_with_retry`), those specific patch strings are retargeted to the new module (`titantrade.broker.*`). `conftest.tmp_state_dir` patches `STATE_DIR` in each new state-owning module.
 
-**Done so far** (branch `refactor/backend-modularization`, each step 424 green):
-1. Dead code removed: `calculate_shares`, `_adjust_entry_price` (+ its dead `test_dynamic_entry.py`), `_highs`/`_lows`, `fetch_earnings_date`, dead constants, unused locals, 24 unused imports (ruff). Added `ruff`+`vulture` dev extra.
-2. `broker.py` — all Alpaca REST primitives.
-3. `pricing.py` — `compute_trend_regime` + `_choose_entry_price`.
-4. `cooldown.py` — ABORT re-entry cooldown; `trailing_state.py` — trailing-stop state.
+**Split COMPLETE** (branch `refactor/backend-modularization`, each step 424 green):
+1. Dead code removed: `calculate_shares`, `_adjust_entry_price` (+ its dead `test_dynamic_entry.py`), `_highs`/`_lows`, `fetch_earnings_date`, dead constants, unused locals, 24+ unused imports (ruff). Added `ruff`+`vulture` dev extra.
+2. 10 modules extracted (dependency flow leaf→orchestrator): `broker` (Alpaca client), `trade_state`, `trailing_state`, `pricing`, `cooldown`, `alerts`, `core_allocation`, `protection`, `entries`, `positions`.
+3. `executor.py` is now a **691-line orchestrator** (`execute_trades`) — down from **3,267 LOC (−79%)**. No extracted module imports `executor` (clean DAG).
 
-`executor.py`: 3,267 → 2,496 LOC.
+Test-coupling handling worked exactly as planned: re-exports preserved `titantrade.executor.X` patch targets for orchestrator-resident callers; tests exercising a moved function directly were repointed to its home module (mechanical, suite-verified). `conftest.tmp_state_dir` now patches `STATE_DIR` across all state-owning modules with `raising=False`.
 
-**Remaining** (planned, same approach): `trade_state.py`, `alerts.py`, `entries.py`, `positions.py`, `protection.py`, `core_allocation.py`; de-duplicate the entry-adaptation / bracket-validation logic shared by `_handle_bullish_entry` and `resubmit_expired_brackets`; decompose `execute_trades` (592 LOC) and `_handle_bullish_entry` (319 LOC); then redeploy + re-verify.
+**Remaining polish** (lower priority, on now-clean modules; tracked in todo): de-duplicate the entry-adaptation / bracket-validation logic shared by `_handle_bullish_entry` and `resubmit_expired_brackets` (both now in `entries.py`); decompose the long `execute_trades` and `_handle_bullish_entry` functions into named helpers.
 
 **Trade-offs**: per-module test-patch retargeting is mechanical but real (the suite catches mistakes). Logger names become per-module (`titantrade.broker` etc.) — more precise log attribution, no functional change.

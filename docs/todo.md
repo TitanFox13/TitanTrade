@@ -1,16 +1,13 @@
 # TitanTrade TODO
 
-## Phase 1.20: Executor decomposition (2026-06-07) — behavior-preserving, in progress
-Branch `refactor/backend-modularization`; see Decision 036. Each step keeps 424 tests green + is committed.
-- [x] Remove dead code (`calculate_shares`, `_adjust_entry_price` + its test file, `_highs`/`_lows`, `fetch_earnings_date`, dead constants, unused locals, 24 unused imports); add `ruff`+`vulture` dev extra
-- [x] Extract `broker.py` (Alpaca REST client)
-- [x] Extract `pricing.py` (trend regime + entry selection)
-- [x] Extract `cooldown.py` + `trailing_state.py`
-- [x] executor.py 3,267 → 2,496 LOC
-- [ ] Extract `trade_state.py`, `alerts.py` (leaf state helpers)
-- [ ] Extract `entries.py`, `positions.py`, `protection.py`, `core_allocation.py` (Tier-2: retarget moved-caller test patches)
-- [ ] De-duplicate shared entry-adaptation / bracket-validation logic
-- [ ] Decompose `execute_trades` (592) + `_handle_bullish_entry` (319)
+## Phase 1.20: Executor decomposition (2026-06-07) — behavior-preserving
+Branch `refactor/backend-modularization`; see Decision 036. Each step kept 424 tests green + is committed.
+- [x] Remove dead code (`calculate_shares`, `_adjust_entry_price` + its test file, `_highs`/`_lows`, `fetch_earnings_date`, dead constants, unused locals, 24+ unused imports); add `ruff`+`vulture` dev extra
+- [x] Extract all 10 modules: `broker`, `trade_state`, `trailing_state`, `pricing`, `cooldown`, `alerts`, `core_allocation`, `protection`, `entries`, `positions`
+- [x] **executor.py 3,267 → 691 LOC (−79%)** — now a pure orchestrator; clean dependency DAG (no module imports executor)
+- [x] Test patch-target retargeting (re-export for orchestrator callers; home-module for direct tests); conftest STATE_DIR loop with `raising=False`
+- [ ] Polish: de-duplicate shared entry-adaptation / bracket-validation logic in `entries.py`
+- [ ] Polish: decompose the long `execute_trades` + `_handle_bullish_entry` functions
 - [ ] Redeploy + re-verify on server
 
 ## Phase 1.19: Execution-safety hardening (2026-06-07) — go-live blockers

@@ -65,11 +65,17 @@ docker compose run --rm titantrade <command>             # CLI commands
 |------|---------|
 | `src/titantrade/weekly_analyst.py` | 2-pass Claude analysis |
 | `src/titantrade/daily_sentry.py` | 3-layer Gemini sentry |
-| `src/titantrade/executor.py` | Execution orchestrator (`execute_trades`) + entry/position/protection logic |
+| `src/titantrade/executor.py` | Execution **orchestrator** (`execute_trades`) — wires the modules below together |
 | `src/titantrade/broker.py` | Alpaca REST client — the only module that talks to Alpaca |
+| `src/titantrade/entries.py` | New-position entry + expired-bracket resubmission (all 6 risk gates) |
+| `src/titantrade/positions.py` | Open-position management: ATR trailing stop, TP1, pyramiding |
+| `src/titantrade/protection.py` | Pre-flight safety: orphan close + gap-down protection |
+| `src/titantrade/core_allocation.py` | Always-on core (SPY) allocation + stress hedge swap |
 | `src/titantrade/pricing.py` | Trend-regime classification + entry-price selection (pure) |
 | `src/titantrade/cooldown.py` | Re-entry ABORT cooldown state + override policy |
+| `src/titantrade/trade_state.py` | Trade log / near-miss store, state loader, trade-record builders |
 | `src/titantrade/trailing_state.py` | Per-ticker trailing-stop state (HWM, trail, TP1/pyramid flags) |
+| `src/titantrade/alerts.py` | Discord observability alerts (stuck-in-cash, ticker churn) |
 | `src/titantrade/risk_manager.py` | 6 risk gates |
 | `src/titantrade/price_check.py` | Intraday price checks (no LLM) |
 | `src/titantrade/api.py` | FastAPI HTTP server |
@@ -77,7 +83,7 @@ docker compose run --rm titantrade <command>             # CLI commands
 | `src/titantrade/indicators.py` | Pure Python RSI/MACD/Bollinger/ATR/SMA |
 | `src/titantrade/notifier.py` | Discord webhook notifications (job alerts + daily summary) |
 
-> **Refactor in progress** (ADR 036): `executor.py` is being decomposed from a 3,267-line god-module into focused modules above. `broker.py`, `pricing.py`, `cooldown.py`, `trailing_state.py` are extracted; `trade_state.py`/`alerts.py`/`entries.py`/`positions.py`/`protection.py`/`core_allocation.py` are planned. `executor.py` re-exports moved symbols so `titantrade.executor.X` stays importable. Behavior-preserving; tests green at each step. Run tests with `--extra test` (see below).
+> **Executor decomposition complete** (ADR 036): `executor.py` was a 3,267-line god-module; it's now a **691-line orchestrator** plus the 10 focused modules above (broker/entries/positions/protection/core_allocation/pricing/cooldown/trade_state/trailing_state/alerts). Dependency flow: leaf modules → core_allocation → protection → entries/positions → executor. `executor.py` re-exports the symbols `execute_trades` calls, so `titantrade.executor.X` patch targets still resolve for orchestrator-resident callers. Behavior-preserving; 424 tests green. Run tests with `--extra test` (see below). Remaining polish (tracked in todo): de-dup shared entry-adaptation logic in `entries.py`; decompose the long `execute_trades`/`_handle_bullish_entry` functions.
 
 ## Documentation Rules
 

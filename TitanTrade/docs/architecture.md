@@ -73,19 +73,28 @@ config.py
 ├── weekly_analyst.py       <- Two-pass Claude analysis (uses data_fetcher, performance)
 ├── daily_sentry.py         <- Three-layer sentry (uses data_fetcher, Gemini)
 ├── price_check.py          <- Lightweight intraday price checks (no LLM)
-├── broker.py               <- Alpaca REST client (the only module that calls Alpaca)
+│
+│   ── Execution layer (ADR 036), dependency flow top → bottom ──
+├── broker.py               <- Alpaca REST client (the ONLY module that calls Alpaca)
+├── trade_state.py          <- Trade log / near-miss store, state loader, record builders
+├── trailing_state.py       <- Trailing-stop state (HWM, trail, TP1/pyramid flags)
 ├── pricing.py              <- Trend regime + entry-price selection (pure)
 ├── cooldown.py             <- ABORT re-entry cooldown state + override policy
-├── trailing_state.py       <- Trailing-stop state (HWM, trail, TP1/pyramid flags)
-└── executor.py             <- Execution orchestrator + entry/position/protection logic
-                               (uses broker, pricing, cooldown, trailing_state, risk_manager)
+├── alerts.py               <- Discord observability alerts (uses trade_state, notifier)
+├── core_allocation.py      <- Always-on SPY core + hedge swap (uses broker, trade_state)
+├── protection.py           <- Orphan close + gap-down protection (uses broker, trade_state, core_allocation)
+├── entries.py              <- New entries + bracket resubmission (uses broker, pricing, cooldown, risk_manager)
+├── positions.py            <- Trailing stop + TP1 + pyramid (uses broker, trade_state, trailing_state)
+└── executor.py             <- Orchestrator: execute_trades() wires entries/positions/protection/
+                               core_allocation together (691 LOC, was 3,267)
 ```
 
-> **In progress (ADR 036):** `executor.py` is being decomposed from a 3,267-line god-module into the
-> focused modules above (behavior-preserving; tests green at each step). `broker.py`, `pricing.py`,
-> `cooldown.py`, `trailing_state.py` are extracted; `trade_state.py`, `alerts.py`, `entries.py`,
-> `positions.py`, `protection.py`, `core_allocation.py` are planned. `executor.py` re-exports moved
-> symbols, so `from titantrade.executor import X` and `@patch("titantrade.executor.X")` still resolve.
+> **Executor decomposition complete (ADR 036):** the former 3,267-line `executor.py` god-module is now
+> a 691-line orchestrator plus the 10 focused modules above. No module below imports `executor`
+> (clean DAG, no cycles). `executor.py` re-exports the symbols `execute_trades` calls, so
+> `from titantrade.executor import X` and `@patch("titantrade.executor.X")` still resolve for
+> orchestrator-resident callers; tests that exercise a moved function directly import/patch it from
+> its home module. Behavior-preserving; 424 tests green.
 
 ---
 
