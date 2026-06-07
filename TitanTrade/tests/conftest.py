@@ -50,13 +50,15 @@ def tmp_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """
     state = tmp_path / "state"
     state.mkdir()
-    monkeypatch.setattr("titantrade.config.STATE_DIR", state)
-    monkeypatch.setattr("titantrade.risk_manager.STATE_DIR", state)
-    monkeypatch.setattr("titantrade.executor.STATE_DIR", state)
-    monkeypatch.setattr("titantrade.daily_sentry.STATE_DIR", state)
-    # State helpers extracted from executor read STATE_DIR in their own modules.
-    monkeypatch.setattr("titantrade.cooldown.STATE_DIR", state)
-    monkeypatch.setattr("titantrade.trailing_state.STATE_DIR", state)
+    # Patch STATE_DIR everywhere it's imported by name. raising=False tolerates
+    # modules that don't bind STATE_DIR (e.g. executor after its state helpers
+    # were extracted into trade_state/cooldown/trailing_state/alerts).
+    for mod in (
+        "titantrade.config", "titantrade.risk_manager", "titantrade.executor",
+        "titantrade.daily_sentry", "titantrade.cooldown", "titantrade.trailing_state",
+        "titantrade.trade_state", "titantrade.alerts",
+    ):
+        monkeypatch.setattr(f"{mod}.STATE_DIR", state, raising=False)
     return state
 
 

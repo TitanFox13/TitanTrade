@@ -1394,7 +1394,7 @@ class TestBracketAttemptCap:
 class TestStateArchival:
     def test_trade_log_archives_overflow(self, tmp_state_dir):
         """When trade_log.json exceeds MAX_LIVE_TRADES, archive the excess."""
-        from titantrade.executor import (
+        from titantrade.trade_state import (
             _append_trade,
             MAX_LIVE_TRADES,
         )
@@ -1432,7 +1432,7 @@ class TestStuckInCashAlert:
         self, mock_send, tmp_state_dir,
     ):
         """3 days of high-cash should fire one alert, then suppress repeats today."""
-        from titantrade.executor import (
+        from titantrade.alerts import (
             _maybe_alert_stuck_in_cash,
             STUCK_IN_CASH_DAYS_THRESHOLD,
         )
@@ -1455,7 +1455,7 @@ class TestStuckInCashAlert:
 
     @patch("titantrade.notifier.send_discord")
     def test_does_not_alert_below_threshold(self, mock_send, tmp_state_dir):
-        from titantrade.executor import _maybe_alert_stuck_in_cash
+        from titantrade.alerts import _maybe_alert_stuck_in_cash
         _maybe_alert_stuck_in_cash(portfolio_value=100_000, cash_balance=30_000)
         mock_send.assert_not_called()
 
@@ -1463,7 +1463,7 @@ class TestStuckInCashAlert:
 class TestTickerChurnAlert:
     @patch("titantrade.notifier.send_discord")
     def test_alerts_on_excessive_round_trips(self, mock_send, tmp_state_dir):
-        from titantrade.executor import (
+        from titantrade.alerts import (
             _maybe_alert_ticker_churn,
             TICKER_CHURN_ROUND_TRIPS,
         )
