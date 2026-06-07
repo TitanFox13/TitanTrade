@@ -13,16 +13,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from titantrade.executor import (
-    _build_trade_context,
-    _choose_entry_price,
-    _handle_bullish_entry,
-    compute_trend_regime,
-    manage_core_position,
-    maybe_pyramid_position,
-    place_native_stop_loss,
-    resubmit_expired_brackets,
-)
+from titantrade.broker import place_native_stop_loss
+from titantrade.core_allocation import manage_core_position
+from titantrade.entries import _handle_bullish_entry, resubmit_expired_brackets
+from titantrade.positions import maybe_pyramid_position
+from titantrade.pricing import _choose_entry_price, compute_trend_regime
+from titantrade.trade_state import _build_trade_context
 from titantrade.retry import HTTPError
 
 from tests.conftest import write_state_file
@@ -89,8 +85,8 @@ class TestHandleBullishEntry:
     def _mock_deps(self, monkeypatch, tmp_state_dir):
         monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: "Technology")
 
-    @patch("titantrade.executor.place_bracket_order", return_value={"id": "order_123"})
-    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.entries.place_bracket_order", return_value={"id": "order_123"})
+    @patch("titantrade.entries.get_open_orders", return_value=[])
     def test_places_bracket_when_allowed(
         self, mock_orders, mock_bracket, fake_config, bullish_thesis, sample_positions, data_bundle
     ):
@@ -109,8 +105,8 @@ class TestHandleBullishEntry:
         assert result["ticker"] == "AAPL"
         assert mock_bracket.call_count >= 1  # 2-tranche: may call twice
 
-    @patch("titantrade.executor.place_bracket_order")
-    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_open_orders", return_value=[])
     def test_blocked_by_low_confidence(
         self, mock_orders, mock_bracket, fake_config, bullish_thesis, sample_positions, data_bundle, tmp_state_dir
     ):
@@ -128,8 +124,8 @@ class TestHandleBullishEntry:
         assert result is None
         mock_bracket.assert_not_called()
 
-    @patch("titantrade.executor.place_bracket_order")
-    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_open_orders", return_value=[])
     def test_near_miss_recorded(
         self, mock_orders, mock_bracket, fake_config, bullish_thesis, sample_positions, data_bundle, tmp_state_dir
     ):
@@ -268,8 +264,8 @@ class TestHandleBullishEntryTrendAdaptive:
     """Verify the real entry path responds to trend regime."""
 
     @patch("titantrade.daily_sentry._fetch_current_price", return_value=200.0)
-    @patch("titantrade.executor.place_bracket_order")
-    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_open_orders", return_value=[])
     def test_downtrend_skips_entry(
         self, mock_orders, mock_bracket, mock_price,
         fake_config, bullish_thesis, sample_positions, tmp_state_dir,
@@ -299,8 +295,8 @@ class TestHandleBullishEntryTrendAdaptive:
         mock_bracket.assert_not_called()
 
     @patch("titantrade.daily_sentry._fetch_current_price", return_value=200.0)
-    @patch("titantrade.executor.place_bracket_order", return_value={"id": "br-1"})
-    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.entries.place_bracket_order", return_value={"id": "br-1"})
+    @patch("titantrade.entries.get_open_orders", return_value=[])
     def test_strong_up_uses_near_market_entry(
         self, mock_orders, mock_bracket, mock_price,
         fake_config, bullish_thesis, sample_positions, tmp_state_dir, monkeypatch,
@@ -356,11 +352,11 @@ class TestResubmitExpiredBrackets:
     def _mock_deps(self, monkeypatch, tmp_state_dir):
         monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: "Technology")
 
-    @patch("titantrade.executor.place_bracket_order", return_value={"id": "resubmit_1"})
-    @patch("titantrade.executor.get_positions", return_value=[])
-    @patch("titantrade.executor.get_open_orders", return_value=[])
-    @patch("titantrade.executor.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
-    @patch("titantrade.executor.get_expired_brackets")
+    @patch("titantrade.entries.place_bracket_order", return_value={"id": "resubmit_1"})
+    @patch("titantrade.entries.get_positions", return_value=[])
+    @patch("titantrade.entries.get_open_orders", return_value=[])
+    @patch("titantrade.entries.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
+    @patch("titantrade.entries.get_expired_brackets")
     def test_resubmits_valid_expired(
         self, mock_expired, mock_account, mock_open, mock_pos, mock_bracket,
         fake_config, bullish_thesis
@@ -374,16 +370,16 @@ class TestResubmitExpiredBrackets:
         assert result[0]["trigger"] == "bracket_resubmission"
         mock_bracket.assert_called_once()
 
-    @patch("titantrade.executor.get_expired_brackets", return_value=[])
+    @patch("titantrade.entries.get_expired_brackets", return_value=[])
     def test_no_expired_returns_empty(self, mock_expired, fake_config):
         result = resubmit_expired_brackets(fake_config, {"theses": []}, [], {})
         assert result == []
 
-    @patch("titantrade.executor.place_bracket_order")
-    @patch("titantrade.executor.get_positions", return_value=[])
-    @patch("titantrade.executor.get_open_orders", return_value=[])
-    @patch("titantrade.executor.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
-    @patch("titantrade.executor.get_expired_brackets")
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_positions", return_value=[])
+    @patch("titantrade.entries.get_open_orders", return_value=[])
+    @patch("titantrade.entries.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
+    @patch("titantrade.entries.get_expired_brackets")
     def test_skips_if_thesis_not_bullish(
         self, mock_expired, mock_account, mock_open, mock_pos, mock_bracket,
         fake_config
@@ -396,11 +392,11 @@ class TestResubmitExpiredBrackets:
         assert result == []
         mock_bracket.assert_not_called()
 
-    @patch("titantrade.executor.place_bracket_order")
-    @patch("titantrade.executor.get_positions", return_value=[])
-    @patch("titantrade.executor.get_open_orders", return_value=[])
-    @patch("titantrade.executor.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
-    @patch("titantrade.executor.get_expired_brackets")
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_positions", return_value=[])
+    @patch("titantrade.entries.get_open_orders", return_value=[])
+    @patch("titantrade.entries.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
+    @patch("titantrade.entries.get_expired_brackets")
     def test_skips_if_already_holding(
         self, mock_expired, mock_account, mock_open, mock_pos, mock_bracket,
         fake_config, bullish_thesis
@@ -414,11 +410,11 @@ class TestResubmitExpiredBrackets:
         result = resubmit_expired_brackets(fake_config, thesis_doc, positions, {})
         assert result == []
 
-    @patch("titantrade.executor.place_bracket_order")
-    @patch("titantrade.executor.get_positions", return_value=[])
-    @patch("titantrade.executor.get_open_orders", return_value=[])
-    @patch("titantrade.executor.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
-    @patch("titantrade.executor.get_expired_brackets")
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_positions", return_value=[])
+    @patch("titantrade.entries.get_open_orders", return_value=[])
+    @patch("titantrade.entries.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
+    @patch("titantrade.entries.get_expired_brackets")
     def test_dedupes_skip_log_lines_per_ticker_reason(
         self, mock_expired, mock_account, mock_open, mock_pos, mock_bracket,
         fake_config, bullish_thesis, caplog,
@@ -1113,7 +1109,7 @@ class TestBracketMathSanity:
     must detect and skip these — Alpaca would reject with HTTP 422 anyway.
     """
 
-    @patch("titantrade.executor.place_bracket_order")
+    @patch("titantrade.entries.place_bracket_order")
     def test_handle_bullish_entry_skips_when_stop_above_entry(
         self, mock_bracket, fake_config, data_bundle,
     ):
@@ -1135,7 +1131,7 @@ class TestBracketMathSanity:
         assert result is None
         mock_bracket.assert_not_called()
 
-    @patch("titantrade.executor.place_bracket_order")
+    @patch("titantrade.entries.place_bracket_order")
     def test_handle_bullish_entry_skips_when_tp_below_stop(
         self, mock_bracket, fake_config, data_bundle,
     ):
@@ -1233,7 +1229,7 @@ class TestWaitForOrderCanceled:
 
 class TestReentryCooldown:
     def test_record_and_check_cooldown(self, tmp_state_dir):
-        from titantrade.executor import (
+        from titantrade.cooldown import (
             _is_in_cooldown,
             _record_abort_cooldown,
             REENTRY_COOLDOWN_HOURS,
@@ -1245,7 +1241,7 @@ class TestReentryCooldown:
         assert hours < 1.0
 
     def test_unrelated_ticker_not_in_cooldown(self, tmp_state_dir):
-        from titantrade.executor import _is_in_cooldown, _record_abort_cooldown
+        from titantrade.cooldown import _is_in_cooldown, _record_abort_cooldown
         _record_abort_cooldown("FCX", "test")
         in_cooldown, _ = _is_in_cooldown("NVDA")
         assert in_cooldown is False
@@ -1254,7 +1250,7 @@ class TestReentryCooldown:
         """A cooldown older than REENTRY_COOLDOWN_HOURS should auto-expire."""
         import datetime as dt
         import json as _json
-        from titantrade.executor import _is_in_cooldown
+        from titantrade.cooldown import _is_in_cooldown
         # Write a stale entry directly (older than the window)
         stale_time = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=100)
         (tmp_state_dir / "abort_cooldown.json").write_text(_json.dumps({
@@ -1264,12 +1260,12 @@ class TestReentryCooldown:
         assert in_cooldown is False
         assert hours >= 72  # past the window
 
-    @patch("titantrade.executor.place_bracket_order")
+    @patch("titantrade.entries.place_bracket_order")
     def test_handle_bullish_entry_blocked_by_cooldown(
         self, mock_bracket, fake_config, data_bundle, tmp_state_dir,
     ):
         """A ticker in cooldown should not get a new bracket placed."""
-        from titantrade.executor import _record_abort_cooldown
+        from titantrade.cooldown import _record_abort_cooldown
         _record_abort_cooldown("AAPL", "tripped")
 
         thesis = {
@@ -1306,7 +1302,7 @@ class TestCooldownOverride:
         return base
 
     def test_too_soon_no_override(self):
-        from titantrade.executor import cooldown_override_allowed
+        from titantrade.cooldown import cooldown_override_allowed
         # Only 12h have passed — below the 24h minimum.
         assert cooldown_override_allowed(
             "AAPL", self._thesis(), {"signal": "CONTINUE"},
@@ -1314,7 +1310,7 @@ class TestCooldownOverride:
         ) is False
 
     def test_thesis_no_longer_bullish_no_override(self):
-        from titantrade.executor import cooldown_override_allowed
+        from titantrade.cooldown import cooldown_override_allowed
         bearish = self._thesis(thesis="BEARISH")
         assert cooldown_override_allowed(
             "AAPL", bearish, {"signal": "CONTINUE"},
@@ -1322,14 +1318,14 @@ class TestCooldownOverride:
         ) is False
 
     def test_sentry_still_aborting_no_override(self):
-        from titantrade.executor import cooldown_override_allowed
+        from titantrade.cooldown import cooldown_override_allowed
         assert cooldown_override_allowed(
             "AAPL", self._thesis(), {"signal": "ABORT"},
             hours_since_abort=48, current_price=110.0,
         ) is False
 
     def test_price_below_stop_no_override(self):
-        from titantrade.executor import cooldown_override_allowed
+        from titantrade.cooldown import cooldown_override_allowed
         # Price = 99 below stop = 100 → hasn't recovered, don't re-enter
         assert cooldown_override_allowed(
             "AAPL", self._thesis(), {"signal": "CONTINUE"},
@@ -1337,7 +1333,7 @@ class TestCooldownOverride:
         ) is False
 
     def test_all_conditions_met_allows_override(self):
-        from titantrade.executor import cooldown_override_allowed
+        from titantrade.cooldown import cooldown_override_allowed
         # 48h since ABORT, thesis still BULLISH, sentry CONTINUE, price
         # safely above stop → override allowed.
         assert cooldown_override_allowed(
@@ -1346,7 +1342,7 @@ class TestCooldownOverride:
         ) is True
 
     def test_no_sentry_no_override(self):
-        from titantrade.executor import cooldown_override_allowed
+        from titantrade.cooldown import cooldown_override_allowed
         # If there's no sentry signal at all, can't confirm recovery
         assert cooldown_override_allowed(
             "AAPL", self._thesis(), None,
@@ -1359,18 +1355,18 @@ class TestCooldownOverride:
 # ---------------------------------------------------------------------------
 
 class TestBracketAttemptCap:
-    @patch("titantrade.executor.place_bracket_order")
-    @patch("titantrade.executor.get_open_orders", return_value=[])
-    @patch("titantrade.executor.get_positions", return_value=[])
-    @patch("titantrade.executor.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
-    @patch("titantrade.executor.get_expired_brackets")
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_open_orders", return_value=[])
+    @patch("titantrade.entries.get_positions", return_value=[])
+    @patch("titantrade.entries.get_account", return_value={"portfolio_value": "100000", "cash": "50000"})
+    @patch("titantrade.entries.get_expired_brackets")
     def test_skips_after_max_attempts(
         self, mock_expired, mock_account, mock_pos, mock_open, mock_bracket,
         fake_config, bullish_thesis, tmp_state_dir,
     ):
         """If the same ticker has more than MAX_BRACKET_ATTEMPTS expired
         brackets in Alpaca's history, we should stop chasing the price."""
-        from titantrade.executor import MAX_BRACKET_ATTEMPTS
+        from titantrade.entries import MAX_BRACKET_ATTEMPTS
         # Generate enough expired brackets to trip the cap (+1 to be over)
         mock_expired.return_value = [
             {
@@ -1990,8 +1986,8 @@ class TestStopWalksBothDirections:
     """
 
     @patch("titantrade.daily_sentry._fetch_current_price", return_value=47.16)
-    @patch("titantrade.executor.place_bracket_order", return_value={"id": "br"})
-    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.entries.place_bracket_order", return_value={"id": "br"})
+    @patch("titantrade.entries.get_open_orders", return_value=[])
     def test_entry_walking_down_walks_stop_down_too(
         self, mock_orders, mock_bracket, mock_price,
         fake_config, sample_positions, tmp_state_dir, monkeypatch,

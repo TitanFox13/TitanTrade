@@ -24,13 +24,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from titantrade.executor import (
+from titantrade.broker import place_bracket_order
+from titantrade.entries import (
     _handle_bullish_entry,
-    manage_trailing_stop,
     open_buy_commitment,
-    place_bracket_order,
     resubmit_expired_brackets,
 )
+from titantrade.positions import manage_trailing_stop
 
 
 def _resp(data):
@@ -70,12 +70,12 @@ class TestResubmitFractionalSkip:
         }
 
     @patch("titantrade.daily_sentry._fetch_current_price", return_value=None)
-    @patch("titantrade.executor.place_bracket_order")
-    @patch("titantrade.executor.get_positions", return_value=[])
-    @patch("titantrade.executor.get_open_orders", return_value=[])
-    @patch("titantrade.executor.get_account",
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_positions", return_value=[])
+    @patch("titantrade.entries.get_open_orders", return_value=[])
+    @patch("titantrade.entries.get_account",
            return_value={"portfolio_value": "100000", "cash": "5100"})
-    @patch("titantrade.executor.get_expired_brackets")
+    @patch("titantrade.entries.get_expired_brackets")
     def test_skips_when_sized_below_one_share(
         self, mock_expired, mock_account, mock_open, mock_pos, mock_bracket,
         mock_price, fake_config, tmp_state_dir, monkeypatch,
@@ -147,7 +147,7 @@ class TestTp1RestoreNeverLeavesBare:
 # ---------------------------------------------------------------------------
 
 class TestOpenBuyCommitment:
-    @patch("titantrade.executor.get_open_orders")
+    @patch("titantrade.entries.get_open_orders")
     def test_sums_pending_buy_notional(self, mock_orders, fake_config):
         mock_orders.return_value = [
             {"symbol": "GE", "side": "buy", "qty": "31", "limit_price": "318.00"},
@@ -157,7 +157,7 @@ class TestOpenBuyCommitment:
         total = open_buy_commitment(fake_config)
         assert total == pytest.approx(31 * 318.0 + 155 * 65.0)
 
-    @patch("titantrade.executor.get_open_orders")
+    @patch("titantrade.entries.get_open_orders")
     def test_excludes_named_ticker(self, mock_orders, fake_config):
         mock_orders.return_value = [
             {"symbol": "GE", "side": "buy", "qty": "31", "limit_price": "318.00"},
@@ -167,8 +167,8 @@ class TestOpenBuyCommitment:
         assert total == pytest.approx(155 * 65.0)
 
     @patch("titantrade.daily_sentry._fetch_current_price", return_value=185.0)
-    @patch("titantrade.executor.place_bracket_order")
-    @patch("titantrade.executor.get_open_orders")
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_open_orders")
     def test_bullish_entry_blocked_by_committed_cash(
         self, mock_orders, mock_bracket, mock_price,
         fake_config, bullish_thesis, sample_positions, tmp_state_dir,
@@ -206,8 +206,8 @@ class TestDowntrendNearMiss:
     """
 
     @patch("titantrade.daily_sentry._fetch_current_price", return_value=96.0)
-    @patch("titantrade.executor.place_bracket_order")
-    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_open_orders", return_value=[])
     def test_downtrend_selected_ticker_records_near_miss(
         self, mock_orders, mock_bracket, mock_price,
         fake_config, sample_positions, tmp_state_dir, monkeypatch,
