@@ -1,5 +1,18 @@
 # TitanTrade TODO
 
+## Phase 1.20: Executor decomposition (2026-06-07) — behavior-preserving, in progress
+Branch `refactor/backend-modularization`; see Decision 036. Each step keeps 424 tests green + is committed.
+- [x] Remove dead code (`calculate_shares`, `_adjust_entry_price` + its test file, `_highs`/`_lows`, `fetch_earnings_date`, dead constants, unused locals, 24 unused imports); add `ruff`+`vulture` dev extra
+- [x] Extract `broker.py` (Alpaca REST client)
+- [x] Extract `pricing.py` (trend regime + entry selection)
+- [x] Extract `cooldown.py` + `trailing_state.py`
+- [x] executor.py 3,267 → 2,496 LOC
+- [ ] Extract `trade_state.py`, `alerts.py` (leaf state helpers)
+- [ ] Extract `entries.py`, `positions.py`, `protection.py`, `core_allocation.py` (Tier-2: retarget moved-caller test patches)
+- [ ] De-duplicate shared entry-adaptation / bracket-validation logic
+- [ ] Decompose `execute_trades` (592) + `_handle_bullish_entry` (319)
+- [ ] Redeploy + re-verify on server
+
 ## Phase 1.19: Execution-safety hardening (2026-06-07) — go-live blockers
 From a 14-day paper-log review (see Decision 035). All six found bugs fixed:
 - [x] TP1 race fixed: poll the partial sell to `filled` before sizing the breakeven stop; restore handler sizes off the live position, not the stale pre-sell qty

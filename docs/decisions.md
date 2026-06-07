@@ -906,3 +906,23 @@ After Decisions 032-033 rewired the executor's risk gates, sizing, entry style, 
 - 437 tests passing (was 425), all external calls mocked — zero real orders, zero tokens.
 - New regression tests reproduce each production failure mode: stop-clamp-to-available, TP1 restore sizing off the live position, pyramid limit-buy (never market-buy) + unfilled-add cancel, gap-down cancel-settle ordering, fractional-bracket guard + resubmit skip, committed-cash reserve blocking, and the downtrend near-miss.
 - Pre-existing brittle test (`test_qty_race_times_out_if_cancel_never_completes`) de-flaked by patching `_wait_for_order_canceled` instead of the global `time.time` (pytest's log capture was consuming the mocked clock).
+
+## Decision 036: Behavior-preserving decomposition of the executor god-module
+**Date**: 2026-06-07
+**Decision**: Break the 3,267-line `executor.py` into cohesive single-responsibility modules and remove confirmed dead code — as a **behavior-preserving** refactor (pure code movement + extraction, zero logic changes), NOT a rewrite. An audit found the codebase is otherwise well-structured (26 of 27 modules are 80–400 LOC, 7,000+ test LOC, 424 passing); the debt was concentrated almost entirely in `executor.py`.
+
+**Why not a rewrite**: This is a live, money-handling system being prepared for go-live. A rewrite of order-execution/risk code is exactly how subtle behavior changes cause real losses. So every step is guarded by the full test suite (must stay green) and committed independently for revertability.
+
+**Key constraint discovered**: the test suite is deeply coupled to `executor`'s namespace (123+ `@patch("titantrade.executor.X")` targets). Mitigation: moved symbols are **re-imported into `executor.py`**, so `titantrade.executor.X` keeps resolving for callers that remain in executor (Python resolves patched names in the caller's namespace). Where a moved function's *internal* dependency is patched by a test (e.g. `place_native_stop_loss` calling `fetch_with_retry`), those specific patch strings are retargeted to the new module (`titantrade.broker.*`). `conftest.tmp_state_dir` patches `STATE_DIR` in each new state-owning module.
+
+**Done so far** (branch `refactor/backend-modularization`, each step 424 green):
+1. Dead code removed: `calculate_shares`, `_adjust_entry_price` (+ its dead `test_dynamic_entry.py`), `_highs`/`_lows`, `fetch_earnings_date`, dead constants, unused locals, 24 unused imports (ruff). Added `ruff`+`vulture` dev extra.
+2. `broker.py` — all Alpaca REST primitives.
+3. `pricing.py` — `compute_trend_regime` + `_choose_entry_price`.
+4. `cooldown.py` — ABORT re-entry cooldown; `trailing_state.py` — trailing-stop state.
+
+`executor.py`: 3,267 → 2,496 LOC.
+
+**Remaining** (planned, same approach): `trade_state.py`, `alerts.py`, `entries.py`, `positions.py`, `protection.py`, `core_allocation.py`; de-duplicate the entry-adaptation / bracket-validation logic shared by `_handle_bullish_entry` and `resubmit_expired_brackets`; decompose `execute_trades` (592 LOC) and `_handle_bullish_entry` (319 LOC); then redeploy + re-verify.
+
+**Trade-offs**: per-module test-patch retargeting is mechanical but real (the suite catches mistakes). Logger names become per-module (`titantrade.broker` etc.) — more precise log attribution, no functional change.

@@ -30,10 +30,10 @@ uv run python -m titantrade download-history [dir]  # Download OHLCV for backtes
 ### Tests (zero token spend)
 
 ```bash
-cd TitanTrade && uv run python -m pytest tests/ -v
+cd TitanTrade && uv run --extra test python -m pytest tests/ -v
 ```
 
-All 224 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens.
+`pytest` lives in the `test` optional-dependency extra, so the `--extra test` flag is required (a bare `uv run` omits it → `No module named pytest`). All 424 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens. `ruff`/`vulture` are in the `dev` extra for lint/dead-code checks.
 
 ### Flutter app (from titan_trade_app/)
 
@@ -65,13 +65,19 @@ docker compose run --rm titantrade <command>             # CLI commands
 |------|---------|
 | `src/titantrade/weekly_analyst.py` | 2-pass Claude analysis |
 | `src/titantrade/daily_sentry.py` | 3-layer Gemini sentry |
-| `src/titantrade/executor.py` | Order execution + trailing stops + orphan/gap protection |
+| `src/titantrade/executor.py` | Execution orchestrator (`execute_trades`) + entry/position/protection logic |
+| `src/titantrade/broker.py` | Alpaca REST client — the only module that talks to Alpaca |
+| `src/titantrade/pricing.py` | Trend-regime classification + entry-price selection (pure) |
+| `src/titantrade/cooldown.py` | Re-entry ABORT cooldown state + override policy |
+| `src/titantrade/trailing_state.py` | Per-ticker trailing-stop state (HWM, trail, TP1/pyramid flags) |
 | `src/titantrade/risk_manager.py` | 6 risk gates |
 | `src/titantrade/price_check.py` | Intraday price checks (no LLM) |
 | `src/titantrade/api.py` | FastAPI HTTP server |
 | `src/titantrade/scheduler.py` | Built-in APScheduler (cron jobs inside API process) |
 | `src/titantrade/indicators.py` | Pure Python RSI/MACD/Bollinger/ATR/SMA |
 | `src/titantrade/notifier.py` | Discord webhook notifications (job alerts + daily summary) |
+
+> **Refactor in progress** (ADR 036): `executor.py` is being decomposed from a 3,267-line god-module into focused modules above. `broker.py`, `pricing.py`, `cooldown.py`, `trailing_state.py` are extracted; `trade_state.py`/`alerts.py`/`entries.py`/`positions.py`/`protection.py`/`core_allocation.py` are planned. `executor.py` re-exports moved symbols so `titantrade.executor.X` stays importable. Behavior-preserving; tests green at each step. Run tests with `--extra test` (see below).
 
 ## Documentation Rules
 

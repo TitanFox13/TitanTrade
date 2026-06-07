@@ -73,8 +73,19 @@ config.py
 ├── weekly_analyst.py       <- Two-pass Claude analysis (uses data_fetcher, performance)
 ├── daily_sentry.py         <- Three-layer sentry (uses data_fetcher, Gemini)
 ├── price_check.py          <- Lightweight intraday price checks (no LLM)
-└── executor.py             <- Trade execution (uses risk_manager, Alpaca API)
+├── broker.py               <- Alpaca REST client (the only module that calls Alpaca)
+├── pricing.py              <- Trend regime + entry-price selection (pure)
+├── cooldown.py             <- ABORT re-entry cooldown state + override policy
+├── trailing_state.py       <- Trailing-stop state (HWM, trail, TP1/pyramid flags)
+└── executor.py             <- Execution orchestrator + entry/position/protection logic
+                               (uses broker, pricing, cooldown, trailing_state, risk_manager)
 ```
+
+> **In progress (ADR 036):** `executor.py` is being decomposed from a 3,267-line god-module into the
+> focused modules above (behavior-preserving; tests green at each step). `broker.py`, `pricing.py`,
+> `cooldown.py`, `trailing_state.py` are extracted; `trade_state.py`, `alerts.py`, `entries.py`,
+> `positions.py`, `protection.py`, `core_allocation.py` are planned. `executor.py` re-exports moved
+> symbols, so `from titantrade.executor import X` and `@patch("titantrade.executor.X")` still resolve.
 
 ---
 
