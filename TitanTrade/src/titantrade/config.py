@@ -25,12 +25,39 @@ class AlpacaConfig:
     key: str = ""
     secret: str = ""
     base_url: str = "https://paper-api.alpaca.markets"
+    # Market-data API is a different host from the trading API. Same keys.
+    # Free plan serves the IEX feed, which is all we need for daily bars,
+    # latest trades, and news.
+    data_base_url: str = "https://data.alpaca.markets"
+    data_feed: str = "iex"
 
 
 @dataclass(frozen=True)
 class FMPConfig:
+    # Retained only so legacy code / test fixtures that reference cfg.fmp keep
+    # working. FMP was fully replaced by Alpaca + FRED + Yahoo (see ADR 040);
+    # the key is no longer required.
     key: str = ""
     base_url: str = "https://financialmodelingprep.com/api/v3"
+
+
+@dataclass(frozen=True)
+class FREDConfig:
+    """St. Louis Fed (FRED) — free, official source for VIX, treasury yields,
+    and the economic-release calendar. Key is optional: without it those
+    macro inputs are simply absent (the macro-blackout gate fails open)."""
+    key: str = ""
+    base_url: str = "https://api.stlouisfed.org/fred"
+
+
+@dataclass(frozen=True)
+class FinnhubConfig:
+    """Finnhub (free tier) — per-ticker earnings dates, analyst recommendation
+    trends, and sector/industry. Key is optional: without it those per-ticker
+    enrichments are absent (earnings-blackout gate fails open; Claude simply
+    sees no analyst block)."""
+    key: str = ""
+    base_url: str = "https://finnhub.io/api/v1"
 
 
 @dataclass(frozen=True)
@@ -107,6 +134,8 @@ class Config:
     claude: ClaudeConfig
     gemini: GeminiConfig
     trading: TradingSettings
+    fred: FREDConfig = field(default_factory=FREDConfig)
+    finnhub: FinnhubConfig = field(default_factory=FinnhubConfig)
 
 
 def load_watchlist() -> TradingSettings:
@@ -155,10 +184,16 @@ def save_watchlist(tickers: list[str]) -> None:
 
 
 REQUIRED_KEYS = {
-    "FMP_KEY": "Financial Modeling Prep (data source)",
     "CLAUDE_KEY": "Anthropic Claude (weekly analysis)",
     "GEMINI_KEY": "Google Gemini (daily sentry)",
 }
+
+# Optional keys — absent ones degrade gracefully rather than failing startup.
+#   FMP_KEY  — legacy; FMP was fully replaced (ADR 040), no longer used.
+#   FRED_KEY — St. Louis Fed: VIX, treasury, economic calendar. Without it
+#              those macro inputs are absent and the macro-blackout gate
+#              fails open (its existing behaviour on a data error).
+OPTIONAL_KEYS = ("FMP_KEY", "FRED_KEY", "FINNHUB_KEY")
 
 
 def _resolve_alpaca_keys() -> dict[str, str]:
@@ -220,6 +255,10 @@ def validate_api_keys() -> dict[str, str]:
             + "\n\nCopy .env.example to .env and fill in your keys."
         )
 
+    # Optional keys: included if present, never block startup.
+    for key_name in OPTIONAL_KEYS:
+        keys[key_name] = os.environ.get(key_name, "").strip()
+
     # Merge in Alpaca keys (has its own validation)
     keys.update(_resolve_alpaca_keys())
     return keys
@@ -261,7 +300,13 @@ def load_config() -> Config:
             base_url=base_url,
         ),
         fmp=FMPConfig(
-            key=keys["FMP_KEY"],
+            key=keys.get("FMP_KEY", ""),
+        ),
+        fred=FREDConfig(
+            key=keys.get("FRED_KEY", ""),
+        ),
+        finnhub=FinnhubConfig(
+            key=keys.get("FINNHUB_KEY", ""),
         ),
         claude=ClaudeConfig(
             key=keys["CLAUDE_KEY"],

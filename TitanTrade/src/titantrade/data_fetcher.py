@@ -1,6 +1,8 @@
-"""Module A: Data fetcher for FMP (prices + news) and SEC EDGAR (filings).
+"""Module A: Data-bundle assembler.
 
-Produces a clean JSON "Data Bundle" that includes:
+Pulls market data via the unified ``market_data`` layer (Alpaca + FRED +
+Finnhub — see ADR 040; FMP fully replaced) and SEC EDGAR (filings), and
+produces a clean JSON "Data Bundle" that includes:
   - OHLCV price data (250 days for indicator calculation, last 5 sent to Claude)
   - Technical indicators (RSI, MACD, Bollinger, ATR, SMA analysis)
   - News headlines and snippets (last 7 days)
@@ -12,9 +14,10 @@ Produces a clean JSON "Data Bundle" that includes:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
+from titantrade import market_data
 from titantrade.config import Config, STATE_DIR, load_config
 from titantrade.earnings import build_earnings_context
 from titantrade.indicators import atr as compute_atr
@@ -22,7 +25,6 @@ from titantrade.indicators import compute_all_indicators
 from titantrade.logger import get_logger
 from titantrade.market_context import load_stock_sectors
 from titantrade.market_context import build_market_context
-from titantrade.retry import fetch_with_retry
 from titantrade.sec_edgar import fetch_insider_filings, fetch_recent_filings
 
 log = get_logger("data_fetcher")
@@ -35,37 +37,9 @@ DISPLAY_DAYS = 5
 def fetch_ohlcv(
     ticker: str, cfg: Config, days: int = HISTORY_DAYS
 ) -> list[dict[str, Any]]:
-    """Pull historical OHLCV data from FMP. Returns oldest-first."""
-    today = datetime.now(timezone.utc).date()
-    from_date = today - timedelta(days=int(days * 1.5))  # pad for weekends
-
-    url = "https://financialmodelingprep.com/stable/historical-price-eod/full"
-    params = {
-        "symbol": ticker,
-        "from": from_date.isoformat(),
-        "to": today.isoformat(),
-        "apikey": cfg.fmp.key,
-    }
-
+    """Historical OHLCV (Alpaca data API). Returns oldest-first."""
     log.info(f"Fetching OHLCV for {ticker} ({days} days)")
-    resp = fetch_with_retry("GET", url, params=params)
-    data = resp.json()
-
-    # Stable API returns a list; legacy returned {"historical": [...]}
-    historical = data if isinstance(data, list) else data.get("historical", [])
-    # FMP returns newest-first, reverse to oldest-first
-    bars = [
-        {
-            "date": bar["date"],
-            "open": bar["open"],
-            "high": bar["high"],
-            "low": bar["low"],
-            "close": bar["close"],
-            "volume": bar["volume"],
-        }
-        for bar in reversed(historical)
-    ]
-    return bars[-days:] if len(bars) > days else bars
+    return market_data.get_ohlcv(ticker, cfg, days=days)
 
 
 def _news_dedup_key(title: str) -> str:
@@ -95,33 +69,19 @@ def fetch_news(ticker: str, cfg: Config, limit: int = 50) -> list[dict[str, Any]
     both the analyst and sentry to over-weight single events that appeared
     to be "10 separate concerns".
     """
-    url = "https://financialmodelingprep.com/stable/news/stock"
-    params = {
-        "symbol": ticker,
-        "limit": str(limit),
-        "apikey": cfg.fmp.key,
-    }
-
     log.info(f"Fetching news for {ticker}")
-    resp = fetch_with_retry("GET", url, params=params)
-    articles = resp.json()
+    articles = market_data.get_news(ticker, cfg, limit=limit)
 
     seen_keys: set[str] = set()
     results: list[dict[str, Any]] = []
     duplicates = 0
     for article in articles:
-        title = article.get("title", "")
-        key = _news_dedup_key(title)
+        key = _news_dedup_key(article.get("title", ""))
         if not key or key in seen_keys:
             duplicates += 1
             continue
         seen_keys.add(key)
-        results.append({
-            "title": title,
-            "snippet": article.get("text", "")[:500],
-            "published_at": article.get("publishedDate", ""),
-            "source": article.get("site", ""),
-        })
+        results.append(article)
 
     if duplicates > 0:
         log.info(f"News dedup for {ticker}: removed {duplicates} syndicated duplicate(s)")
@@ -141,47 +101,9 @@ def fetch_sec_filings(ticker: str) -> list[dict[str, Any]]:
 
 
 def fetch_analyst_ratings(ticker: str, cfg: Config) -> dict[str, Any]:
-    """Fetch analyst consensus ratings and price targets from FMP."""
-    result: dict[str, Any] = {}
-
-    # Consensus ratings
-    url = "https://financialmodelingprep.com/stable/grades"
-    params = {"symbol": ticker, "apikey": cfg.fmp.key, "limit": "10"}
-    try:
-        resp = fetch_with_retry("GET", url, params=params)
-        grades = resp.json()
-        if grades and isinstance(grades, list):
-            recent = grades[:10]
-            result["recent_grades"] = [
-                {
-                    "date": g.get("date", ""),
-                    "company": g.get("gradingCompany", ""),
-                    "action": g.get("newGrade", ""),
-                    "previous": g.get("previousGrade", ""),
-                }
-                for g in recent
-            ]
-    except Exception as exc:
-        log.warning(f"Analyst grades fetch failed for {ticker}: {exc}")
-
-    # Price target consensus
-    url2 = "https://financialmodelingprep.com/stable/price-target-consensus"
-    params2 = {"symbol": ticker, "apikey": cfg.fmp.key}
-    try:
-        resp2 = fetch_with_retry("GET", url2, params=params2)
-        data = resp2.json()
-        if data and isinstance(data, list) and data[0]:
-            pt = data[0]
-            result["price_target"] = {
-                "consensus": pt.get("targetConsensus"),
-                "high": pt.get("targetHigh"),
-                "low": pt.get("targetLow"),
-                "median": pt.get("targetMedian"),
-            }
-    except Exception as exc:
-        log.warning(f"Price target fetch failed for {ticker}: {exc}")
-
-    return result
+    """Analyst recommendation trend (Finnhub). Price-target consensus has no
+    free source post-FMP and is omitted; the buy/hold/sell mix is preserved."""
+    return market_data.get_analyst_ratings(ticker, cfg)
 
 
 def fetch_insider_trades(ticker: str) -> list[dict[str, Any]]:
@@ -196,51 +118,12 @@ def fetch_insider_trades(ticker: str) -> list[dict[str, Any]]:
 
 
 def fetch_economic_calendar(cfg: Config, days_ahead: int = 7) -> list[dict[str, Any]]:
-    """Fetch upcoming macro events (FOMC, CPI, jobs, GDP, PPI) from FMP.
+    """Upcoming high-impact US macro events (FRED releases + FOMC schedule).
 
-    Returns list of high-impact events in the next N days.
+    Returns high-impact events in the next N days. Empty when the FRED key is
+    absent — the macro-blackout gate fails open, as it did on FMP errors.
     """
-    today = datetime.now(timezone.utc).date()
-    url = "https://financialmodelingprep.com/stable/economic-calendar"
-    params = {
-        "from": today.isoformat(),
-        "to": (today + timedelta(days=days_ahead)).isoformat(),
-        "apikey": cfg.fmp.key,
-    }
-
-    HIGH_IMPACT_KEYWORDS = {
-        "FOMC", "Federal Funds Rate", "Interest Rate Decision",
-        "CPI", "Consumer Price Index",
-        "Non-Farm", "Nonfarm", "Employment",
-        "PPI", "Producer Price",
-        "GDP", "Gross Domestic Product",
-        "Retail Sales",
-        "PCE", "Personal Consumption",
-    }
-
-    try:
-        resp = fetch_with_retry("GET", url, params=params)
-        data = resp.json()
-    except Exception as exc:
-        log.warning(f"Economic calendar fetch failed: {exc}")
-        return []
-
-    events = []
-    for entry in data:
-        event_name = entry.get("event", "")
-        country = entry.get("country", "")
-        if country != "US":
-            continue
-        if any(kw.lower() in event_name.lower() for kw in HIGH_IMPACT_KEYWORDS):
-            events.append({
-                "date": entry.get("date", ""),
-                "event": event_name,
-                "impact": entry.get("impact", ""),
-                "previous": entry.get("previous"),
-                "estimate": entry.get("estimate"),
-            })
-
-    return events
+    return market_data.get_economic_calendar(cfg, days_ahead=days_ahead)
 
 
 def build_stock_data(ticker: str, cfg: Config) -> dict[str, Any]:

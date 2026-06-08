@@ -91,7 +91,7 @@ def main() -> None:
 
         cfg = _load_cfg()
         data_dir = sys.argv[2] if len(sys.argv) > 2 else "data/historical"
-        download_historical_data(cfg.trading.watchlist, cfg.fmp.key, data_dir)
+        download_historical_data(cfg.trading.watchlist, cfg, data_dir)
         return
 
     if command == "gapcheck":

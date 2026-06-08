@@ -282,7 +282,7 @@ def trigger_download_history() -> dict:
         from .backtest.data_loader import download_historical_data
         cfg = load_config()
         data_dir = str(DATA_DIR / "historical")
-        download_historical_data(cfg.trading.watchlist, cfg.fmp.key, data_dir)
+        download_historical_data(cfg.trading.watchlist, cfg, data_dir)
         return {"data_dir": data_dir, "tickers": cfg.trading.watchlist}
 
     threading.Thread(target=_run_in_thread, args=(job_id, _run), daemon=True).start()

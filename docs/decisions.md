@@ -980,3 +980,29 @@ The 2-week ERROR/CRITICAL aggregation showed the remaining error classes are his
 - **The non-obvious part (cost two iterations, verified on the deployed apscheduler 3.11.2):** APScheduler 3.11 normalizes the *scheduler's* timezone to a stdlib `zoneinfo` object, and a `CronTrigger` that **inherits** the scheduler tz then mis-computes fire times — the job fires at the right wall-clock hour but with a **UTC offset** (e.g. pre-close at `15:30:00+00:00` instead of `15:30:00-04:00`), i.e. effectively in UTC, silently defeating the whole fix. Passing the timezone **explicitly to each `CronTrigger`** computes correctly. So `start_scheduler()` and the `set_job_enabled` re-add path now build `CronTrigger(timezone=tzinfo, **cron)`. The tz is resolved via **pytz** (`_resolve_timezone`, new `pytz` dependency) — both pytz and zoneinfo work when passed explicitly, but pytz is APScheduler 3.x's best-tested path.
 **Trade-offs**: jobs now fire at fixed ET wall-clock times, so their UTC instant shifts by an hour across DST boundaries (intended). Transition-day edge cases (spring-forward 02:00–03:00 gap, fall-back repeat) don't apply — no job runs near 02:00 ET. Added one small dependency (`pytz`).
 **Validation**: 435 tests passing (was 431) — 4 new scheduler tests, including `test_cron_fires_in_et_not_utc` which asserts the job's `next_run_time` carries a **non-zero UTC offset** (the regression that the first iteration's tz-string-only check missed). Deployed and verified on the server: all jobs' `next_run` now show `-04:00` (EDT); `weekday_sentry_preclose` fires 15:30 ET = 19:30 UTC, before the 20:00 UTC summer close.
+
+## Decision 040: Replace FMP with Alpaca + FRED + Finnhub
+**Date**: 2026-06-08
+**Decision**: Remove the paid Financial Modeling Prep (FMP, €25/mo) dependency entirely, replacing every data input with free sources behind a new unified `market_data.py` layer. The connector functions in `data_fetcher` / `market_context` / `earnings` / `daily_sentry` keep their signatures and return shapes — only the source behind them changed.
+
+**Why**: FMP was operationally critical (it fed all price data) but not strategically irreplaceable — ~80% of its role (prices, quotes, news) maps onto Alpaca's free data API, which uses keys we already have. The remaining macro + per-ticker fundamentals have free official/proper sources. The codebase was already cleanly "connectored" (one function per data type), so the swap was low-coupling.
+
+**Source mapping** (all verified reachable from the production server before implementing):
+| Data | Source | Notes |
+|---|---|---|
+| OHLCV bars, latest price, daily change %, news | **Alpaca** data API (`data.alpaca.markets`, existing keys, IEX feed, free) | robust core |
+| VIX, 10Y/2Y treasury, economic-release calendar | **FRED** (St. Louis Fed, free `FRED_KEY`) | official; CPI/jobs/PPI/GDP/PCE/retail release dates + a `data/fomc_dates.json` schedule for FOMC (not a FRED release) |
+| Earnings dates, analyst recommendation trend, sector | **Finnhub** (free `FINNHUB_KEY`) | per-ticker enrichment |
+
+**Implementation**:
+- New `market_data.py`: `get_ohlcv` / `get_latest_price` / `get_daily_change_pct` / `get_news` (Alpaca, with cursor pagination); `get_vix` / `get_treasury_yields` / `get_economic_calendar` (FRED + FOMC file); `get_earnings_dates` / `get_analyst_ratings` / `get_sector` (Finnhub). Every function degrades to `[]`/`None`/`{}` on missing key or error — preserving FMP's prior fail-open behaviour (the macro/earnings gates already skip on missing data).
+- Connectors now delegate: `fetch_ohlcv`, `fetch_news` (dedup retained), `fetch_analyst_ratings`, `fetch_economic_calendar`, `market_context._fetch_bars/_fetch_vix_level/_fetch_treasury_yield/_fetch_sector`, `earnings.fetch_all_earnings_dates`, `daily_sentry._fetch_current_price/_fetch_spy_quote`, and the backtest `download_historical_data`.
+- `config.py`: `AlpacaConfig.data_base_url`/`data_feed`; new `FREDConfig`, `FinnhubConfig`; `FMP_KEY` moved from required → optional (`OPTIONAL_KEYS`), alongside `FRED_KEY`/`FINNHUB_KEY`. `FMPConfig` kept as a vestigial stub so existing fixtures/`cfg.fmp` references don't break.
+
+**Trade-offs / what changed**:
+- **Price-target consensus is dropped** — it has no free source post-FMP (Finnhub's is premium, Yahoo's is crumb-locked). Claude still receives the analyst **recommendation mix** (strong-buy/buy/hold/sell/strong-sell) from Finnhub. This is the one genuine functionality reduction.
+- **Two new free keys required** (`FRED_KEY`, `FINNHUB_KEY`). Without them the macro inputs (VIX/treasury/econ-calendar) and per-ticker fundamentals (earnings/analyst/sector) are absent and their gates fail open — degraded but not broken; core price/news/quotes (Alpaca) work regardless.
+- **FOMC dates** live in `data/fomc_dates.json` (FOMC isn't a FRED release). The 2026 dates there are best-effort and **must be verified against the official Fed calendar**; a wrong date only causes a spurious/missed 6h macro-blackout (gate fails open).
+- Alpaca's free tier serves the **IEX** feed (not full SIP). For daily bars / EOD-style decisions this is equivalent; intraday coverage is thinner but the strategy is daily-cadence.
+
+**Validation**: 455 tests passing (was 435) — new `test_market_data.py` (20 cases) covers each provider's response parsing + the no-key fail-open paths; all pre-existing tests green unchanged (the data fetchers had no FMP-response unit tests — they were exercised via mocked connectors / downstream logic). Ruff clean. Raw Alpaca/FRED/Yahoo reachability + Alpaca bars/news/quote correctness verified live on the paper account before cutover.

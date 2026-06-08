@@ -1,5 +1,16 @@
 # TitanTrade TODO
 
+## Phase 1.22: Replace FMP with free sources (2026-06-08) — Decision 040
+Drop the €25/mo Financial Modeling Prep dependency.
+- [x] New `market_data.py` unified layer: Alpaca (bars/quotes/news), FRED (VIX/treasury/econ-calendar), Finnhub (earnings/analyst/sector). All fail-open.
+- [x] Rewire connectors (data_fetcher, market_context, earnings, daily_sentry, backtest downloader) to delegate; signatures + return shapes unchanged.
+- [x] `config.py`: Alpaca data URL, FRED/Finnhub configs; FMP_KEY → optional.
+- [x] `data/fomc_dates.json` for FOMC (not a FRED release) — ⚠️ 2026 dates best-effort, verify against federalreserve.gov.
+- [x] 20 new `test_market_data.py` cases (455 total); ruff clean.
+- [ ] **User action**: obtain free FRED_KEY + FINNHUB_KEY, add to server `.env`. Until then VIX/treasury/earnings/econ-calendar/analyst are absent (gates fail open; core price/news via Alpaca works).
+- [ ] Price-target consensus dropped (no free source) — Claude still gets the recommendation mix.
+- [ ] Verify a full live `fetch` cycle once keys are in (Alpaca core verifiable now).
+
 ## Phase 1.21: Live-log error sweep — bracket stop reconciliation + bearish-exit (2026-06-08)
 From a full sweep of the deployed paper-account logs (see Decision 038), driven by direct Alpaca probing.
 - [x] Root-caused via live probe: a bracket's stop-loss leg never leaves `held` after the entry fills (only the TP activates) — for both `stop`/`stop_limit` and day/GTC TIF. The real protection is the standalone GTC stop placed by the next-cycle heal.

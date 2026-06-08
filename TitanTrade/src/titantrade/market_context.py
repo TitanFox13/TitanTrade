@@ -4,20 +4,22 @@ Provides the macro backdrop that individual stock analysis needs.
 Going BULLISH on a tech stock while VIX is at 35 and SPY is in a downtrend
 is fighting the market - this module prevents that.
 
-Sector mapping is dynamic: fetched from FMP for any ticker and cached locally.
+Sector mapping is dynamic: fetched (Finnhub) for any ticker and cached locally.
 This means the watchlist can be changed freely without code changes.
+Market data comes from the unified ``market_data`` layer (Alpaca bars, FRED
+VIX/treasury — see ADR 040).
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
+from titantrade import market_data
 from titantrade.config import Config, STATE_DIR
 from titantrade.indicators import compute_all_indicators
 from titantrade.logger import get_logger
-from titantrade.retry import fetch_with_retry
 
 log = get_logger("market_context")
 
@@ -59,18 +61,9 @@ def _save_sector_cache(cache: dict[str, str]) -> None:
         json.dump(cache, f, indent=2)
 
 
-def _fetch_sector_from_fmp(ticker: str, cfg: Config) -> str:
-    """Look up a stock's sector from FMP company profile. Returns sector name."""
-    url = "https://financialmodelingprep.com/stable/profile"
-    params = {"symbol": ticker, "apikey": cfg.fmp.key}
-    try:
-        resp = fetch_with_retry("GET", url, params=params)
-        data = resp.json()
-        if data and isinstance(data, list) and data[0].get("sector"):
-            return data[0]["sector"]
-    except Exception as exc:
-        log.warning(f"Failed to fetch sector for {ticker}: {exc}")
-    return "Unknown"
+def _fetch_sector(ticker: str, cfg: Config) -> str:
+    """Look up a stock's sector/industry (Finnhub). Returns sector name."""
+    return market_data.get_sector(ticker, cfg)
 
 
 def load_stock_sectors(tickers: list[str], cfg: Config) -> dict[str, str]:
@@ -88,7 +81,7 @@ def load_stock_sectors(tickers: list[str], cfg: Config) -> dict[str, str]:
     if missing:
         log.info(f"Fetching sectors for {len(missing)} new tickers: {missing}")
         for ticker in missing:
-            _sector_cache[ticker] = _fetch_sector_from_fmp(ticker, cfg)
+            _sector_cache[ticker] = _fetch_sector(ticker, cfg)
         _save_sector_cache(_sector_cache)
 
     return {t: _sector_cache.get(t, "Unknown") for t in tickers}
@@ -100,67 +93,18 @@ def get_stock_sector(ticker: str) -> str:
 
 
 def _fetch_bars(ticker: str, cfg: Config, days: int = 250) -> list[dict[str, Any]]:
-    """Fetch historical bars from FMP, oldest first."""
-    today = datetime.now(timezone.utc).date()
-    from_date = today - timedelta(days=int(days * 1.5))  # pad for weekends/holidays
-
-    url = "https://financialmodelingprep.com/stable/historical-price-eod/full"
-    params = {
-        "symbol": ticker,
-        "from": from_date.isoformat(),
-        "to": today.isoformat(),
-        "apikey": cfg.fmp.key,
-    }
-
-    resp = fetch_with_retry("GET", url, params=params)
-    data = resp.json()
-    # Stable API returns a list; legacy returned {"historical": [...]}
-    historical = data if isinstance(data, list) else data.get("historical", [])
-
-    # FMP returns newest-first, we need oldest-first
-    bars = [
-        {
-            "date": bar["date"],
-            "open": bar["open"],
-            "high": bar["high"],
-            "low": bar["low"],
-            "close": bar["close"],
-            "volume": bar["volume"],
-        }
-        for bar in reversed(historical)
-    ]
-    return bars[-days:] if len(bars) > days else bars
+    """Fetch historical bars (Alpaca data API), oldest first."""
+    return market_data.get_ohlcv(ticker, cfg, days=days)
 
 
 def _fetch_vix_level(cfg: Config) -> float | None:
-    """Fetch the current VIX level."""
-    url = "https://financialmodelingprep.com/stable/quote"
-    params = {"symbol": "^VIX", "apikey": cfg.fmp.key}
-    try:
-        resp = fetch_with_retry("GET", url, params=params)
-        data = resp.json()
-        if data and isinstance(data, list):
-            return data[0].get("price")
-    except Exception as exc:
-        log.warning(f"Failed to fetch VIX: {exc}")
-    return None
+    """Fetch the current VIX level (FRED VIXCLS)."""
+    return market_data.get_vix(cfg)
 
 
 def _fetch_treasury_yield(cfg: Config) -> dict[str, float | None]:
-    """Fetch 10Y and 2Y Treasury yields from FMP."""
-    url = "https://financialmodelingprep.com/stable/treasury-rates"
-    params = {"apikey": cfg.fmp.key}
-    result: dict[str, float | None] = {"yield_10y": None, "yield_2y": None}
-    try:
-        resp = fetch_with_retry("GET", url, params=params)
-        data = resp.json()
-        if data and isinstance(data, list):
-            entry = data[0]
-            result["yield_10y"] = entry.get("year10")
-            result["yield_2y"] = entry.get("year2")
-    except Exception as exc:
-        log.warning(f"Failed to fetch treasury yields: {exc}")
-    return result
+    """Fetch 10Y and 2Y Treasury yields (FRED DGS10 / DGS2)."""
+    return market_data.get_treasury_yields(cfg)
 
 
 def _compute_return(bars: list[dict[str, Any]], days: int) -> float | None:

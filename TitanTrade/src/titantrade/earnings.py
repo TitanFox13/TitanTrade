@@ -7,12 +7,12 @@ enforces regardless of what the AI recommends.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
+from titantrade import market_data
 from titantrade.config import Config
 from titantrade.logger import get_logger
-from titantrade.retry import fetch_with_retry
 
 log = get_logger("earnings")
 
@@ -26,35 +26,12 @@ DEFAULT_BLOCK_DAYS = 2
 def fetch_all_earnings_dates(
     tickers: list[str], cfg: Config
 ) -> dict[str, str | None]:
-    """Fetch upcoming earnings dates for all tickers in one pass.
+    """Fetch upcoming earnings dates for all tickers (Finnhub, one call).
 
-    FMP returns the full calendar, so we only make one API call
-    and filter for our watchlist.
+    Returns ``{ticker: "YYYY-MM-DD" | None}``. All None when no Finnhub key —
+    the earnings-blackout gate then fails open (its prior behaviour on error).
     """
-    url = "https://financialmodelingprep.com/stable/earnings-calendar"
-    today = datetime.now(timezone.utc).date()
-    params = {
-        "from": today.isoformat(),
-        "to": (today + timedelta(days=60)).isoformat(),
-        "apikey": cfg.fmp.key,
-    }
-
-    try:
-        resp = fetch_with_retry("GET", url, params=params)
-        data = resp.json()
-    except Exception as exc:
-        log.warning(f"Failed to fetch earnings calendar: {exc}")
-        return {t: None for t in tickers}
-
-    ticker_set = set(tickers)
-    result: dict[str, str | None] = {t: None for t in tickers}
-
-    for entry in data:
-        symbol = entry.get("symbol", "")
-        if symbol in ticker_set and result[symbol] is None:
-            result[symbol] = entry.get("date")
-
-    return result
+    return market_data.get_earnings_dates(tickers, cfg)
 
 
 def is_earnings_blocked(

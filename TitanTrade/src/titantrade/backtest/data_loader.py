@@ -1,62 +1,36 @@
 """Load historical data for backtesting.
 
-download_historical_data(): One-time FMP download — run BEFORE backtesting.
+download_historical_data(): One-time Alpaca download — run BEFORE backtesting.
 load_historical_data(): Load from saved files — used DURING backtesting.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from titantrade.config import Config
 
 
 def download_historical_data(
     tickers: list[str],
-    fmp_key: str,
+    cfg: Config,
     output_dir: str,
     days: int = 750,
 ) -> None:
-    """Download OHLCV from FMP and save as JSON. Run once before backtesting.
+    """Download OHLCV from Alpaca and save as JSON. Run once before backtesting.
 
     This is the ONLY function in the backtest package that makes API calls.
     """
-    from titantrade.retry import fetch_with_retry
+    from titantrade import market_data
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    today = datetime.now(timezone.utc).date()
-    from_date = today - timedelta(days=int(days * 1.5))
-
     for ticker in tickers + ["SPY"]:
-        url = "https://financialmodelingprep.com/stable/historical-price-eod/full"
-        params = {
-            "symbol": ticker,
-            "from": from_date.isoformat(),
-            "to": today.isoformat(),
-            "apikey": fmp_key,
-        }
-
         print(f"Downloading {ticker}...")
-        resp = fetch_with_retry("GET", url, params=params)
-        data = resp.json()
-
-        # Stable API returns a list; legacy returned {"historical": [...]}
-        historical = data if isinstance(data, list) else data.get("historical", [])
-        bars = [
-            {
-                "date": bar["date"],
-                "open": bar["open"],
-                "high": bar["high"],
-                "low": bar["low"],
-                "close": bar["close"],
-                "volume": bar["volume"],
-            }
-            for bar in reversed(historical)
-        ]
-
+        bars = market_data.get_ohlcv(ticker, cfg, days=days)
         path = out / f"{ticker}.json"
         with open(path, "w") as f:
             json.dump(bars, f)
