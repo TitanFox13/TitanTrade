@@ -6,6 +6,10 @@ requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.52.0",
     "apscheduler>=3.10,<4",
+    # APScheduler 3.x computes cron fire times correctly only with pytz
+    # timezones; a zoneinfo tz (the 3.11 default on py3.12) silently fires
+    # jobs in UTC. Pin pytz so DST-aware scheduling actually works.
+    "pytz>=2024.1",
     "fastapi>=0.115.0",
     "httpx>=0.28.0",
     "python-dotenv>=1.1.0",

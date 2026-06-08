@@ -80,6 +80,23 @@ class TestTimezone:
         assert "New_York" in str(mod._scheduler.timezone)
         stop_scheduler()
 
+    def test_cron_fires_in_et_not_utc(self, schedule_dir: Path):
+        """Regression: APScheduler 3.x + a stdlib zoneinfo tz silently fires
+        crons in UTC (next_run shows +00:00), so the 15:30 ET pre-close would
+        drift to 15:30 UTC. Resolving the tz via pytz fixes it — the fire time
+        must carry a non-zero UTC offset (ET is -04:00/-05:00, never UTC)."""
+        from datetime import timedelta
+        self._write_tz_schedule(schedule_dir, "America/New_York")
+        start_scheduler()
+        import titantrade.scheduler as mod
+        nrt = mod._scheduler.get_job("preclose").next_run_time
+        assert (nrt.hour, nrt.minute) == (15, 30)  # ET wall-clock
+        assert nrt.utcoffset() != timedelta(0), (
+            f"cron fired at UTC offset 0 ({nrt}) — the zoneinfo bug; "
+            f"must be pytz ET"
+        )
+        stop_scheduler()
+
     def test_missing_timezone_defaults_utc(self, schedule_dir: Path):
         with open(schedule_dir / "schedule.json", "w") as f:
             json.dump({"jobs": [

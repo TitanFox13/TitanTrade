@@ -204,6 +204,28 @@ def _load_schedule() -> list[dict[str, Any]]:
     return _load_schedule_doc().get("jobs", [])
 
 
+def _resolve_timezone(name: str) -> Any:
+    """Resolve an IANA tz name to a **pytz** timezone.
+
+    APScheduler 3.x computes cron fire times correctly only with pytz
+    timezones — its CronTrigger calls ``tz.localize(naive_dt)``, which a
+    stdlib ``zoneinfo`` object (APScheduler 3.11's default resolution on
+    Python 3.12) does not provide, so jobs silently fire in UTC. Forcing
+    pytz is what makes the DST-aware ET schedule actually fire in ET.
+    Falls back to the raw string (UTC-equivalent behaviour) if pytz can't
+    resolve the name, rather than crashing the scheduler.
+    """
+    try:
+        import pytz
+        return pytz.timezone(name)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            f"Could not resolve timezone {name!r} via pytz ({exc}); "
+            f"cron times may not track DST"
+        )
+        return name
+
+
 def start_scheduler() -> None:
     """Read schedule.json, register all enabled jobs, and start.
 
@@ -221,7 +243,7 @@ def start_scheduler() -> None:
     tz = doc.get("timezone") or "UTC"
     _schedule_timezone = tz
     _scheduler = BackgroundScheduler(
-        timezone=tz,
+        timezone=_resolve_timezone(tz),
         job_defaults={
             "coalesce": True,
             "max_instances": 1,
