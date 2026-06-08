@@ -26,7 +26,8 @@ import sys
 import time
 
 from titantrade.config import load_config
-from titantrade.executor import (
+# All Alpaca primitives live in broker.py after the ADR-036 decomposition.
+from titantrade.broker import (
     cancel_all_orders_for_ticker,
     close_position_at_market,
     get_open_orders,
