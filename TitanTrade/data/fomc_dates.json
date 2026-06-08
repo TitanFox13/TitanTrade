@@ -1,6 +1,6 @@
 {
   "_comment": "FOMC rate-decision announcement days (2nd day of each meeting). FOMC is not a FRED 'release', so this fixed schedule is kept here. VERIFY/UPDATE annually against https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm — wrong dates only cause a spurious or missed 6h macro-blackout (the gate fails open), but keep it accurate.",
-  "_verify": "These 2026 dates are best-effort and MUST be confirmed against the official Fed calendar.",
+  "_verify": "2026 dates VERIFIED against federalreserve.gov/monetarypolicy/fomccalendars.htm on 2026-06-08 (all 8 confirmed). Re-verify when the 2027 schedule is published.",
   "fomc_dates": [
     "2026-01-28",
     "2026-03-18",
