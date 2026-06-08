@@ -1,60 +1,60 @@
 {
-  "timezone": "UTC",
+  "timezone": "America/New_York",
   "jobs": [
     {
       "id": "sunday_full",
       "name": "Weekly Full Pipeline",
       "command": "full",
-      "cron": {"day_of_week": "sun", "hour": 20, "minute": 0},
+      "cron": {"day_of_week": "sun", "hour": 16, "minute": 0},
       "enabled": true
     },
     {
       "id": "weekday_fetch",
       "name": "Daily Data Bundle Refresh",
       "command": "fetch",
-      "cron": {"day_of_week": "mon-fri", "hour": 13, "minute": 0},
+      "cron": {"day_of_week": "mon-fri", "hour": 9, "minute": 0},
       "enabled": true
     },
     {
       "id": "weekday_gapcheck",
       "name": "Gap-Down Check",
       "command": "gapcheck",
-      "cron": {"day_of_week": "mon-fri", "hour": 13, "minute": 35},
+      "cron": {"day_of_week": "mon-fri", "hour": 9, "minute": 35},
       "enabled": true
     },
     {
       "id": "weekday_sentry_morning",
       "name": "Morning Sentry + Execute",
       "command": "sentry_execute",
-      "cron": {"day_of_week": "mon-fri", "hour": 14, "minute": 15},
+      "cron": {"day_of_week": "mon-fri", "hour": 10, "minute": 15},
       "enabled": true
     },
     {
       "id": "weekday_pricecheck_midday",
       "name": "Midday Price Check",
       "command": "pricecheck",
-      "cron": {"day_of_week": "mon-fri", "hour": 16, "minute": 0},
+      "cron": {"day_of_week": "mon-fri", "hour": 12, "minute": 0},
       "enabled": true
     },
     {
       "id": "weekday_pricecheck_afternoon",
       "name": "Afternoon Price Check",
       "command": "pricecheck",
-      "cron": {"day_of_week": "mon-fri", "hour": 18, "minute": 0},
+      "cron": {"day_of_week": "mon-fri", "hour": 14, "minute": 0},
       "enabled": true
     },
     {
       "id": "weekday_sentry_preclose",
       "name": "Pre-Close Sentry + Execute",
       "command": "sentry_execute",
-      "cron": {"day_of_week": "mon-fri", "hour": 20, "minute": 30},
+      "cron": {"day_of_week": "mon-fri", "hour": 15, "minute": 30},
       "enabled": true
     },
     {
       "id": "daily_summary",
       "name": "Daily Portfolio Summary",
       "command": "daily_summary",
-      "cron": {"day_of_week": "mon-fri", "hour": 21, "minute": 0},
+      "cron": {"day_of_week": "mon-fri", "hour": 16, "minute": 30},
       "enabled": true
     }
   ]

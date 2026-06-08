@@ -23,6 +23,7 @@ log = logging.getLogger("titantrade.scheduler")
 _scheduler: BackgroundScheduler | None = None
 _job_config: list[dict[str, Any]] = []
 _job_history: dict[str, list[dict[str, Any]]] = {}
+_schedule_timezone: str = "UTC"
 _lock = threading.Lock()
 
 MAX_HISTORY = 20
@@ -188,29 +189,46 @@ def _execute_job(job_id: str, command: str) -> None:
 # Scheduler lifecycle
 # ---------------------------------------------------------------------------
 
-def _load_schedule() -> list[dict[str, Any]]:
-    """Read data/schedule.json."""
+def _load_schedule_doc() -> dict[str, Any]:
+    """Read the full data/schedule.json document (timezone + jobs)."""
     path = DATA_DIR / "schedule.json"
     if not path.exists():
         log.warning(f"Schedule file not found: {path}")
-        return []
+        return {"timezone": "UTC", "jobs": []}
     with open(path) as f:
-        data = json.load(f)
-    return data.get("jobs", [])
+        return json.load(f)
+
+
+def _load_schedule() -> list[dict[str, Any]]:
+    """Read the jobs list from data/schedule.json."""
+    return _load_schedule_doc().get("jobs", [])
 
 
 def start_scheduler() -> None:
-    """Read schedule.json, register all enabled jobs, and start."""
-    global _scheduler, _job_config
+    """Read schedule.json, register all enabled jobs, and start.
 
-    _job_config = _load_schedule()
+    The cron times are interpreted in the schedule's top-level ``timezone``
+    (default ``UTC``). Market-relative jobs are configured in
+    ``America/New_York`` so the wall-clock time tracks DST automatically —
+    a fixed-UTC schedule would otherwise drift an hour twice a year (e.g. the
+    pre-close cycle ran *after* the summer close, and the morning cycle would
+    run pre-market in winter).
+    """
+    global _scheduler, _job_config, _schedule_timezone
+
+    doc = _load_schedule_doc()
+    _job_config = doc.get("jobs", [])
+    tz = doc.get("timezone") or "UTC"
+    _schedule_timezone = tz
     _scheduler = BackgroundScheduler(
+        timezone=tz,
         job_defaults={
             "coalesce": True,
             "max_instances": 1,
             "misfire_grace_time": 300,
         },
     )
+    log.info(f"Scheduler timezone: {tz}")
 
     for job in _job_config:
         if not job.get("enabled", True):
@@ -351,6 +369,6 @@ def set_job_enabled(job_id: str, enabled: bool) -> bool:
 def _save_schedule() -> None:
     """Write the current schedule config back to data/schedule.json."""
     path = DATA_DIR / "schedule.json"
-    data = {"timezone": "UTC", "jobs": _job_config}
+    data = {"timezone": _schedule_timezone, "jobs": _job_config}
     with open(path, "w") as f:
         json.dump(data, f, indent=2)

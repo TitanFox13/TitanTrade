@@ -30,6 +30,7 @@ def _clean_scheduler():
     mod._scheduler = None
     mod._job_config = []
     mod._job_history = {}
+    mod._schedule_timezone = "UTC"
     yield
     if mod._scheduler:
         mod._scheduler.shutdown(wait=False)
@@ -58,6 +59,48 @@ class TestLoadSchedule:
 
     def test_missing_file_returns_empty(self, schedule_dir: Path):
         assert _load_schedule() == []
+
+
+class TestTimezone:
+    """Cron times are interpreted in the schedule's top-level timezone so
+    market-relative jobs track DST automatically (the pre-close cycle no
+    longer drifts past the close in summer)."""
+
+    def _write_tz_schedule(self, path: Path, tz: str) -> None:
+        with open(path / "schedule.json", "w") as f:
+            json.dump({"timezone": tz, "jobs": [
+                {"id": "preclose", "name": "Pre-Close", "command": "sentry_execute",
+                 "cron": {"day_of_week": "mon-fri", "hour": 15, "minute": 30}, "enabled": True},
+            ]}, f)
+
+    def test_scheduler_uses_configured_timezone(self, schedule_dir: Path):
+        self._write_tz_schedule(schedule_dir, "America/New_York")
+        start_scheduler()
+        import titantrade.scheduler as mod
+        assert "New_York" in str(mod._scheduler.timezone)
+        stop_scheduler()
+
+    def test_missing_timezone_defaults_utc(self, schedule_dir: Path):
+        with open(schedule_dir / "schedule.json", "w") as f:
+            json.dump({"jobs": [
+                {"id": "j", "name": "J", "command": "pricecheck",
+                 "cron": {"hour": 10}, "enabled": True},
+            ]}, f)
+        start_scheduler()
+        import titantrade.scheduler as mod
+        assert str(mod._scheduler.timezone) == "UTC"
+        stop_scheduler()
+
+    def test_toggle_preserves_timezone(self, schedule_dir: Path):
+        """set_job_enabled must not clobber the timezone back to UTC when it
+        rewrites schedule.json (the Flutter app toggles jobs via this path)."""
+        self._write_tz_schedule(schedule_dir, "America/New_York")
+        start_scheduler()
+        set_job_enabled("preclose", False)
+        stop_scheduler()
+        with open(schedule_dir / "schedule.json") as f:
+            data = json.load(f)
+        assert data["timezone"] == "America/New_York"
 
 
 class TestCommandRegistry:

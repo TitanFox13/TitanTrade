@@ -7,8 +7,8 @@ From a full sweep of the deployed paper-account logs (see Decision 038), driven 
 - [x] Bearish-exit close uses cancel→`_wait_for_order_canceled`→close (was `cancel_all` + blind `sleep(2)`) — same ADR-037 pattern as ABORT/gap-down; fixes the DVN/FANG 403s if a market-hours cancel takes >2s.
 - [x] Confirmed remaining log errors are historical/already-fixed (data staleness → daily fetch; pyramid → ADR 037; FCX/fractional → ADR 035; ANET ABORT → ADR 037, smoke-tested live).
 - [x] 431 tests passing (was 426); ruff clean on changed files; ABORT fix + `_manage_held_bullish` heal smoke-tested end-to-end on the live paper account.
-- [ ] Follow-up: `weekday_sentry_preclose` (20:30 UTC) runs *after* the 20:00 UTC close in summer (EDT) so it defers as off-hours — make it DST-aware (or 19:30 UTC) so the pre-close cycle does real work in summer.
-- [ ] Deploy to server + re-verify logs are clean on the next live cycle.
+- [x] DST-aware scheduling (Decision 039): scheduler now interprets crons in `America/New_York`; all market-relative jobs converted to ET (pre-close now 15:30 ET = before the close year-round; morning 10:15 ET no longer runs pre-market in winter). 434 tests.
+- [x] Deployed to server (commit `f054cf8`) + verified: full live `execute` cycle ran clean (0 errors/warnings), new pyramid flow fired twice correctly.
 
 ## Phase 1.20: Executor decomposition (2026-06-07) — behavior-preserving
 Branch `refactor/backend-modularization`; see Decision 036. Each step kept 424 tests green + is committed.
