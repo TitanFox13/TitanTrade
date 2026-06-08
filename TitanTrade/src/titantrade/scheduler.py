@@ -242,8 +242,9 @@ def start_scheduler() -> None:
     _job_config = doc.get("jobs", [])
     tz = doc.get("timezone") or "UTC"
     _schedule_timezone = tz
+    tzinfo = _resolve_timezone(tz)
     _scheduler = BackgroundScheduler(
-        timezone=_resolve_timezone(tz),
+        timezone=tzinfo,
         job_defaults={
             "coalesce": True,
             "max_instances": 1,
@@ -261,7 +262,12 @@ def start_scheduler() -> None:
             continue
 
         cron = job["cron"]
-        trigger = CronTrigger(**cron)
+        # Pass the timezone EXPLICITLY to the trigger. APScheduler 3.11 lets a
+        # CronTrigger inherit the scheduler tz, but that inheritance path
+        # mis-computes fire times (jobs fire at the wall-clock hour but with a
+        # UTC offset, i.e. effectively in UTC). An explicit trigger tz computes
+        # correctly. Verified on the deployed apscheduler 3.11.2.
+        trigger = CronTrigger(timezone=tzinfo, **cron)
         _scheduler.add_job(
             _execute_job,
             trigger=trigger,
@@ -369,7 +375,10 @@ def set_job_enabled(job_id: str, enabled: bool) -> bool:
             job_def_match = next(j for j in _job_config if j["id"] == job_id)
             command = job_def_match["command"]
             if command in COMMANDS:
-                trigger = CronTrigger(**job_def_match["cron"])
+                trigger = CronTrigger(
+                    timezone=_resolve_timezone(_schedule_timezone),
+                    **job_def_match["cron"],
+                )
                 _scheduler.add_job(
                     _execute_job,
                     trigger=trigger,
