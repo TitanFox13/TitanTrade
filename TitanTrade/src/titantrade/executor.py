@@ -17,7 +17,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-import time
+# Re-exported so the broker-resident order helpers' tests can patch
+# `titantrade.executor.time.sleep` (the ADR-036 re-export patch-target
+# convention). Not called directly in this module anymore.
+import time  # noqa: F401
 
 from titantrade.config import Config, load_config
 from titantrade.logger import get_logger, log_decision
@@ -534,6 +537,7 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
             # fails (qty race, network blip, etc.), we restore the stop so
             # the position isn't left naked while we wait for the next run.
             existing_stop_price = 0.0
+            open_orders_pre: list[dict[str, Any]] = []
             try:
                 open_orders_pre = get_open_orders(ticker, cfg)
                 existing_stop = next(
@@ -550,12 +554,23 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                 log.warning(f"Could not read existing stop for {ticker}: {exc}")
 
             try:
-                cancel_all_orders_for_ticker(ticker, cfg)
-                # Wait briefly for cancels to settle before the close attempt.
-                # During market hours this is near-instant; if it takes more
-                # than a few seconds something is wrong and the close will
-                # surface the qty-race error naturally.
-                time.sleep(2)
+                # Cancel every resting order and wait for each to reach a
+                # terminal state before closing. A blind sleep(2) is not
+                # enough: Alpaca's pending_cancel can take 5-15s to settle
+                # even during market hours (ADR 042), and the close then 403s
+                # with code 40310000 ("insufficient qty") because the just-
+                # cancelled stop still holds the shares. This is the same
+                # cancel-settle pattern _handle_abort and gap-down use (ADR 037).
+                for order in open_orders_pre:
+                    try:
+                        cancel_order(order["id"], cfg)
+                    except Exception as cexc:  # noqa: BLE001
+                        log.warning(
+                            f"Bearish exit {ticker}: cancel "
+                            f"{order.get('id')} failed: {cexc}"
+                        )
+                for order in open_orders_pre:
+                    _wait_for_order_canceled(order["id"], cfg)
                 position = get_position(ticker, cfg)
                 if position:
                     qty = float(position.get("qty", 0))

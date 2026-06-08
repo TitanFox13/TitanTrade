@@ -33,10 +33,14 @@ def maybe_pyramid_position(
     operator — current behavior caps every entry at one bracket plus trail.
     Now: at +``pyramid_trigger_pct`` (5%) gain with the trailing stop active
     (so downside is bounded), we add ``pyramid_size_fraction`` (50%) of the
-    original notional via a marketable LIMIT buy (a market buy is rejected as
-    a wash trade while the protective stop rests on the book), capped at
-    ``pyramid_max_total_pct`` of portfolio, then extend the stop to cover the
-    enlarged position.
+    original notional, capped at ``pyramid_max_total_pct`` of portfolio. The
+    add requires briefly cancelling the protective stop, market-buying, then
+    re-placing a stop over the enlarged position: a live paper probe (ADR 037)
+    disproved the earlier assumption that a marketable LIMIT buy is accepted
+    alongside a resting opposite-side stop — Alpaca rejects BOTH market and
+    limit buys as a wash trade (code 40310000) while the stop rests, so the
+    stop must come off first. See the "WHY CANCEL → BUY → RE-STOP" comment in
+    the body for the bare-window tradeoff.
 
     Pyramids fire exactly once per position (tracked via
     ``trailing_state[ticker]["pyramid_added"]``). Safety preconditions:

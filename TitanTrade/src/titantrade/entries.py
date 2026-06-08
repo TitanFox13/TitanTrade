@@ -5,6 +5,7 @@ Extracted from executor.py (behavior-preserving).
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from titantrade.config import Config
@@ -13,6 +14,8 @@ from titantrade.retry import fetch_with_retry
 from titantrade.broker import (
     place_bracket_order, place_limit_buy, get_open_orders, get_account,
     get_positions, _headers, _is_fractional,
+    get_order, get_position, cancel_order, _wait_for_order_canceled,
+    place_native_stop_loss,
 )
 from titantrade.trade_state import (
     _load, _append_trade, _append_near_miss, _trade_record, _build_trade_context,
@@ -28,6 +31,97 @@ from titantrade.cooldown import (
 from titantrade.risk_manager import pre_trade_check
 
 log = get_logger("entries")
+
+# After a bracket entry fills, Alpaca leaves the bracket's stop-loss leg
+# permanently in ``held`` (only the take-profit leg activates) — verified on
+# the paper account for both stop and stop_limit legs. So a freshly-filled
+# position is downside-unprotected until the next execute cycle's
+# ``_manage_held_bullish`` heal places a standalone GTC stop. We close that
+# gap by polling the just-placed entry for a fill within the cycle and, on
+# fill, replacing the dead held leg with a visible GTC stop immediately.
+# Most trend-aware entries are marketable and fill within a few seconds;
+# slower limit fills fall through to the next-cycle heal (the backstop).
+_ENTRY_FILL_POLL_SECONDS = 15.0
+_ENTRY_FILL_POLL_INTERVAL = 1.0
+_ORDER_TERMINAL = {
+    "filled", "canceled", "cancelled", "rejected", "expired", "done_for_day",
+}
+
+
+def _ensure_gtc_stop_on_fill(
+    ticker: str,
+    parent_order: dict[str, Any] | None,
+    stop_price: float,
+    cfg: Config,
+) -> None:
+    """Poll a just-placed bracket entry for a fill; on fill, replace the
+    unreliable ``held`` bracket stop leg with a standalone GTC stop.
+
+    See the module-level note on ``_ENTRY_FILL_POLL_SECONDS`` for why this is
+    needed. No-op when the entry doesn't fill within the poll window — the
+    next-cycle heal is the backstop. Every failure path is logged; a stop is
+    always attempted via ``place_native_stop_loss`` (which clamps to broker-
+    available qty) so the position is not left silently bare.
+    """
+    if not isinstance(parent_order, dict) or not parent_order.get("id"):
+        return
+    if not stop_price or stop_price <= 0:
+        return
+    parent_id = parent_order["id"]
+
+    status = None
+    waited = 0.0
+    while waited < _ENTRY_FILL_POLL_SECONDS:
+        od = get_order(parent_id, cfg)
+        status = od.get("status") if od else None
+        if status in _ORDER_TERMINAL:
+            break
+        time.sleep(_ENTRY_FILL_POLL_INTERVAL)
+        waited += _ENTRY_FILL_POLL_INTERVAL
+
+    if status != "filled":
+        log.info(
+            f"Entry for {ticker} not filled within "
+            f"{int(_ENTRY_FILL_POLL_SECONDS)}s (status={status}) — bracket "
+            f"left in place; next-cycle heal will establish the GTC stop "
+            f"if/when it fills."
+        )
+        return
+
+    # Filled: the bracket stop leg is 'held' and won't protect. Cancel the OCO
+    # legs (releasing the qty), settle, then place a visible GTC stop. The TP
+    # leg is dropped here exactly as the next-cycle heal does — a weekly ADJUST
+    # reinstates a TP if appropriate; the stop is the safety-critical leg.
+    position = get_position(ticker, cfg)
+    if not position:
+        return
+    qty = float(position.get("qty", 0))
+    if qty <= 0 or _is_fractional(qty):
+        return
+
+    open_orders = get_open_orders(ticker, cfg)
+    for o in open_orders:
+        try:
+            cancel_order(o["id"], cfg)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                f"Entry stop reconcile {ticker}: cancel {o.get('id')} "
+                f"failed: {exc}"
+            )
+    for o in open_orders:
+        _wait_for_order_canceled(o["id"], cfg)
+
+    try:
+        place_native_stop_loss(ticker, qty, stop_price, cfg)
+        log.info(
+            f"Entry for {ticker} filled — replaced held bracket stop leg with "
+            f"a GTC stop on {qty} shares @ ${stop_price:.2f}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.error(
+            f"CRITICAL: {ticker} entry filled but GTC stop placement failed: "
+            f"{exc} — next-cycle heal will retry"
+        )
 
 
 def open_buy_commitment(cfg: Config, exclude_ticker: str | None = None) -> float:
@@ -279,8 +373,10 @@ def _handle_bullish_entry(
                 time_in_force="day",
             )
     else:
-        # Whole shares path: bracket orders with broker-native stops
-        place_bracket_order(
+        # Whole shares path: bracket orders with broker-native stops.
+        # The bracket stop leg stays 'held' after fill (Alpaca), so on each
+        # fill we replace it with a visible GTC stop within the cycle.
+        bracket1 = place_bracket_order(
             ticker=ticker,
             qty=tranche1_shares,
             entry_limit_price=entry_price,
@@ -288,8 +384,9 @@ def _handle_bullish_entry(
             take_profit_price=take_profit_price,
             cfg=cfg,
         )
+        _ensure_gtc_stop_on_fill(ticker, bracket1, stop_price, cfg)
         if tranche2_shares > 0:
-            place_bracket_order(
+            bracket2 = place_bracket_order(
                 ticker=ticker,
                 qty=tranche2_shares,
                 entry_limit_price=tranche2_price,
@@ -297,6 +394,7 @@ def _handle_bullish_entry(
                 take_profit_price=take_profit_price,
                 cfg=cfg,
             )
+            _ensure_gtc_stop_on_fill(ticker, bracket2, stop_price, cfg)
 
     context = _build_trade_context(ticker, data_bundle, sentry)
 
@@ -597,7 +695,7 @@ def resubmit_expired_brackets(
             )
             continue
 
-        place_bracket_order(
+        parent = place_bracket_order(
             ticker=ticker,
             qty=shares,
             entry_limit_price=entry_price,
@@ -605,6 +703,7 @@ def resubmit_expired_brackets(
             take_profit_price=take_profit_price,
             cfg=cfg,
         )
+        _ensure_gtc_stop_on_fill(ticker, parent, stop_price, cfg)
 
         trade = _trade_record(
             ticker=ticker,

@@ -1,5 +1,15 @@
 # TitanTrade TODO
 
+## Phase 1.21: Live-log error sweep — bracket stop reconciliation + bearish-exit (2026-06-08)
+From a full sweep of the deployed paper-account logs (see Decision 038), driven by direct Alpaca probing.
+- [x] Root-caused via live probe: a bracket's stop-loss leg never leaves `held` after the entry fills (only the TP activates) — for both `stop`/`stop_limit` and day/GTC TIF. The real protection is the standalone GTC stop placed by the next-cycle heal.
+- [x] On-fill GTC-stop reconciliation (`entries._ensure_gtc_stop_on_fill`): poll the entry to terminal within the cycle; on fill, cancel the OCO legs and place a visible GTC stop. Wired into all 3 bracket sites (tranche 1+2, resubmit). Slow fills fall through to the next-cycle heal.
+- [x] Bearish-exit close uses cancel→`_wait_for_order_canceled`→close (was `cancel_all` + blind `sleep(2)`) — same ADR-037 pattern as ABORT/gap-down; fixes the DVN/FANG 403s if a market-hours cancel takes >2s.
+- [x] Confirmed remaining log errors are historical/already-fixed (data staleness → daily fetch; pyramid → ADR 037; FCX/fractional → ADR 035; ANET ABORT → ADR 037, smoke-tested live).
+- [x] 431 tests passing (was 426); ruff clean on changed files; ABORT fix + `_manage_held_bullish` heal smoke-tested end-to-end on the live paper account.
+- [ ] Follow-up: `weekday_sentry_preclose` (20:30 UTC) runs *after* the 20:00 UTC close in summer (EDT) so it defers as off-hours — make it DST-aware (or 19:30 UTC) so the pre-close cycle does real work in summer.
+- [ ] Deploy to server + re-verify logs are clean on the next live cycle.
+
 ## Phase 1.20: Executor decomposition (2026-06-07) — behavior-preserving
 Branch `refactor/backend-modularization`; see Decision 036. Each step kept 424 tests green + is committed.
 - [x] Remove dead code (`calculate_shares`, `_adjust_entry_price` + its test file, `_highs`/`_lows`, `fetch_earnings_date`, dead constants, unused locals, 24+ unused imports); add `ruff`+`vulture` dev extra

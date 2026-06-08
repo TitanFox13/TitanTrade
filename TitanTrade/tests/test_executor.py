@@ -1926,12 +1926,12 @@ class TestBearishExitOffHours:
         mock_cancel.assert_not_called()
         mock_close.assert_not_called()
 
-    @patch("titantrade.executor.time.sleep", return_value=None)
+    @patch("titantrade.executor._wait_for_order_canceled", return_value="canceled")
     @patch("titantrade.executor.close_position_at_market", return_value={"id": "c1"})
-    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=0)
+    @patch("titantrade.executor.cancel_order", return_value={"id": "stop-dvn"})
     @patch("titantrade.executor.get_position")
     @patch("titantrade.executor.get_positions")
-    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.executor.get_open_orders")
     @patch("titantrade.executor.get_account", return_value={
         "portfolio_value": "100000", "cash": "20000", "buying_power": "40000",
     })
@@ -1945,12 +1945,20 @@ class TestBearishExitOffHours:
         self,
         mock_open, mock_load_sec, mock_core, mock_orphan, mock_gap,
         mock_resub, mock_account, mock_oo, mock_get_positions,
-        mock_get_pos, mock_cancel, mock_close, mock_sleep,
+        mock_get_pos, mock_cancel, mock_close, mock_wait,
         fake_config, tmp_state_dir,
     ):
-        """Market-open: cancel + close fires normally (with the 2s settle delay)."""
+        """Market-open: each resting order is cancelled AND polled to a
+        terminal state (cancel-settle, ADR 037) before the close — no blind
+        sleep. The stop on the book is what holds the qty, so it must settle
+        first or the close 403s."""
         self._e2e_state(tmp_state_dir)
         fake_config = _config_with_watchlist(fake_config, ["DVN"])
+        # A resting stop holds the shares; the exit must cancel + settle it.
+        mock_oo.return_value = [{
+            "type": "stop_limit", "side": "sell",
+            "stop_price": "45.00", "id": "stop-dvn",
+        }]
         position = {"symbol": "DVN", "qty": "260", "current_price": "47.00",
                     "avg_entry_price": "47.16"}
         mock_get_positions.return_value = [position]
@@ -1959,7 +1967,9 @@ class TestBearishExitOffHours:
         from titantrade.executor import execute_trades
         execute_trades(fake_config)
 
-        mock_cancel.assert_called_once_with("DVN", fake_config)
+        # Cancelled the resting stop, waited for it to reach terminal, then closed.
+        mock_cancel.assert_any_call("stop-dvn", fake_config)
+        mock_wait.assert_any_call("stop-dvn", fake_config)
         mock_close.assert_called_once()
 
 
@@ -2152,10 +2162,10 @@ class TestBearishExitRestoresStopOnFailure:
     Fix: capture existing stop before cancel; restore it if close fails.
     """
 
-    @patch("titantrade.executor.time.sleep", return_value=None)
+    @patch("titantrade.executor._wait_for_order_canceled", return_value="canceled")
     @patch("titantrade.executor.place_native_stop_loss", return_value={"id": "restored"})
     @patch("titantrade.executor.close_position_at_market", side_effect=RuntimeError("403 qty race"))
-    @patch("titantrade.executor.cancel_all_orders_for_ticker", return_value=1)
+    @patch("titantrade.executor.cancel_order", return_value={"id": "stop-1"})
     @patch("titantrade.executor.get_position")
     @patch("titantrade.executor.get_positions")
     @patch("titantrade.executor.get_open_orders")
@@ -2172,7 +2182,7 @@ class TestBearishExitRestoresStopOnFailure:
         self,
         mock_open, mock_load, mock_core, mock_orphan, mock_gap,
         mock_resub, mock_account, mock_oo, mock_get_positions, mock_get_pos,
-        mock_cancel, mock_close, mock_place_stop, mock_sleep,
+        mock_cancel, mock_close, mock_place_stop, mock_wait,
         fake_config, tmp_state_dir,
     ):
         write_state_file(tmp_state_dir, "weekly_thesis.json", {
@@ -2214,3 +2224,92 @@ class TestBearishExitRestoresStopOnFailure:
         assert restore_args[0] == "DVN"
         assert float(restore_args[1]) == 260.0
         assert float(restore_args[2]) == 46.74
+
+
+# ---------------------------------------------------------------------------
+# Regression: bracket stop leg stays 'held' after fill — entries reconcile it
+# to a visible GTC stop within the cycle (Option A; Alpaca paper behaviour)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.real_stop_reconcile
+class TestEnsureGtcStopOnFill:
+    """Alpaca leaves a bracket's stop-loss leg permanently in ``held`` after
+    the entry fills (only the take-profit activates), so the position is
+    downside-unprotected until the next cycle. ``_ensure_gtc_stop_on_fill``
+    polls the entry and, on fill, cancels the OCO legs and places a standalone
+    GTC stop we can actually see on the book.
+    """
+
+    @patch("titantrade.entries.place_native_stop_loss", return_value={"id": "gtc"})
+    @patch("titantrade.entries._wait_for_order_canceled", return_value="canceled")
+    @patch("titantrade.entries.cancel_order")
+    @patch("titantrade.entries.get_open_orders")
+    @patch("titantrade.entries.get_position")
+    @patch("titantrade.entries.get_order", return_value={"status": "filled"})
+    def test_fill_replaces_held_leg_with_gtc_stop(
+        self, mock_order, mock_pos, mock_oo, mock_cancel, mock_wait,
+        mock_stop, fake_config,
+    ):
+        from titantrade.entries import _ensure_gtc_stop_on_fill
+        mock_pos.return_value = {"symbol": "AAPL", "qty": "10"}
+        mock_oo.return_value = [
+            {"id": "tp-leg", "type": "limit", "side": "sell"},
+            {"id": "held-stop", "type": "stop_limit", "side": "sell"},
+        ]
+        _ensure_gtc_stop_on_fill("AAPL", {"id": "parent"}, 95.0, fake_config)
+
+        # Both OCO legs cancelled + settled, then a GTC stop on the full qty
+        mock_cancel.assert_any_call("tp-leg", fake_config)
+        mock_cancel.assert_any_call("held-stop", fake_config)
+        mock_wait.assert_any_call("tp-leg", fake_config)
+        mock_stop.assert_called_once_with("AAPL", 10.0, 95.0, fake_config)
+
+    @patch("titantrade.entries.place_native_stop_loss")
+    @patch("titantrade.entries.cancel_order")
+    @patch("titantrade.entries.time.sleep", return_value=None)
+    @patch("titantrade.entries.get_order", return_value={"status": "new"})
+    def test_unfilled_entry_is_noop(
+        self, mock_order, mock_sleep, mock_cancel, mock_stop, fake_config,
+    ):
+        """Slow limit fill never reaches terminal in the poll window → leave
+        the bracket alone (next-cycle heal is the backstop)."""
+        from titantrade.entries import _ensure_gtc_stop_on_fill
+        _ensure_gtc_stop_on_fill("AAPL", {"id": "parent"}, 95.0, fake_config)
+        mock_cancel.assert_not_called()
+        mock_stop.assert_not_called()
+
+    @patch("titantrade.entries.place_native_stop_loss")
+    @patch("titantrade.entries.cancel_order")
+    @patch("titantrade.entries.get_position", return_value={"symbol": "AAPL", "qty": "0.5"})
+    @patch("titantrade.entries.get_order", return_value={"status": "filled"})
+    def test_fractional_fill_skipped(
+        self, mock_order, mock_pos, mock_cancel, mock_stop, fake_config,
+    ):
+        """Fractional positions have no native stop (Alpaca) — skip cleanly."""
+        from titantrade.entries import _ensure_gtc_stop_on_fill
+        _ensure_gtc_stop_on_fill("AAPL", {"id": "parent"}, 95.0, fake_config)
+        mock_cancel.assert_not_called()
+        mock_stop.assert_not_called()
+
+    @patch("titantrade.entries.place_native_stop_loss", side_effect=RuntimeError("boom"))
+    @patch("titantrade.entries._wait_for_order_canceled", return_value="canceled")
+    @patch("titantrade.entries.cancel_order")
+    @patch("titantrade.entries.get_open_orders", return_value=[{"id": "tp", "side": "sell", "type": "limit"}])
+    @patch("titantrade.entries.get_position", return_value={"symbol": "AAPL", "qty": "10"})
+    @patch("titantrade.entries.get_order", return_value={"status": "filled"})
+    def test_stop_placement_failure_does_not_raise(
+        self, mock_order, mock_pos, mock_oo, mock_cancel, mock_wait,
+        mock_stop, fake_config,
+    ):
+        """If the GTC stop placement fails, log CRITICAL but don't propagate —
+        the next-cycle heal retries."""
+        from titantrade.entries import _ensure_gtc_stop_on_fill
+        # Must not raise
+        _ensure_gtc_stop_on_fill("AAPL", {"id": "parent"}, 95.0, fake_config)
+        mock_stop.assert_called_once()
+
+    def test_no_parent_id_is_noop(self, fake_config):
+        from titantrade.entries import _ensure_gtc_stop_on_fill
+        # No exception, no work when the order dict is missing/empty
+        _ensure_gtc_stop_on_fill("AAPL", None, 95.0, fake_config)
+        _ensure_gtc_stop_on_fill("AAPL", {}, 95.0, fake_config)

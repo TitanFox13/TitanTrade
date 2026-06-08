@@ -23,6 +23,32 @@ from titantrade.config import (
 )
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "real_stop_reconcile: exercise the real "
+        "entries._ensure_gtc_stop_on_fill (the autouse fixture no-ops it "
+        "elsewhere to avoid live broker calls during bracket tests)",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _noop_entry_stop_reconcile(request, monkeypatch):
+    """``entries._ensure_gtc_stop_on_fill`` polls the broker for the entry
+    fill and then places a GTC stop — all live Alpaca calls. Bracket-placement
+    tests mock ``place_bracket_order`` but not those primitives, so by default
+    we no-op the reconcile. Its own dedicated tests mark themselves
+    ``@pytest.mark.real_stop_reconcile`` to run the real implementation.
+    """
+    if request.node.get_closest_marker("real_stop_reconcile"):
+        return
+    monkeypatch.setattr(
+        "titantrade.entries._ensure_gtc_stop_on_fill",
+        lambda *a, **k: None,
+        raising=False,
+    )
+
+
 @pytest.fixture
 def fake_config() -> Config:
     """A Config with dummy API keys — never hits real services."""
