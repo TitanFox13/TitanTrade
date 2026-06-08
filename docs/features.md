@@ -129,7 +129,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 ### Pyramiding Into Winners
 - Adds to a position once per ticker when it's working (+5% gain with the trailing stop active, so combined downside is bounded)
 - Adds 50% of the original notional, capped at the per-ticker concentration limit (30% of portfolio)
-- Uses a **marketable limit buy**, never a market buy — a market buy placed while the protective sell stop rests on the book is rejected by Alpaca as a wash trade (Decision 035). After the add fills, the stop is extended to cover the enlarged position.
+- **Cancel → market-buy → re-stop** (Decision 037): a live probe proved Alpaca rejects *both* market and limit buys against a resting protective stop, so the add drops the stop, market-buys (fastest fill = shortest unprotected window), then re-places a stop covering the full enlarged position. Every failure path restores a stop (never silently bare). This is an explicit, bounded exception to the "never bare" model, accepted to enable the feature.
 
 ### Portfolio-Level Protection
 - Peak portfolio tracking for drawdown calculation

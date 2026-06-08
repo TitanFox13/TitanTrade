@@ -925,3 +925,19 @@ Test-coupling handling worked exactly as planned: re-exports preserved `titantra
 **Follow-up done**: de-duplicated the shared entry-adaptation / bracket-validation / data-accessor / near-miss logic (helpers in `pricing.py` + `trade_state.py`); decomposed the worst long function — `execute_trades` 572 → 406 LOC via `_manage_held_bullish`. **Remaining (optional)**: the bearish-exit and ADJUST inline blocks in `execute_trades`, plus `_handle_bullish_entry` (259) and `resubmit_expired_brackets` (284), are cohesive sequential pipelines; further decomposition is deferred — they're safety-critical exit/stop-placement code, better split in a focused pass than rushed. Deployed through commit `68f4c62`.
 
 **Trade-offs**: per-module test-patch retargeting is mechanical but real (the suite catches mistakes). Logger names become per-module (`titantrade.broker` etc.) — more precise log attribution, no functional change.
+
+## Decision 037: Pyramiding correctly implemented as cancel → market-buy → re-stop (probe-driven)
+**Date**: 2026-06-08
+**Decision**: Replace the pyramid add mechanism with **cancel the protective stop → market-buy the add → re-place a stop covering the full enlarged position**, after a live paper probe disproved the Decision-035 assumption.
+
+**Why**: Decision 035 fixed the "every pyramid fails as a wash trade" bug by switching the add from a market buy to a *marketable limit buy*, on the inference (from Alpaca's error text "use complex/limit/stop_limit orders") that a limit buy is accepted alongside a resting sell stop. A one-shot paper probe (`scripts/probe_pyramid_washtrade.py`, run on a live market day) **disproved this**: Alpaca rejects BOTH market and limit buys against a resting opposite-side stop with the same 40310000 wash-trade error. So the limit-buy fix never actually pyramided either — it just failed gracefully.
+
+**Implementation** (`positions.py::maybe_pyramid_position`): read the existing protective stop; cancel it and poll to terminal (releasing the held qty); MARKET-buy the add (fastest fill → shortest unprotected window, and with the stop gone there is no opposite-side order to trip the wash-trade rule); poll the buy to `filled`; re-place a native stop covering original+added qty at the prior protective price. Every failure path (`cancel`, `buy`, `did-not-fill`, `re-stop`) restores a stop via `place_native_stop_loss` (which clamps to broker-available qty) and logs CRITICAL if even that fails.
+
+**Trade-off accepted (user decision)**: there is now a brief (seconds, during market hours) window between dropping the old stop and placing the new one where the position is unprotected — an explicit, bounded exception to the otherwise-strict "never bare" model, taken because the user wants the pyramiding feature and the window is minimised (market buy) and guarded (restore-on-every-failure). Pyramiding only fires on a winner (+5%, trailing stop already at breakeven-or-better), so the exposure during the window is small.
+
+**Validation**: 9 pyramid tests rewritten for the new flow; full suite green. The probe is the regression oracle — re-run it after any Alpaca-side change.
+
+**Note**: `scripts/` is not copied into the Docker image (only the installed package is), so the probe is run via the bind-mounted `state/` dir or `docker compose run` with a mount. Add `COPY scripts ./scripts` to the Dockerfile if repeatable in-container probe runs are wanted.
+
+Also fixed alongside (found in the live deployment logs): the ABORT exit (`_handle_abort`) now waits for order cancels to settle before closing (same held-qty race as gap-down — production ANET ABORT failure), and a `log_decision` `extra` carried a function object after the dedup rename (JSON file-handler `TypeError`), now corrected to the numeric ATR value.

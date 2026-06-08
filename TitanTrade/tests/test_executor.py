@@ -1659,16 +1659,15 @@ class TestPyramidIntoWinners:
     @patch("titantrade.positions.cancel_order")
     @patch("titantrade.positions._wait_for_order_canceled", return_value="filled")
     @patch("titantrade.positions.get_open_orders")
-    @patch("titantrade.positions.place_limit_buy", return_value={"id": "pyr-buy"})
-    @patch("titantrade.broker.place_market_buy")
-    def test_pyramids_at_5pct_gain_via_limit_buy(
-        self, mock_market_buy, mock_limit_buy, mock_orders, mock_wait,
-        mock_cancel, mock_stop, fake_config, tmp_state_dir,
+    @patch("titantrade.positions.place_market_buy", return_value={"id": "pyr-buy"})
+    def test_pyramids_at_5pct_gain(
+        self, mock_market_buy, mock_orders, mock_wait, mock_cancel, mock_stop,
+        fake_config, tmp_state_dir,
     ):
-        """FIX: pyramid adds with a marketable LIMIT buy (never a market buy,
-        which Alpaca rejects as a wash trade while the protective sell stop is
-        on the book — the bug that made every pyramid fail), then extends the
-        stop to cover the full position.
+        """FIX (post-probe): Alpaca rejects BOTH market and limit buys against a
+        resting stop, so the pyramid DROPS the protective stop, MARKET-buys the
+        add (fastest fill = shortest bare window), then re-places a stop covering
+        the full enlarged position.
         """
         mock_orders.return_value = self._existing_stop(qty="100")
 
@@ -1679,44 +1678,42 @@ class TestPyramidIntoWinners:
         assert trade is not None
         assert trade["trigger"] == "pyramid"
 
-        # CORE FIX: the add is a LIMIT buy, NOT a market buy.
-        mock_market_buy.assert_not_called()
-        mock_limit_buy.assert_called_once()
-        buy_args = mock_limit_buy.call_args
-        assert buy_args.args[0] == "FOO"
-        # Original notional $10000 × 50% = $5000, at $107 = 46 shares
-        assert buy_args.args[1] == 46
-        assert buy_args.args[2] == pytest.approx(107.0 * 1.003, abs=0.01)  # marketable limit
-        assert buy_args.kwargs.get("time_in_force") == "day"
-
-        # After the add fills, the stop is extended to cover the FULL position
-        # (100 existing + 46 added = 146) so the new shares aren't left bare.
+        # 1. Dropped the protective stop. 2. MARKET-bought the add.
         mock_cancel.assert_called_once_with("stop-old", fake_config)
+        mock_market_buy.assert_called_once()
+        buy_args = mock_market_buy.call_args.args
+        assert buy_args[0] == "FOO"
+        assert buy_args[1] == 46  # $5000 add / $107 = 46 shares
+        # 3. Re-placed a stop covering the FULL position (100 + 46 = 146).
         mock_stop.assert_called_once()
         stop_args = mock_stop.call_args.args
         assert stop_args[0] == "FOO"
-        assert stop_args[1] == 146  # full coverage
+        assert stop_args[1] == 146
         assert stop_args[2] == pytest.approx(95.0, abs=0.01)  # existing stop price
 
+    @patch("titantrade.positions.place_native_stop_loss", return_value={"id": "restored"})
     @patch("titantrade.positions.cancel_order")
     @patch("titantrade.positions._wait_for_order_canceled", return_value="canceled")
-    @patch("titantrade.positions.place_limit_buy", return_value={"id": "pyr-buy"})
-    def test_unfilled_add_is_cancelled_and_no_trade(
-        self, mock_limit_buy, mock_wait, mock_cancel, fake_config, tmp_state_dir,
+    @patch("titantrade.positions.get_open_orders")
+    @patch("titantrade.positions.place_market_buy", return_value={"id": "pyr-buy"})
+    def test_unfilled_add_restores_stop_and_no_trade(
+        self, mock_market_buy, mock_orders, mock_wait, mock_cancel, mock_stop,
+        fake_config, tmp_state_dir,
     ):
-        """If the add limit doesn't fill (poll returns a non-'filled' terminal
-        state), we cancel the resting buy so it can't fill later UNPROTECTED,
-        and record no trade.
-        """
+        """If the add doesn't fill (poll returns non-'filled'), the dropped stop
+        is restored on the ORIGINAL qty and no trade is recorded — never bare."""
+        mock_orders.return_value = self._existing_stop(qty="100")
         trade = maybe_pyramid_position(
             "FOO", self._thesis(), self._winning_position(gain_pct=0.07),
             {"signal": "CONTINUE"}, portfolio_value=100_000, cfg=fake_config,
         )
         assert trade is None
-        mock_limit_buy.assert_called_once()
-        mock_cancel.assert_called_once_with("pyr-buy", fake_config)
+        mock_market_buy.assert_called_once()
+        # Stop restored on the original 100 shares (not the enlarged 146).
+        mock_stop.assert_called_once()
+        assert mock_stop.call_args.args[1] == 100
 
-    @patch("titantrade.positions.place_limit_buy")
+    @patch("titantrade.positions.place_market_buy")
     def test_does_not_fire_below_trigger(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1728,7 +1725,7 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.positions.place_limit_buy")
+    @patch("titantrade.positions.place_market_buy")
     def test_only_fires_once_per_position(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1742,7 +1739,7 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.positions.place_limit_buy")
+    @patch("titantrade.positions.place_market_buy")
     def test_skips_if_sentry_aborting(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1753,7 +1750,7 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.positions.place_limit_buy")
+    @patch("titantrade.positions.place_market_buy")
     def test_skips_if_thesis_flipped(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1766,7 +1763,7 @@ class TestPyramidIntoWinners:
         assert trade is None
         mock_buy.assert_not_called()
 
-    @patch("titantrade.positions.place_limit_buy")
+    @patch("titantrade.positions.place_market_buy")
     def test_respects_concentration_cap(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1794,7 +1791,7 @@ class TestPyramidWashTradeGuard:
     still defers for 30 min after TP1 to avoid churning the just-sold position.
     """
 
-    @patch("titantrade.positions.place_limit_buy")
+    @patch("titantrade.positions.place_market_buy")
     def test_pyramid_defers_when_tp1_fired_recently(
         self, mock_buy, fake_config, tmp_state_dir,
     ):
@@ -1829,15 +1826,13 @@ class TestPyramidWashTradeGuard:
     @patch("titantrade.positions.cancel_order")
     @patch("titantrade.positions._wait_for_order_canceled", return_value="filled")
     @patch("titantrade.positions.get_open_orders", return_value=[])
-    @patch("titantrade.positions.place_limit_buy", return_value={"id": "p1"})
-    @patch("titantrade.broker.place_market_buy")
+    @patch("titantrade.positions.place_market_buy", return_value={"id": "p1"})
     def test_pyramid_fires_when_tp1_old_enough(
-        self, mock_market_buy, mock_limit_buy, mock_orders, mock_wait,
+        self, mock_market_buy, mock_orders, mock_wait,
         mock_cancel, mock_stop, fake_config, tmp_state_dir,
     ):
         """Once 30+ minutes have passed since TP1, the cooldown window has
-        closed and the pyramid fires — via a limit buy, never a market buy.
-        """
+        closed and the pyramid fires (cancel -> market buy -> re-stop)."""
         from datetime import datetime, timezone, timedelta
         from titantrade.positions import maybe_pyramid_position
         from titantrade.trailing_state import _save_trailing_state
@@ -1862,8 +1857,7 @@ class TestPyramidWashTradeGuard:
             portfolio_value=100_000, cfg=fake_config,
         )
         assert result is not None
-        mock_market_buy.assert_not_called()
-        mock_limit_buy.assert_called_once()
+        mock_market_buy.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

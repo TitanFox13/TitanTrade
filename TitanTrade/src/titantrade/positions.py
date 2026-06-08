@@ -11,7 +11,7 @@ from typing import Any
 from titantrade.config import Config
 from titantrade.logger import get_logger
 from titantrade.broker import (
-    place_native_stop_loss, place_market_sell, place_limit_buy, cancel_order,
+    place_native_stop_loss, place_market_sell, place_market_buy, cancel_order,
     cancel_all_orders_for_ticker, get_position, get_open_orders,
     _wait_for_order_canceled, _is_fractional,
 )
@@ -130,80 +130,84 @@ def maybe_pyramid_position(
         f"shares @ ~${current_price:.2f} on top of {int(qty)} existing"
     )
 
-    # WHY A LIMIT BUY, NOT A MARKET BUY:
-    # The position is always protected by a resting sell stop. Alpaca rejects a
-    # MARKET buy placed while an opposite-side stop/limit is open as a
-    # "potential wash trade" (code 40310000, "use complex/limit/stop_limit
-    # orders"). In production this made EVERY pyramid fail. A marketable LIMIT
-    # buy is accepted alongside the resting stop, so we never have to drop the
-    # protective stop to add. Price the limit slightly through the market
-    # (current * 1.003) for a near-immediate fill.
-    limit_price = round(current_price * 1.003, 2)
-    try:
-        buy_order = place_limit_buy(
-            ticker, add_qty, limit_price, cfg, time_in_force="day",
-        )
-    except Exception as exc:
-        log.error(f"Pyramid limit-buy failed for {ticker}: {exc}")
-        return None
-
-    # Wait for the add to fill before touching the stop. A marketable limit
-    # fills within seconds during market hours.
-    buy_id = buy_order.get("id") if isinstance(buy_order, dict) else None
-    fill_status = _wait_for_order_canceled(buy_id, cfg) if buy_id else None
-    if fill_status != "filled":
-        # Didn't fill in the polling window (price ran away, or off-hours queue).
-        # Cancel the resting add so we don't get a surprise UNPROTECTED fill
-        # later — the existing stop only covers the original shares. We'll
-        # retry the pyramid on a future cycle if conditions still hold.
-        if buy_id:
-            try:
-                cancel_order(buy_id, cfg)
-            except Exception as cexc:  # noqa: BLE001
-                log.warning(f"Pyramid {ticker}: failed to cancel unfilled add {buy_id}: {cexc}")
-        log.info(
-            f"Pyramid deferred for {ticker}: add order did not fill "
-            f"(status={fill_status}) — leaving existing stop in place, will retry"
-        )
-        return None
-
-    # Add filled. Extend the protective stop to cover the FULL position so the
-    # newly-added shares aren't left bare until the next trailing cycle. Cancel
-    # the old (partial-coverage) stop and re-place one for the full qty at the
-    # same protective price. Sell-to-sell cancel+replace is not a wash trade,
-    # and place_native_stop_loss clamps to available qty as a backstop.
+    # WHY CANCEL → BUY → RE-STOP:
+    # A live paper probe confirmed Alpaca rejects ANY buy (market OR limit) while
+    # an opposite-side sell stop rests on the position ("potential wash trade",
+    # code 40310000, "use complex orders"). So to add we must briefly drop the
+    # protective stop, buy, then re-place a stop covering the full enlarged
+    # position. A MARKET buy gives the fastest fill = shortest unprotected
+    # window. Every failure path restores a stop so the position is never left
+    # silently bare (place_native_stop_loss clamps to broker-available qty).
+    open_orders = get_open_orders(ticker, cfg)
+    existing_stop = next(
+        (
+            o for o in open_orders
+            if o.get("type") in ("stop", "stop_limit") and o.get("side") == "sell"
+        ),
+        None,
+    )
+    protective_price = (
+        (float(existing_stop.get("stop_price", 0)) if existing_stop else 0.0)
+        or float(thesis.get("stop_loss_price") or 0)
+        or round(entry_price * 1.005, 2)
+    )
     new_total_qty = qty + add_qty
-    try:
-        open_orders = get_open_orders(ticker, cfg)
-        existing_stop = next(
-            (
-                o for o in open_orders
-                if o.get("type") in ("stop", "stop_limit")
-                and o.get("side") == "sell"
-            ),
-            None,
-        )
-        protective_price = (
-            float(existing_stop.get("stop_price", 0)) if existing_stop else 0.0
-        ) or float(thesis.get("stop_loss_price") or 0) or round(entry_price * 1.005, 2)
-        if existing_stop:
+
+    def _restore_stop(stop_qty: float, note: str) -> None:
+        try:
+            place_native_stop_loss(ticker, stop_qty, protective_price, cfg)
+            log.warning(
+                f"Pyramid {ticker}: {note} — restored stop on {stop_qty} shares "
+                f"@ ${protective_price:.2f}"
+            )
+        except Exception as rexc:  # noqa: BLE001
+            log.error(
+                f"CRITICAL: {ticker} pyramid left position with NO stop ({note}); "
+                f"restore failed: {rexc}. Manual review needed."
+            )
+
+    # 1. Drop the protective stop so the buy isn't wash-trade-rejected.
+    if existing_stop:
+        try:
             cancel_order(existing_stop["id"], cfg)
             _wait_for_order_canceled(existing_stop["id"], cfg)
+        except Exception as exc:  # noqa: BLE001
+            log.error(
+                f"Pyramid {ticker}: could not cancel stop to add ({exc}) — "
+                f"aborting add; existing stop remains."
+            )
+            return None
+    # [position is BARE here — minimise this window]
+
+    # 2. Market-buy the add (no opposite-side order now → accepted, fast fill).
+    try:
+        buy_order = place_market_buy(ticker, add_qty, cfg)
+    except Exception as exc:  # noqa: BLE001
+        log.error(f"Pyramid market-buy failed for {ticker}: {exc}")
+        _restore_stop(qty, "add buy failed")
+        return None
+    buy_id = buy_order.get("id") if isinstance(buy_order, dict) else None
+    fill_status = _wait_for_order_canceled(buy_id, cfg) if buy_id else "filled"
+    if fill_status != "filled":
+        log.error(
+            f"Pyramid {ticker}: add order {buy_id} did not fill (status={fill_status})"
+        )
+        _restore_stop(qty, "add did not fill")
+        return None
+
+    # 3. Re-place the protective stop covering the FULL enlarged position.
+    try:
         place_native_stop_loss(ticker, new_total_qty, protective_price, cfg)
         log.info(
-            f"Pyramid {ticker}: stop extended to {new_total_qty} shares "
-            f"@ ${protective_price:.2f} (covers added {add_qty})"
+            f"Pyramid {ticker}: added {add_qty}, stop re-placed on {new_total_qty} "
+            f"shares @ ${protective_price:.2f}"
         )
     except Exception as exc:  # noqa: BLE001
-        # The add filled but we couldn't extend the stop. The original stop (if
-        # it was never cancelled) still covers the original shares; the added
-        # shares ride to the next trailing cycle, which re-places a full-qty
-        # stop. Surface loudly.
         log.error(
-            f"Pyramid {ticker}: add filled but stop extension to "
-            f"{new_total_qty} shares failed: {exc} — added shares protected at "
-            f"next trailing cycle"
+            f"CRITICAL: {ticker} pyramid add filled but full-qty stop placement "
+            f"failed: {exc} — attempting restore"
         )
+        _restore_stop(new_total_qty, "post-add stop placement failed")
 
     try:
         from titantrade.notifier import notify_pyramid_added
