@@ -32,6 +32,7 @@ from titantrade.cooldown import _record_abort_cooldown
 from titantrade.trailing_state import _cleanup_trailing_state
 from titantrade.broker import (  # re-exported: preserves titantrade.executor.* patch targets
     _is_fractional,
+    _wait_for_order_canceled,
     cancel_all_orders_for_ticker,
     cancel_order,
     close_position_at_market,
@@ -58,8 +59,21 @@ def _handle_abort(ticker: str, sentry: dict[str, Any], cfg: Config) -> dict[str,
     Uses limit sell at 0.2% discount for news-based ABORT (less urgent, reduces slippage).
     """
     reasoning = sentry.get("reasoning", "ABORT signal")
-    cancelled = cancel_all_orders_for_ticker(ticker, cfg)
-    log.info(f"Cancelled {cancelled} open orders for {ticker}")
+    # Cancel every open order AND wait for each to reach a terminal state before
+    # closing. The position's shares are held_for_orders by the protective stop;
+    # closing immediately after cancelling 403s with "insufficient qty
+    # (available: 0)" because the cancel hasn't released them yet (production:
+    # ANET ABORT failed exactly this way during a -2.6% SPY stress day). Same
+    # held-qty race the gap-down path already guards against.
+    open_orders = get_open_orders(ticker, cfg)
+    for order in open_orders:
+        try:
+            cancel_order(order["id"], cfg)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"ABORT {ticker}: cancel {order.get('id')} failed: {exc}")
+    for order in open_orders:
+        _wait_for_order_canceled(order["id"], cfg)
+    log.info(f"Cancelled {len(open_orders)} open orders for {ticker} (settled)")
 
     position = get_position(ticker, cfg)
     if not position:

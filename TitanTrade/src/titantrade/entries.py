@@ -328,7 +328,7 @@ def _handle_bullish_entry(
             "tranche2": tranche2_price,
             "stop": stop_price,
             "tp": take_profit_price,
-            "atr": stock_atr,
+            "atr": atr,
             "confidence": thesis.get("confidence", 0),
         },
     )
