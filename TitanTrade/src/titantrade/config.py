@@ -136,6 +136,9 @@ class Config:
     trading: TradingSettings
     fred: FREDConfig = field(default_factory=FREDConfig)
     finnhub: FinnhubConfig = field(default_factory=FinnhubConfig)
+    # Active market-data provider: "native" (Alpaca+FRED+Finnhub, default) or
+    # "fmp" (legacy, retained). Switch via the DATA_PROVIDER env var.
+    data_provider: str = "native"
 
 
 def load_watchlist() -> TradingSettings:
@@ -308,6 +311,7 @@ def load_config() -> Config:
         finnhub=FinnhubConfig(
             key=keys.get("FINNHUB_KEY", ""),
         ),
+        data_provider=os.environ.get("DATA_PROVIDER", "native").strip() or "native",
         claude=ClaudeConfig(
             key=keys["CLAUDE_KEY"],
             model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
