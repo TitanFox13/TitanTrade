@@ -7,9 +7,14 @@ Drop the €25/mo Financial Modeling Prep dependency.
 - [x] `config.py`: Alpaca data URL, FRED/Finnhub configs; FMP_KEY → optional.
 - [x] `data/fomc_dates.json` for FOMC (not a FRED release) — ⚠️ 2026 dates best-effort, verify against federalreserve.gov.
 - [x] 20 new `test_market_data.py` cases (455 total); ruff clean.
-- [ ] **User action**: obtain free FRED_KEY + FINNHUB_KEY, add to server `.env`. Until then VIX/treasury/earnings/econ-calendar/analyst are absent (gates fail open; core price/news via Alpaca works).
+- [x] FRED_KEY + FINNHUB_KEY added to server `.env` (live); full bundle verified flowing (VIX 21.51, CPI/FOMC calendar, analyst mix, earnings).
+- [x] Pluggable providers (Decision 040 follow-up): `data_providers/{native,fmp}.py` + `market_data.py` facade; revert anytime with `DATA_PROVIDER=fmp`. FMP code retained.
+- [x] FRED econ-calendar fixed (per-release `/release/dates`); events stamped with ET release times (FOMC 14:00, data 08:30) so the macro-blackout 6h window aligns — caught + fixed in E2E that date-only FRED dates broke the FOMC blackout.
+- [x] FOMC 2026 dates verified against federalreserve.gov (all 8 correct).
+- [x] End-to-end verified token-free: `fetch` (healthy bundle), risk gates (VIX scaling, macro blackout fires on timed FOMC, earnings blackout), `pricecheck` (9 positions via Alpaca quotes), `gapcheck` — zero errors. 461 tests green.
 - [ ] Price-target consensus dropped (no free source) — Claude still gets the recommendation mix.
-- [ ] Verify a full live `fetch` cycle once keys are in (Alpaca core verifiable now).
+- [ ] **User action**: cancel the FMP subscription (nothing uses it now).
+- [ ] Optional: a live `analyze`/`sentry` AI round-trip (spends tokens) to confirm the AI steps consume the new bundle — deferred per the no-token preference; data feeding them is verified well-formed.
 
 ## Phase 1.21: Live-log error sweep — bracket stop reconciliation + bearish-exit (2026-06-08)
 From a full sweep of the deployed paper-account logs (see Decision 038), driven by direct Alpaca probing.
