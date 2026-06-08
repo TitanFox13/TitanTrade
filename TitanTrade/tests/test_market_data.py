@@ -129,8 +129,10 @@ class TestFred:
         ]})
         events = market_data.get_economic_calendar(_with_keys(fake_config), days_ahead=7)
         assert events, "expected in-window release events"
-        assert all(e["date"] == soon for e in events)
-        assert all(e["date"] != far for e in events)
+        # date is now a tz-aware ISO timestamp at the ET release time (8:30 ET)
+        assert all(e["date"].startswith(soon) for e in events)
+        assert all(not e["date"].startswith(far) for e in events)
+        assert all("T08:30:00" in e["date"] for e in events)  # data-release time
         # one event per configured release id
         assert len(events) == len(native._FRED_RELEASE_IDS)
 
@@ -144,7 +146,11 @@ class TestFred:
         soon = (today + timedelta(days=3)).isoformat()
         with patch("titantrade.data_providers.native._load_fomc_dates", return_value=[soon]):
             events = market_data.get_economic_calendar(_with_keys(fake_config), days_ahead=7)
-        assert any("FOMC" in e["event"] for e in events)
+        fomc = [e for e in events if "FOMC" in e["event"]]
+        assert fomc
+        # FOMC must be stamped at 14:00 ET so the macro-blackout 6h window
+        # covers the morning execute (the bug this guards against).
+        assert "T14:00:00" in fomc[0]["date"] and fomc[0]["date"].startswith(soon)
 
 
 # --- Native: Finnhub earnings / analyst / sector ----------------------------

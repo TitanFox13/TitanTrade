@@ -195,12 +195,34 @@ def _load_fomc_dates() -> list[str]:
         return []
 
 
+def _et_timestamp(date_str: str, hour: int, minute: int) -> str:
+    """Stamp a YYYY-MM-DD release date with its typical Eastern release time,
+    as a tz-aware ISO string (DST-correct via pytz).
+
+    FRED and the FOMC file give date-only; the macro-blackout gate needs the
+    actual release *time* to fire its 6h window correctly (e.g. an FOMC
+    decision at 14:00 ET = 18:00 UTC, not the gate's date-only 14:00 *UTC*
+    default — which would miss the morning execute on an FOMC day).
+
+    Uses stdlib ``zoneinfo`` (plain datetime localization is correct with
+    zoneinfo; the APScheduler zoneinfo quirk in ADR 039 is unrelated).
+    """
+    from zoneinfo import ZoneInfo
+    d = datetime.strptime(date_str, "%Y-%m-%d").replace(
+        hour=hour, minute=minute, tzinfo=ZoneInfo("America/New_York"),
+    )
+    return d.isoformat()
+
+
 def get_economic_calendar(cfg: Config, days_ahead: int = 7) -> list[dict[str, Any]]:
     """Upcoming high-impact US macro events in the next ``days_ahead`` days.
 
     Per-release FRED dates (CPI, jobs, PPI, GDP, PCE, retail) + the FOMC
-    schedule. Shape: ``[{date, event, impact, previous, estimate}]``. Returns
-    [] (gate fails open) when the FRED key is absent.
+    schedule. Each event's ``date`` is a tz-aware ISO timestamp at its typical
+    Eastern release time (FOMC 14:00 ET; data releases 08:30 ET) so the
+    macro-blackout gate's 6h window aligns with reality. Shape:
+    ``[{date, event, impact, previous, estimate}]``. Returns [] (gate fails
+    open) when the FRED key is absent.
     """
     today = datetime.now(timezone.utc).date()
     horizon = today + timedelta(days=days_ahead)
@@ -213,7 +235,8 @@ def get_economic_calendar(cfg: Config, days_ahead: int = 7) -> list[dict[str, An
             continue
         if today <= dt <= horizon:
             events.append({
-                "date": d, "event": "FOMC Meeting (Federal Funds Rate decision)",
+                "date": _et_timestamp(d, 14, 0),  # FOMC announcement ~2pm ET
+                "event": "FOMC Meeting (Federal Funds Rate decision)",
                 "impact": "High", "previous": None, "estimate": None,
             })
 
@@ -235,7 +258,8 @@ def get_economic_calendar(cfg: Config, days_ahead: int = 7) -> list[dict[str, An
                         continue
                     if today <= dt <= horizon:
                         events.append({
-                            "date": date_str, "event": label,
+                            "date": _et_timestamp(date_str, 8, 30),  # data releases 8:30 ET
+                            "event": label,
                             "impact": "High", "previous": None, "estimate": None,
                         })
             except Exception as exc:  # noqa: BLE001
