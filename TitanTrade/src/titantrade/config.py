@@ -71,16 +71,23 @@ class ClaudeConfig:
 @dataclass(frozen=True)
 class GeminiConfig:
     key: str = ""
-    model: str = "gemini-2.5-flash"
+    # Primary: gemini-3.1-flash-lite — current-gen, cheaper than 2.5-flash
+    # ($0.25/$1.50 vs $0.30/$2.50 per 1M in/out) and ample for the binary
+    # CONTINUE/ABORT classification. Verified it accepts our structured-output
+    # + thinkingBudget=0 request.
+    model: str = "gemini-3.1-flash-lite"
     temperature: float = 0.1
     max_tokens: int = 2048
     # On a persistent 503 ("model overloaded" — a Google-side capacity issue,
-    # not quota), fall back to these models in order. They are separate
-    # capacity pools, so a different model usually answers immediately.
-    # "*-latest" also future-proofs against version retirement (gemini-2.0-flash
-    # was removed and now 404s). Each model gets `per_model_retries` attempts
-    # before moving on, so the whole chain stays time-bounded.
-    fallback_models: tuple[str, ...] = ("gemini-2.5-flash-lite", "gemini-flash-latest")
+    # not quota), fall back to these models in order. They span model
+    # generations and are separate capacity pools, so a different model
+    # usually answers immediately. "*-latest" also future-proofs against
+    # version retirement (gemini-2.0-flash was removed and now 404s). Each
+    # model gets `per_model_retries` attempts before moving on, so the whole
+    # chain stays time-bounded.
+    fallback_models: tuple[str, ...] = (
+        "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest",
+    )
     per_model_retries: int = 2
 
 
@@ -326,7 +333,7 @@ def load_config() -> Config:
         ),
         gemini=GeminiConfig(
             key=keys["GEMINI_KEY"],
-            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+            model=os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite"),
         ),
         trading=trading,
     )
