@@ -7,11 +7,11 @@ always monkeypatched. No real API calls. Zero tokens spent.
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
-from titantrade.daily_sentry import check_stock
+from titantrade.daily_sentry import check_stock, _call_gemini
 
 
 CONTINUE_JSON = json.dumps({
@@ -408,3 +408,56 @@ class TestSentryObservability:
         )
         # The fallback was CONTINUE (no adverse price move in the fixture)
         assert "CONTINUE" in fallback_log_lines[0]
+
+
+# ---------------------------------------------------------------------------
+# Gemini model-fallback chain (503 "model overloaded" resilience)
+# ---------------------------------------------------------------------------
+
+def _gemini_ok(text: str = '{"signal":"CONTINUE"}'):
+    m = MagicMock()
+    m.json.return_value = {
+        "candidates": [{"content": {"parts": [{"text": text}]}}],
+        "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5},
+    }
+    return m
+
+
+class TestGeminiModelFallback:
+    """On a persistent 503 on the primary model, _call_gemini falls back to
+    the next configured model (a separate capacity pool) before giving up."""
+
+    def test_falls_back_to_next_model_on_failure(self, fake_config):
+        # Primary raises (simulating exhausted 503 retries), fallback succeeds.
+        calls = []
+
+        def _side(method, url, **kwargs):
+            calls.append(url)
+            if len(calls) == 1:
+                raise RuntimeError("503 model overloaded")
+            return _gemini_ok()
+
+        with patch("titantrade.daily_sentry.fetch_with_retry", side_effect=_side):
+            out = _call_gemini("prompt", fake_config)
+
+        assert out == '{"signal":"CONTINUE"}'
+        assert len(calls) == 2                      # primary + 1 fallback
+        assert fake_config.gemini.model in calls[0]  # tried primary first
+        assert fake_config.gemini.fallback_models[0] in calls[1]  # then fallback
+
+    def test_raises_when_all_models_fail(self, fake_config):
+        with patch(
+            "titantrade.daily_sentry.fetch_with_retry",
+            side_effect=RuntimeError("503 model overloaded"),
+        ) as m:
+            with pytest.raises(RuntimeError):
+                _call_gemini("prompt", fake_config)
+        # primary + all fallbacks attempted
+        assert m.call_count == 1 + len(fake_config.gemini.fallback_models)
+
+    def test_primary_success_no_fallback(self, fake_config):
+        with patch(
+            "titantrade.daily_sentry.fetch_with_retry", return_value=_gemini_ok(),
+        ) as m:
+            _call_gemini("prompt", fake_config)
+        assert m.call_count == 1  # primary answered, no fallback needed

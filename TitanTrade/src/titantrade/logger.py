@@ -10,6 +10,37 @@ from datetime import datetime, timezone
 from titantrade.config import LOGS_DIR
 
 
+class DailyJSONFileHandler(logging.FileHandler):
+    """File handler that rolls to a new ``{name}_{YYYY-MM-DD}.json`` file at UTC
+    midnight.
+
+    The plain ``FileHandler`` fixes its filename when the handler is created.
+    Loggers are created once per process (cached by ``get_logger``), so a
+    long-running process (the API container) would otherwise pile every day's
+    records into the file dated at process start. This handler re-points the
+    stream to the current date's file on the first emit after midnight,
+    preserving the one-file-per-module-per-day convention.
+    """
+
+    def __init__(self, base_name: str) -> None:
+        self._base_name = base_name
+        self._date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        super().__init__(self._path(self._date), encoding="utf-8", delay=True)
+
+    def _path(self, date_str: str):
+        return LOGS_DIR / f"{self._base_name}_{date_str}.json"
+
+    def emit(self, record: logging.LogRecord) -> None:
+        current = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if current != self._date:
+            self._date = current
+            self.baseFilename = os.fspath(self._path(current))
+            if self.stream:
+                self.stream.close()
+                self.stream = None  # FileHandler.emit reopens with the new name
+        super().emit(record)
+
+
 class JSONFormatter(logging.Formatter):
     """Emit each log record as a single JSON line."""
 
@@ -41,10 +72,9 @@ def get_logger(name: str) -> logging.Logger:
     console.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
     logger.addHandler(console)
 
-    # File handler - structured JSON, one file per module per day
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    log_file = LOGS_DIR / f"{name}_{today}.json"
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    # File handler - structured JSON, one file per module per day. Rolls at
+    # UTC midnight even for a long-running process (see DailyJSONFileHandler).
+    file_handler = DailyJSONFileHandler(name)
     file_handler.setFormatter(JSONFormatter())
     logger.addHandler(file_handler)
 

@@ -74,6 +74,14 @@ class GeminiConfig:
     model: str = "gemini-2.5-flash"
     temperature: float = 0.1
     max_tokens: int = 2048
+    # On a persistent 503 ("model overloaded" — a Google-side capacity issue,
+    # not quota), fall back to these models in order. They are separate
+    # capacity pools, so a different model usually answers immediately.
+    # "*-latest" also future-proofs against version retirement (gemini-2.0-flash
+    # was removed and now 404s). Each model gets `per_model_retries` attempts
+    # before moving on, so the whole chain stays time-bounded.
+    fallback_models: tuple[str, ...] = ("gemini-2.5-flash-lite", "gemini-flash-latest")
+    per_model_retries: int = 2
 
 
 @dataclass(frozen=True)

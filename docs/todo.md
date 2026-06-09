@@ -1,5 +1,11 @@
 # TitanTrade TODO
 
+## Phase 1.23: Post-deploy log review fixes (2026-06-09) — Decision 041
+- [x] Log files roll at UTC midnight (`DailyJSONFileHandler`) — long-running container no longer piles all days into the process-start-dated file.
+- [x] Gemini 503 investigation: 506 × 503 / 0 × 429 over ~10wk = Google-side "model overloaded" capacity (not an outage, not quota). Live probe: 2.5-flash up; only retired 2.0-flash 404s.
+- [x] Gemini model-fallback chain (2.5-flash → flash-lite → flash-latest), bounded retries; existing CONTINUE-fallback safety net retained.
+- [x] +5 tests (logger rotation, Gemini fallback chain). Full suite green.
+
 ## Phase 1.22: Replace FMP with free sources (2026-06-08) — Decision 040
 Drop the €25/mo Financial Modeling Prep dependency.
 - [x] New `market_data.py` unified layer: Alpaca (bars/quotes/news), FRED (VIX/treasury/econ-calendar), Finnhub (earnings/analyst/sector). All fail-open.

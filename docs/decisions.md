@@ -1,5 +1,20 @@
 # Important Decisions Log
 
+## Decision 041: Daily log rotation + Gemini 503 model-fallback chain
+**Date**: 2026-06-09
+**Decision**: Two operational fixes from a post-deploy log review (~1 trading day after ADR 040).
+
+### Fix 1 — log files now roll at UTC midnight (`logger.py`)
+`get_logger` computed the date for the `{name}_{YYYY-MM-DD}.json` filename once, and loggers are cached per process — so the always-on API container piled every day's records into the file dated at process start (e.g. Jun-9 logs landed in `*_2026-06-08.json`). Data was never lost, but daily files didn't rotate, making log review confusing. New `DailyJSONFileHandler` re-points the stream to the current date's file on the first emit after midnight, preserving the one-file-per-module-per-day convention. (2 new tests.)
+
+### Fix 2 — Gemini model-fallback chain (`daily_sentry._call_gemini`, `config.py`)
+**Investigation** (the operator suspected a week-long Gemini outage): across ~10 weeks of logs there were **506 × HTTP 503 and zero 429** — i.e. purely Google-side "model overloaded" capacity errors on `gemini-2.5-flash`, never our quota/rate limit. A live multi-model probe found 2.5-flash **up (4/4)** alongside flash-lite / flash-latest / 2.5-pro; only the retired `gemini-2.0-flash` is gone (404). So it is **not an outage** — it's intermittent 503 spikes (worst sustained patch was mid-April at 44-57/day; recent days 0-23 retries with 0-2 actual check failures). A [Google AI dev-forum](https://discuss.ai.google.dev/t/frequent-503-the-model-is-overloaded-errors-on-gemini-2-5-flash/103550) search confirms 503 is a known, widespread, all-tiers capacity issue with ~5-15min recovery, and the recommended mitigation is retry + **switch to an alternate model** (separate capacity pool).
+**Fix**: `_call_gemini` now tries the primary model then falls back through `cfg.gemini.fallback_models` (default `gemini-2.5-flash-lite` → `gemini-flash-latest`), each with `per_model_retries` (2) bounded attempts. A 503 on the primary now usually answers immediately on a different pool instead of degrading to the CONTINUE fallback. The existing 5-attempt backoff and the final fall-back-to-CONTINUE (broker stops still protect) remain as the safety net. `-latest` in the chain also future-proofs against version retirement (the 2.0-flash 404 trap). (3 new tests.)
+
+**Why not other options**: a paid tier / Vertex doesn't fix 503 (it's not quota — affects all tiers); switching the whole sentry to another provider is disproportionate given the low real impact (retries + safe fallback already keep it functional). The model-fallback chain is free, low-risk, and directly addresses the failures.
+
+**Validation**: full suite green (+5 tests); ruff clean. Diagnosis done against the live paper deployment + web search.
+
 ## Decision 001: Dual-AI Architecture (Claude + Gemini)
 **Date**: 2026-03-29
 **Decision**: Use Claude for weekly deep analysis and Gemini Flash for daily sentiment checks.

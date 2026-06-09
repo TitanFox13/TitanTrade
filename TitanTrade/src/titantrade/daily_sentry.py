@@ -240,11 +240,14 @@ def _call_gemini(prompt: str, cfg: Config, cost_label: str = "") -> str:
     the sentry fields we expect. Also disables ``thinking`` tokens, which
     on gemini-2.5-flash otherwise burn hundreds of tokens for a trivial
     classification task.
+
+    Resilience: Gemini Flash returns frequent 503 "model overloaded" errors
+    (a Google-side capacity issue affecting all tiers, ~5-15min windows). We
+    try the primary model and, on a persistent failure, fall back to alternate
+    models (``cfg.gemini.fallback_models``) — separate capacity pools that
+    usually answer immediately. If every model fails, the caller's existing
+    fall-back-to-CONTINUE keeps the sentry safe (broker stops still protect).
     """
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta"
-        f"/models/{cfg.gemini.model}:generateContent"
-    )
     params = {"key": cfg.gemini.key}
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -260,29 +263,60 @@ def _call_gemini(prompt: str, cfg: Config, cost_label: str = "") -> str:
         },
     }
 
-    resp = fetch_with_retry("POST", url, params=params, json_body=body)
-    data = resp.json()
+    # Primary model first, then any configured fallbacks (de-duplicated).
+    models: list[str] = [cfg.gemini.model]
+    for m in cfg.gemini.fallback_models:
+        if m not in models:
+            models.append(m)
 
-    # Log token usage from Gemini response metadata
-    usage_meta = data.get("usageMetadata", {})
-    input_tokens = usage_meta.get("promptTokenCount", 0)
-    output_tokens = usage_meta.get("candidatesTokenCount", 0)
-    if input_tokens or output_tokens:
-        log_cost(
-            service="gemini",
-            model=cfg.gemini.model,
-            description=cost_label or "Gemini API call",
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            run_type="daily_sentry",
+    last_exc: Exception | None = None
+    for idx, model in enumerate(models):
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta"
+            f"/models/{model}:generateContent"
+        )
+        try:
+            resp = fetch_with_retry(
+                "POST", url, params=params, json_body=body,
+                max_retries=cfg.gemini.per_model_retries,
+            )
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if idx + 1 < len(models):
+                log.warning(
+                    f"Gemini model {model} failed ({exc}); "
+                    f"falling back to {models[idx + 1]}"
+                )
+            continue
+
+        data = resp.json()
+        if idx > 0:
+            log.warning(
+                f"Gemini primary model unavailable — answered via fallback {model}"
+            )
+
+        usage_meta = data.get("usageMetadata", {})
+        input_tokens = usage_meta.get("promptTokenCount", 0)
+        output_tokens = usage_meta.get("candidatesTokenCount", 0)
+        if input_tokens or output_tokens:
+            log_cost(
+                service="gemini",
+                model=model,
+                description=cost_label or "Gemini API call",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                run_type="daily_sentry",
+            )
+
+        return (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
         )
 
-    return (
-        data.get("candidates", [{}])[0]
-        .get("content", {})
-        .get("parts", [{}])[0]
-        .get("text", "")
-    )
+    # Every model failed — let the caller's fallback handle it.
+    raise last_exc if last_exc else RuntimeError("Gemini call failed (no models)")
 
 
 def _format_position_context(position: dict[str, Any] | None) -> str:
