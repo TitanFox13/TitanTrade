@@ -20,7 +20,8 @@ SECTOR_MAP = {
     "CRWD": "Technology", "ANET": "Technology",
     "LLY": "Healthcare", "DXCM": "Healthcare", "HCA": "Healthcare",
     "JPM": "Financials", "GS": "Financials",
-    "DVN": "Energy", "FANG": "Energy",
+    "DVN": "Energy",
+    "WMT": "Consumer Staples",
     "URI": "Industrials", "GE": "Industrials",
     "DASH": "Consumer Discretionary", "DECK": "Consumer Discretionary",
     "FCX": "Materials", "EQIX": "Real Estate",
@@ -39,7 +40,8 @@ def run_backtest(
     end_date: str | None = None,
     thesis_interval_days: int = 7,
     use_confidence_scaling: bool = False,
-    strategy_v2: bool = False,
+    strategy_v2: bool = True,
+    sim_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run a full backtest simulation.
 
@@ -53,6 +55,15 @@ def run_backtest(
         use_confidence_scaling: If True, scale position size by confidence
             (0.7x at 0.70 confidence to 1.3x at 1.00). Defaults to False so
             pre-existing backtest calls behave identically.
+        strategy_v2: Defaults to True so the backtest mirrors the LIVE executor
+            (near-market entries, ATR trailing stops, TP1 partial exits,
+            pyramiding, always-on SPY core). Set False for the legacy v1
+            dip-buy strategy (kept only for the confidence-scaling A/B study).
+        sim_overrides: Optional dict of PortfolioSimulator kwargs to override
+            (e.g. {"trailing_atr_multiplier": 3.0, "core_allocation_pct": 0.0}).
+            Used for structural A/B and robustness studies. Do NOT include
+            initial_capital / use_confidence_scaling / strategy_v2 (passed
+            explicitly).
     """
     if tickers is None:
         tickers = list(SECTOR_MAP.keys())[:15]
@@ -88,6 +99,7 @@ def run_backtest(
         initial_capital=initial_capital,
         use_confidence_scaling=use_confidence_scaling,
         strategy_v2=strategy_v2,
+        **(sim_overrides or {}),
     )
 
     # Track thesis generation schedule
@@ -149,6 +161,8 @@ def run_backtest(
             "trading_days": len(sorted_dates),
             "thesis_interval_days": thesis_interval_days,
             "use_confidence_scaling": use_confidence_scaling,
+            "strategy_v2": strategy_v2,
+            "sim_overrides": sim_overrides or {},
         },
         "metrics": metrics,
         "trade_count": len(sim.trade_log),
@@ -171,14 +185,17 @@ def run_ab_comparison(
 
     This lets you empirically validate whether the 0.7x-1.3x confidence curve
     beats the flat 10% baseline on your historical data.
+
+    Pinned to the legacy v1 strategy: v2 force-enables confidence scaling, so
+    an A/B toggle on the scaling flag would compare identical arms there.
     """
     baseline = run_backtest(
         data_dir, tickers, initial_capital, start_date, end_date,
-        thesis_interval_days, use_confidence_scaling=False,
+        thesis_interval_days, use_confidence_scaling=False, strategy_v2=False,
     )
     scaled = run_backtest(
         data_dir, tickers, initial_capital, start_date, end_date,
-        thesis_interval_days, use_confidence_scaling=True,
+        thesis_interval_days, use_confidence_scaling=True, strategy_v2=False,
     )
 
     bm = baseline.get("metrics", {})

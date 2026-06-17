@@ -300,7 +300,11 @@ def trigger_backtest() -> dict:
         from .backtest.engine import run_backtest
         cfg = load_config()
         data_dir = str(DATA_DIR / "historical")
-        result = run_backtest(data_dir=data_dir, tickers=cfg.trading.watchlist)
+        # strategy_v2=True (the default) mirrors the live executor; pinned
+        # explicitly so the dashboard never silently runs the legacy path.
+        result = run_backtest(
+            data_dir=data_dir, tickers=cfg.trading.watchlist, strategy_v2=True
+        )
         # Save results to state for the app to display
         results_path = STATE_DIR / "backtest_results.json"
         with open(results_path, "w") as f:

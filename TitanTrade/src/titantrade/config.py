@@ -63,9 +63,18 @@ class FinnhubConfig:
 @dataclass(frozen=True)
 class ClaudeConfig:
     key: str = ""
-    model: str = "claude-sonnet-4-20250514"
+    # The weekly analyst is the strategy's alpha source — run the most capable
+    # model (ADR 050). Previous default claude-sonnet-4-20250514 was RETIRED
+    # (404) on 2026-06-15; it had to move off it. Opus 4.8 uses adaptive
+    # thinking (see weekly_analyst._call_claude).
+    model: str = "claude-opus-4-8"
+    # Retained for the legacy Sonnet path; NOT sent to Opus 4.8/4.7 — sampling
+    # params are removed there and return 400. Opus steers via adaptive
+    # thinking + the (detailed) prompt instead.
     temperature: float = 0.3
-    max_tokens: int = 8192
+    # Headroom for adaptive-thinking tokens + JSON output; kept <=16K so the
+    # SDK doesn't require streaming for the non-streaming analyst call.
+    max_tokens: int = 16000
 
 
 @dataclass(frozen=True)
@@ -93,21 +102,32 @@ class GeminiConfig:
 
 @dataclass(frozen=True)
 class TradingSettings:
+    # 15 names across 9 sectors. FANG dropped (0.86 corr with DVN — redundant
+    # oil & gas E&P, one bet in two slots); WMT added as a true defensive
+    # (Consumer Staples, beta ~0.46, ~0.17 avg corr to the rest) so the overlay
+    # has something to rotate INTO in a risk-off, not just cash (ADR 049).
     watchlist: list[str] = field(default_factory=lambda: [
         "CRWD", "ANET", "LLY", "DXCM", "HCA",
-        "JPM", "GS", "DVN", "FANG", "URI",
+        "JPM", "GS", "DVN", "WMT", "URI",
         "GE", "DASH", "DECK", "FCX", "EQIX",
     ])
     risk_per_trade: float = 0.10
     trading_mode: str = "paper"
     stop_loss_pct: float = 0.05
     trailing_trigger_pct: float = 0.05   # Activate trailing stop after 5% gain
-    # ATR-based trailing distance. Set to 2.5 ATRs below HWM by default — gives
-    # volatility room so we don't crystallize winners on noise. A 3% fixed
-    # trail (the prior default) stopped a 25% URI winner on first dip in
-    # production. Falls back to ``trailing_distance_pct`` only when ATR
-    # isn't available.
-    trailing_atr_multiplier: float = 2.5
+    # ATR-based trailing distance below HWM — gives volatility room so we don't
+    # crystallize winners on noise. A 3% fixed trail (the original default)
+    # stopped a 25% URI winner on first dip in production. Falls back to
+    # ``trailing_distance_pct`` only when ATR isn't available.
+    #
+    # Widened 2.5 -> 3.0 (ADR 048): a regime-segmented backtest over a full
+    # 2021-2026 cycle — including the real 2022 bear (SPY -25%) — showed wider
+    # trailing lets winners run (bull capture up materially) with NO downside
+    # cost: in the bear the trailing isn't the binding exit (the initial stop +
+    # defensive thesis are), so the 2022 result was flat-to-better and max
+    # drawdown never rose. 3.0 is a conservative step; 3.5 backtested better
+    # still but looked like a path-dependent peak (4.5 reverted), so not chased.
+    trailing_atr_multiplier: float = 3.0
     trailing_distance_pct: float = 0.05  # Fallback %-trail if ATR missing (was 3%, now 5%)
     # Take-profit tranche: at this fraction of the entry→TP distance, sell
     # ``tp1_fraction`` of the position and raise the stop to breakeven.
@@ -329,7 +349,7 @@ def load_config() -> Config:
         data_provider=os.environ.get("DATA_PROVIDER", "native").strip() or "native",
         claude=ClaudeConfig(
             key=keys["CLAUDE_KEY"],
-            model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+            model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-8"),
         ),
         gemini=GeminiConfig(
             key=keys["GEMINI_KEY"],

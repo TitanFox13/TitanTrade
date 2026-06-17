@@ -1,5 +1,41 @@
 # TitanTrade TODO
 
+## Phase 1.27: Analyst model — retired Sonnet 4 → Opus 4.8 + adaptive thinking (2026-06-17) — Decision 050
+🔴 **URGENT — deploy before Sunday 2026-06-21.**
+- [x] Found prod-breaking bug: analyst model `claude-sonnet-4-20250514` **404s (retired 2026-06-15)**; confirmed via Models API. Next weekly run (Sun Jun 21) would 404 → no thesis → orphan-close liquidates ALL positions.
+- [x] Switched to `claude-opus-4-8` + adaptive thinking (analyst is the alpha source; cost delta ~$2-5/mo, trivial). Dropped `temperature` (400s on Opus); added refusal handling + thinking-aware text extraction; `max_tokens` 8192→16000.
+- [x] Fixed `cost_logger` pricing (added opus-4-8 $5/$25 + current Claude/Gemini; retired-Sonnet entry was missing → historical logged cost ran ~1.5× high on the $5/$15 default).
+- [x] Validated end-to-end with a ~$0.001 live probe (SDK 0.86 + opus-4-8 + adaptive thinking OK). +3 unit tests; 476 green; ruff clean. Prompts unchanged (they're solid).
+- [ ] **DEPLOY: rebuild + restart the API container** (`docker compose build api && docker compose up -d api`) before the Sun 16:00 ET `sunday_full` job. This is the one change that can't wait for a convenient window.
+
+## Phase 1.26: Watchlist tweak — FANG -> WMT (2026-06-17) — Decision 049
+- [x] Beta/correlation analysis of the 15 names: well-built (beta 0.30–1.85, 8 sectors), only two redundant pairs (DVN+FANG 0.86, JPM+GS 0.79).
+- [x] Dropped **FANG** (redundant with held DVN, and not currently held → no forced sell); added **WMT** (Consumer Staples, beta 0.46, 0.17 avg corr — defensive ballast that still trends, so the momentum overlay will use it). Now 15 names / 9 sectors.
+- [x] Decided NOT to add mega-cap tech — the 30% SPY core already holds Mag-7; overlay should complement the core, not duplicate it.
+- [x] Applied to `config.py` default + backtest `SECTOR_MAP`; ADR 049.
+- [ ] **Not live** — update `data/watchlist.json` on the server (Flutter watchlist screen or direct) in a deploy window to activate. Watchlist changes can't be backtested (survivorship); judge on forward paper performance.
+
+## Phase 1.25: Widen trailing ATR multiplier 2.5 -> 3.0 (2026-06-17) — Decision 048
+Goal: more upside in rallies without losing the downside protection. Trailing width is the asymmetric lever (only affects winners; losers exit at the unchanged initial stop).
+- [x] Downloaded a real 2021-2026 dataset (1400 bars incl. the 2022 −25% bear) so the test spans a full cycle, not just a bull.
+- [x] Regime test: wider trailing improves bull (full cycle +32%→+58% at 3.5×) and the 2022 bear is flat-to-better with no rise in max drawdown. Beyond 3.5× the bear column is identical → trailing isn't the binding exit in a bear, so it can't add downside risk.
+- [x] Chose **3.0** (conservative), not 3.5: 3.5 was a path-dependent peak (4.5× reverted). Trust the direction, not the magnitude.
+- [x] Applied to live config (`config.py`) + backtest simulator default; ADR 048; 473 tests green; ruff clean.
+- [ ] **Staged, NOT deployed** — production stays on 2.5 until a deploy window. Account is paper, so deploying = the forward test. Watch live trailing behavior + bull capture after deploy.
+
+## Phase 1.24: Backtest defaults to the live strategy (2026-06-17) — Decision 047
+A backtest of the 3-yr data produced only 7 trades / fake 0% win rate. Signal source was fine (500 BULLISH signals); the engine defaulted to the legacy v1 dip-buy path production no longer runs.
+- [x] Root-caused: `run_backtest` defaulted to `strategy_v2=False` (legacy dip-buy); v1 limit orders rarely fill on momentum signals + never expired (stuck order blocks ticker); `_fill_buy` set TP to the entry price (→ instant break-even "take profit") and overwrote tranche-1 on the second fill.
+- [x] `strategy_v2=True` is now the default (CLI `backtest`, dashboard action, direct calls); recorded in result `config`; `--legacy`/`--v1` opts into the old path.
+- [x] v1 correctness fixes: stop/TP carried from the thesis on the order, second tranche accumulates (no overwrite), unfilled limit orders expire after `limit_order_ttl_days` (10).
+- [x] `run_ab_comparison` pinned to v1 (v2 force-enables confidence scaling → identical A/B arms).
+- [x] Verified on real data: default 7 → **243 trades, 63% win, PF 1.41**; stress window (SPY −19%) only **−5%**; legacy 7 → **161 trades, 56% win** with real P&L. **472 tests green (+6)**.
+- [ ] Backtest measures risk/execution mechanics only (synthetic theses, no LLM, survivorship-biased to today's watchlist) — NOT the AI alpha or "real probability of success". Forward paper track remains the only clean read.
+- [x] `run_backtest(sim_overrides=...)` pass-through added so mechanical knobs (trailing ATR mult, core %, pyramid/TP1, sizing, cash reserve) are A/B-able. Recorded in result config. (+1 test, 473 total.)
+- [x] Structural study run (Decisions-pending). Key findings on the synthetic-signal/bull-window backtest: (1) **pyramiding is value-destructive** — pyramid OFF beats ON on return/Sortino/maxDD/PF (PF 1.90 vs 1.41); TP1 helps. (2) trailing-ATR has a **fragility cliff below 2.5×** (whipsaw); current 2.5 sits on the knee, 3.0 lowers maxDD. (3) the **SPY core does ~all the work — the stock-picking overlay is a net loser standalone (−10%, PF 0.40)**, i.e. the whole edge rides on Claude's signal quality vs a technical baseline. (4) defensive profile is **consistent across regimes** (positive every year, contained DD, −5% vs SPY −19% in the 2025 correction).
+- [x] **Investigated pyramiding on LIVE trades** (5 adds: GE/GS/FCX helped, DXCM/DVN hurt). Net **+$56 on $18k deployed (+0.3%) — a wash**, 3/5 positive. Does NOT confirm the backtest's "pyramid hurts" — the backtest pyramids into noise (synthetic signals), live pyramids into Claude's picks. **Decision: keep pyramiding on**; backtest mechanical findings don't transfer to the AI signal source. (n=5, all still open/unrealized <3wk → preliminary; revisit at ~15-20 adds with realized exits.)
+- [ ] Revisit pyramiding once ~15-20 live adds exist with realized exits; watch concentration risk (backtest showed +2pt maxDD from pyramiding).
+
 ## Phase 1.23: Post-deploy log review fixes (2026-06-09) — Decision 041
 - [x] Log files roll at UTC midnight (`DailyJSONFileHandler`) — long-running container no longer piles all days into the process-start-dated file.
 - [x] Gemini 503 investigation: 506 × 503 / 0 × 429 over ~10wk = Google-side "model overloaded" capacity (not an outage, not quota). Live probe: 2.5-flash up; only retired 2.0-flash 404s.

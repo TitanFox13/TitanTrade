@@ -399,10 +399,13 @@ def _call_claude(system: str, user: str, cfg: Config, cost_label: str = "") -> s
     """Make a Claude API call, log token usage, and return the raw response text."""
     client = anthropic.Anthropic(api_key=cfg.claude.key)
 
+    # Opus 4.8: adaptive thinking on (sharpens the 2-pass reasoning that is the
+    # strategy's alpha source); effort defaults to "high". No temperature —
+    # sampling params are removed on Opus 4.8/4.7 and return 400. See ADR 050.
     message = client.messages.create(
         model=cfg.claude.model,
         max_tokens=cfg.claude.max_tokens,
-        temperature=cfg.claude.temperature,
+        thinking={"type": "adaptive"},
         system=system,
         messages=[{"role": "user", "content": user}],
     )
@@ -418,7 +421,25 @@ def _call_claude(system: str, user: str, cfg: Config, cost_label: str = "") -> s
         run_type="weekly_analyst",
     )
 
-    return message.content[0].text
+    # A safety classifier can decline a request (stop_reason="refusal") with no
+    # text block — surface it rather than IndexError. And with adaptive thinking
+    # the response may lead with thinking block(s), so content[0] is not
+    # necessarily the answer: pull the first text block explicitly.
+    if message.stop_reason == "refusal":
+        raise RuntimeError(
+            f"Claude refused the request ({cost_label or 'analyst'}): "
+            f"{getattr(message, 'stop_details', None)}"
+        )
+    text = next(
+        (b.text for b in message.content if getattr(b, "type", None) == "text"),
+        None,
+    )
+    if text is None:
+        raise RuntimeError(
+            f"Claude returned no text block ({cost_label or 'analyst'}); "
+            f"stop_reason={message.stop_reason}"
+        )
+    return text
 
 
 def analyze_stock(

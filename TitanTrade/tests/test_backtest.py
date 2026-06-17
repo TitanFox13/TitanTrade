@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-import tempfile
 from pathlib import Path
-
-import pytest
 
 from titantrade.backtest.engine import run_backtest
 from titantrade.backtest.metrics import compute_metrics
@@ -217,3 +214,86 @@ class TestConfidenceScalingInBacktest:
         for key in ("total_return_pct", "sharpe_ratio", "max_drawdown_pct"):
             row = cmp[key]
             assert "baseline" in row and "scaled" in row and "delta" in row
+
+
+class TestStrategyDefault:
+    """The backtest must default to the production-faithful v2 strategy and
+    actually execute trades. Regression guard for the bug where the default
+    legacy path generated almost no trades (~7 over 3 years of data).
+    """
+
+    def _write_fixture(self, tmp_path: Path) -> str:
+        for ticker in ["TEST1", "TEST2", "SPY"]:
+            trend = 0.15 if ticker != "TEST2" else 0.08
+            (tmp_path / f"{ticker}.json").write_text(json.dumps(_make_bars(260, 100.0, trend)))
+        return str(tmp_path)
+
+    def test_default_is_strategy_v2(self, tmp_path):
+        result = run_backtest(data_dir=self._write_fixture(tmp_path), tickers=["TEST1", "TEST2"])
+        assert result["config"]["strategy_v2"] is True
+
+    def test_default_executes_trades(self, tmp_path):
+        """The headline failure: the old default barely traded. v2 must fill."""
+        result = run_backtest(data_dir=self._write_fixture(tmp_path), tickers=["TEST1", "TEST2"])
+        assert result["trade_count"] >= 5
+
+    def test_legacy_path_still_reachable(self, tmp_path):
+        result = run_backtest(
+            data_dir=self._write_fixture(tmp_path), tickers=["TEST1", "TEST2"],
+            strategy_v2=False,
+        )
+        assert result["config"]["strategy_v2"] is False
+        assert "error" not in result
+
+    def test_sim_overrides_reach_simulator(self, tmp_path):
+        """Structural A/B knob: sim_overrides must flow into the simulator and
+        be recorded in the result config for traceability."""
+        overrides = {"core_allocation_pct": 0.0, "trailing_atr_multiplier": 3.0}
+        result = run_backtest(
+            data_dir=self._write_fixture(tmp_path), tickers=["TEST1", "TEST2"],
+            sim_overrides=overrides,
+        )
+        assert result["config"]["sim_overrides"] == overrides
+        assert "error" not in result
+
+
+class TestV1FillCorrectness:
+    """The legacy v1 fill path had two correctness bugs: it set the take-profit
+    to the entry limit price (→ instant break-even 'take profit', fake 0% win
+    rate) and overwrote an existing position when the second tranche filled
+    (silently dropping tranche-1 shares).
+    """
+
+    def _order(self, qty, limit, stop, tp):
+        from titantrade.backtest.simulator import SimOrder
+        return SimOrder(
+            ticker="TEST", side="buy", order_type="limit", qty=qty,
+            limit_price=limit, stop_price=stop, tp_price=tp, placed_date="2025-01-01",
+        )
+
+    def test_fill_uses_thesis_tp_not_entry_price(self):
+        sim = PortfolioSimulator(initial_capital=100_000)
+        sim._fill_buy(self._order(100, 100.0, 95.0, 120.0), 100.0, "2025-01-02")
+        pos = sim.positions["TEST"]
+        assert pos.take_profit_price == 120.0      # thesis TP, not the entry limit
+        assert pos.stop_loss_price == 95.0          # thesis stop, not recomputed
+
+    def test_second_tranche_accumulates_not_overwrites(self):
+        sim = PortfolioSimulator(initial_capital=1_000_000)
+        sim._fill_buy(self._order(60, 100.0, 95.0, 120.0), 100.0, "2025-01-02")
+        sim._fill_buy(self._order(40, 98.0, 95.0, 120.0), 98.0, "2025-01-03")
+        pos = sim.positions["TEST"]
+        assert pos.shares == 100                    # 60 + 40, not overwritten to 40
+        # entry price is the share-weighted average of the two fills (w/ slippage)
+        assert 98.0 < pos.entry_price < 100.5
+
+    def test_unfilled_limit_order_expires(self):
+        """A dip-buy limit that never fills must expire instead of blocking
+        the ticker forever."""
+        sim = PortfolioSimulator(initial_capital=100_000)
+        sim.pending_buys.append(self._order(10, 90.0, 85.0, 110.0))  # placed 2025-01-01
+        # A day well past the TTL with price never reaching the limit
+        bar = {"open": 100, "high": 101, "low": 99, "close": 100, "volume": 1e6}
+        sim.process_day("2025-02-01", {"TEST": bar})
+        assert len(sim.pending_buys) == 0
+        assert "TEST" not in sim.positions

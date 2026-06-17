@@ -140,11 +140,11 @@ class TestTrailingStopRatchet:
         position_up_6pct, thesis_with_stop, existing_stop_order,
         fake_config, tmp_state_dir,
     ):
-        """ATR-based trailing: stop sits 2.5x ATR below HWM (configurable
-        via trailing_atr_multiplier). With ATR=$4 and HWM=$196.63, stop
-        should be at HWM - 10 = $186.63 (rounded).
+        """ATR-based trailing: stop sits trailing_atr_multiplier x ATR below
+        HWM. ATR=$2 (chosen so the ATR trail is the binding constraint, clear
+        of the breakeven floor) and HWM=$196.63 → stop at HWM - mult*2.
         """
-        atr = 4.0
+        atr = 2.0
         manage_trailing_stop(
             "AAPL", thesis_with_stop, position_up_6pct,
             [existing_stop_order], fake_config,

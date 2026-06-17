@@ -35,7 +35,8 @@ def main() -> None:
         print("  resubmit         Resubmit expired bracket orders")
         print("  full             Full pipeline (fetch -> analyze -> sentry -> execute)")
         print("  backtest [dir]   Run backtest on historical data (default: data/historical)")
-        print("  backtest-ab [dir]  A/B compare baseline vs confidence-scaled sizing")
+        print("                   mirrors the live strategy; add --legacy for the old dip-buy path")
+        print("  backtest-ab [dir]  A/B compare baseline vs confidence-scaled sizing (legacy strategy)")
         print("  download-history [dir]  Download OHLCV from FMP for backtesting")
         sys.exit(0)
 
@@ -46,11 +47,13 @@ def main() -> None:
 
         data_dir = sys.argv[2] if len(sys.argv) > 2 else "data/historical"
         use_scaling = "--confidence-scaling" in sys.argv
-        v2 = "--v2" in sys.argv
+        # v2 (production-faithful) is the default; --legacy/--v1 opts into the
+        # old dip-buy strategy. --v2 still accepted as an explicit no-op.
+        legacy = "--legacy" in sys.argv or "--v1" in sys.argv
         result = run_backtest(
             data_dir=data_dir,
             use_confidence_scaling=use_scaling,
-            strategy_v2=v2,
+            strategy_v2=not legacy,
         )
         print_summary(result)
         return

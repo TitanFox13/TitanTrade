@@ -7,11 +7,12 @@ Zero tokens are spent running these tests.
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from titantrade.weekly_analyst import analyze_stock, rank_and_select
+from titantrade.weekly_analyst import _call_claude, analyze_stock, rank_and_select
 
 
 VALID_THESIS_JSON = json.dumps({
@@ -164,3 +165,52 @@ class TestEarningsBlackoutNarrowed:
         earnings_date = (dt.date.today() + dt.timedelta(days=1)).isoformat()
         blocked, _ = is_earnings_blocked("AAPL", earnings_date)
         assert blocked is True
+
+
+def _fake_msg(content, stop_reason="end_turn"):
+    return SimpleNamespace(
+        content=content,
+        stop_reason=stop_reason,
+        stop_details=None,
+        usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+    )
+
+
+class TestCallClaudeOpusAdaptive:
+    """_call_claude internals for the Opus 4.8 + adaptive-thinking path (ADR 050).
+
+    Existing analyst tests patch _call_claude itself, so these are the only
+    tests that exercise the real request construction + response parsing.
+    Still zero real API calls — anthropic.Anthropic is mocked.
+    """
+
+    def test_extracts_text_block_after_thinking(self, fake_config):
+        # Adaptive thinking can lead with thinking block(s); content[0] is NOT
+        # the answer. The text block must be pulled explicitly.
+        thinking = SimpleNamespace(type="thinking", thinking="weighing the setup...")
+        text = SimpleNamespace(type="text", text='{"thesis":"BULLISH"}')
+        client = MagicMock()
+        client.messages.create.return_value = _fake_msg([thinking, text])
+        with patch("titantrade.weekly_analyst.anthropic.Anthropic", return_value=client), \
+             patch("titantrade.weekly_analyst.log_cost"):
+            out = _call_claude("sys", "user", fake_config, "pass1")
+        assert out == '{"thesis":"BULLISH"}'
+
+    def test_requests_adaptive_thinking_and_no_temperature(self, fake_config):
+        text = SimpleNamespace(type="text", text="{}")
+        client = MagicMock()
+        client.messages.create.return_value = _fake_msg([text])
+        with patch("titantrade.weekly_analyst.anthropic.Anthropic", return_value=client), \
+             patch("titantrade.weekly_analyst.log_cost"):
+            _call_claude("sys", "user", fake_config, "pass1")
+        kwargs = client.messages.create.call_args.kwargs
+        assert kwargs["thinking"] == {"type": "adaptive"}
+        assert "temperature" not in kwargs  # 400s on Opus 4.8
+
+    def test_refusal_raises(self, fake_config):
+        client = MagicMock()
+        client.messages.create.return_value = _fake_msg([], stop_reason="refusal")
+        with patch("titantrade.weekly_analyst.anthropic.Anthropic", return_value=client), \
+             patch("titantrade.weekly_analyst.log_cost"):
+            with pytest.raises(RuntimeError, match="refused"):
+                _call_claude("sys", "user", fake_config, "pass1")

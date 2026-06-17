@@ -1,5 +1,110 @@
 # Important Decisions Log
 
+## Decision 050: Analyst model — retired Sonnet 4 → Opus 4.8 + adaptive thinking (URGENT prod fix)
+**Date**: 2026-06-17
+**Decision**: Switch the weekly analyst from `claude-sonnet-4-20250514` to `claude-opus-4-8` with adaptive thinking.
+
+### The bug (production-breaking)
+The weekly analyst was hardcoded to `claude-sonnet-4-20250514` (Claude Sonnet 4, May 2025). A Models-API probe confirmed that model now **returns 404 — it retired 2026-06-15**. The last successful weekly run was Jun 14 (the day before). **The next scheduled run is Sunday 2026-06-21 and would 404.** A failed analysis produces no `weekly_thesis.json`, which makes `protection.close_orphaned_positions` treat **every held position as an orphan and market-close it** (ADR 049 removal-safety mechanism) — i.e. left unfixed, the bug silently liquidates the entire portfolio on Sunday.
+
+### Why Opus 4.8 (not just any current model)
+The earlier structural study established the strategy's entire edge rides on the analyst's stock-picking quality (with weak signals the overlay was a net loser; the SPY core did all the work). The analyst is the single highest-leverage model in the system, and it runs only weekly — so the most capable model is the obvious choice. Cost delta is trivial: historical Claude usage was ~$3–4/mo; Opus 4.8 ($5/$25 per MTok) projects to ~$4–8/mo with adaptive thinking vs ~$2.5/mo for Sonnet 4.6 — a few dollars/month on a $109k book. `temperature` (was 0.3) is a non-loss: Opus 4.8 removed sampling params and steers via adaptive thinking + the (already detailed) prompt.
+
+### Changes
+- `config.py`: `claude.model` → `claude-opus-4-8` (default + `CLAUDE_MODEL` env fallback); `max_tokens` 8192 → 16000 (headroom for thinking tokens, still under the non-streaming ceiling); `temperature` retained for the legacy Sonnet path but no longer sent.
+- `weekly_analyst._call_claude`: adds `thinking={"type":"adaptive"}` (effort defaults to `high`); **drops `temperature`** (400s on Opus 4.8/4.7); adds `refusal` stop-reason handling and **thinking-aware text extraction** (adaptive thinking can lead with thinking blocks, so `content[0]` is no longer the answer — pull the first text block).
+- `cost_logger.py`: added `claude-opus-4-8` ($5/$25) and other current model prices (exact-match keys); the old table missed `claude-sonnet-4-20250514` (it fell to the $5/$15 default, which is why historical logged cost ran ~1.5× high) and had a stale Opus price.
+- Prompts themselves unchanged — they're well-built; the model was the issue.
+
+### Validation
+- A minimal (~$0.001) live probe confirmed SDK `anthropic 0.86.0` + `claude-opus-4-8` + adaptive thinking works end-to-end and returns clean JSON. No SDK bump needed.
+- +3 `_call_claude` unit tests (thinking-aware extraction, adaptive-thinking requested + no temperature, refusal raises). **476 tests green**; ruff clean.
+
+### Status — DEPLOY BEFORE SUNDAY 2026-06-21
+Unlike the other staged changes, this one is **urgent**: production still runs the retired model and will 404 on the next weekly run. Must rebuild + redeploy the API container (`docker compose build api && docker compose up -d api`) before the Sunday 16:00 ET `sunday_full` job. The Gemini sentry (`gemini-3.1-flash-lite`) is current — no change.
+
+## Decision 049: Watchlist tweak — drop FANG (redundant), add WMT (defensive)
+**Date**: 2026-06-17
+**Decision**: Replace FANG with WMT in the watchlist. Net 15 names, now across 9 sectors (adds Consumer Staples).
+
+### Why
+A correlation/beta analysis of the 15-name list (daily returns, ~500d) found:
+- The list is well-built overall — beta spans 0.30 (HCA) to 1.85 (ANET), 8 sectors, and only two redundant pairs.
+- **DVN + FANG correlate 0.86** — both oil & gas E&P tracking WTI, i.e. one bet in two slots. DVN is currently held; FANG is not — so dropping **FANG** removes the redundancy with zero forced liquidation.
+- The book had **no Consumer Staples / Utilities** — a gap for a strategy whose edge is downside protection. Of candidate defensives (WMT/PG/COST/SO/KO), **WMT** was the best fit: defensive (beta 0.46) and strongly diversifying (0.17 avg corr to the rest, max 0.28), but unlike pure low-vol names (SO/KO at ~0 beta) it actually trends — so the momentum overlay will *use* it rather than leave a dead slot. It gives the overlay something to rotate INTO in a risk-off instead of only cash.
+
+### Why NOT add mega-cap tech
+The always-on 30% SPY core already holds the Mag-7 (~30%+ of SPY). The overlay's job is to own what SPY *underweights*; adding NVDA/MSFT/etc. would double-bet the core and raise correlation, not diversify. The absence of Mag-7 is a deliberate complement-the-core choice, consistent with the defensive identity.
+
+### Caveat
+A watchlist change is **not backtest-validatable** — choosing names while knowing their history is survivorship bias (the trap avoided throughout this work). This is a forward design decision judged on philosophy (diversification, defensive ballast, liquidity, trendability), to be assessed on live paper performance.
+
+### Removal safety — what happens to an untracked ticker
+Verified for this change: removing a ticker doesn't orphan stale state. The weekly analyst only analyzes watchlist (+ hedge) tickers, so a removed name gets no new thesis; on the next cycle `protection.close_orphaned_positions` market-closes any held position with no thesis (`trigger="thesis_expired"`) and cleans its trailing state. Caveats: it's a *market* close (not a managed exit), and in the gap before it fires the position keeps only its standing broker stop (the sentry also iterates the watchlist, so it loses news monitoring). Rule of thumb: **remove a ticker only when it's flat, or accept a market-close of a held one.** FANG was confirmed flat (no position, 0 open orders, no trailing/cooldown state) — its only trace is an inert thesis entry that self-clears on the next Sunday run.
+
+### Status
+Applied to the **code default** (`config.py`) and the backtest `SECTOR_MAP`. **Not pushed to the live `data/watchlist.json`** — the running paper system keeps the old list until the operator updates it (via the Flutter watchlist screen or directly) in a deploy window.
+
+## Decision 048: Widen the trailing-stop ATR multiplier 2.5 -> 3.0 (more bull, same bear)
+**Date**: 2026-06-17
+**Decision**: Raise `trading.trailing_atr_multiplier` from 2.5 to 3.0 (live config + backtest simulator default), to capture more upside in rallies without giving up the downside protection.
+
+### Why this is the right (asymmetric) lever
+The goal was "gain more in bull without losing the bear advantage." Symmetric levers fail this: raising the SPY core 30%→45% gained bull (+24%→+32%) but *equally* worsened the stress window (−5%→−7.6%). The trailing-stop width is **structurally asymmetric** — it only governs positions already up 5%+ (winners that activated trailing). A *loser* never activates it and exits at the fixed initial stop regardless. So widening it lets winners run further **without loosening the protective stop on losers.**
+
+### Evidence (regime-segmented backtest, real 2021–2026 cycle incl. the 2022 −25% bear)
+Downloaded 1,400 trading days (2020-11 → 2026-06) so the test spans a *real* bear, not just the prior bull-only window. Per-window return / max-drawdown:
+
+| trailing | 2022 BEAR (SPY −25%) | 2021 bull | 2024 bull | FULL 21–26 (SPY +103%) |
+|---|---|---|---|---|
+| 2.5× (old) | −12.3 / DD14.9 | +17.4 / DD8.3 | +9.2 | +31.8 / DD16.8 |
+| **3.0× (new)** | −12.8 / DD15.4 | +21.2 | +10.9 | +46.1 / DD16.2 |
+| 3.5× | −10.3 / DD12.9 | +24.6 | +11.2 | +58.0 / DD16.6 |
+
+- Wider trailing **improves the bull side** (full cycle +32%→+46%→+58%) and **does not hurt the bear** — the 2022 column is flat-to-better and max drawdown never rises.
+- Beyond 3.5× the 2022-bear result is **completely flat** (identical at 4.5×/6.0×/"off"), proving the trailing **isn't the binding exit in a bear** — the initial stop + defensive thesis are. So widening it *cannot* increase downside risk; this is not a disguised "more beta" trade.
+
+### Why 3.0 and not 3.5 (where the backtest scored highest)
+3.5× scored best on the *full* sample (+58%), but a robustness check shows that peak is **noise, not signal**:
+- **Jagged response surface** (full window, fine sweep): 2.75→+49.6, 3.0→+46.1, 3.25→+54.1, 3.5→+58.0, 3.75→+47.7, **4.0→+18.3**, 4.5→+31.7. A 0.25 step swings the result 20-40 pts and 4.0 (next to the "peak") collapses — that's a dartboard, not a plateau.
+- **Split-sample argmax disagrees:** best multiplier is 3.5× full, **3.25× in 2021-23, 2.75× in 2024-26**. The peak location is an artifact of the price path, not a property of the strategy. In the recent half, 3.5× actually *underperformed* 2.75× (+41.8 vs +48.5).
+- **Selection bias:** the value that maxes a backtest is the one whose number is most luck-inflated; its forward performance is systematically worse than the backtest.
+- **Backtest under-penalizes width:** wider trailing gives back more open profit when a live winner reverses; the bull-heavy synthetic-signal sample barely charges for this.
+
+Robust takeaway = the **region** (cliff below 2.5, another above ~3.75; 2.75-3.5 all "fine"), not a point. 3.0 is a round, central, conservative pick inside the good band — chosen for robustness, not because it's uniquely optimal (2.75-3.25 would be equally defensible). The *direction* (let winners run, no downside cost) is the trustworthy finding; the precise magnitude is not.
+
+### Caveats
+Still validated on synthetic technical signals, not Claude's. But the mechanism is **signal-agnostic** (it's about *how long* to hold a winner, not *which* stocks — unlike the pyramiding finding, which was signal-dependent and didn't transfer to live). The live account is **paper**, so deploying this *is* the forward test. Reversible one-line config change.
+
+### Validation
+Full suite green (473 tests, +0 — change is parametric); ruff clean. **Staged, not deployed** — production keeps running on 2.5 until the next deploy window per the operator's "don't disturb the running system" instruction.
+
+## Decision 047: Backtest defaults to the live strategy (was silently running a broken legacy path)
+**Date**: 2026-06-17
+**Decision**: Make the production-faithful `strategy_v2` the default for every backtest entry point, and fix the correctness bugs in the legacy v1 path.
+
+### The bug
+A backtest over 3 years of data (2023-04 → 2026-05, 15 tickers) produced only **7 trades** with a nonsensical **0% win rate despite 21 take-profit exits**. The synthetic-thesis signal source was healthy — it generated **500 BULLISH signals (474 above the confidence gate)** — but the simulator executed almost none of them.
+
+### Root cause (three compounding faults, all in the legacy v1 entry path)
+1. **`run_backtest` defaulted to `strategy_v2=False`** — the legacy *dip-buy* strategy that the live executor no longer runs. The CLI `backtest` command, the dashboard action (`POST /api/actions/backtest`), and direct calls all inherited this default, so every backtest measured a strategy nobody trades.
+2. **Dip-buy limit orders rarely fill on momentum signals.** v1 places limit buys *below* market (`close × 0.995`) and waits for a pullback, but the synthetic signals are momentum/uptrend (golden cross, MACD positive) where price keeps rising. Worse, unfilled orders **never expired** and the entry loop skips any ticker with a pending order — so one stuck order blocked that ticker permanently.
+3. **`_fill_buy` set `take_profit_price` to the entry limit price** (not the thesis TP), so the rare fills instantly "took profit" at break-even → the fake 0% win rate. It also **overwrote** an existing position when the second tranche filled, silently dropping tranche-1 shares (and the cash spent on them).
+
+### Fix
+- **`strategy_v2=True` is now the default** in `run_backtest`, recorded in the result `config`, and pinned explicitly in the API action. `strategy_v2` mirrors the live executor: near-market entries, ATR trailing stops, TP1 partial exits, pyramiding, always-on SPY core.
+- CLI: `backtest` runs v2 by default; **`--legacy` / `--v1`** opts into the old path (`--v2` still accepted as a no-op).
+- **v1 correctness fixes** (kept reachable for the confidence-scaling A/B study): `_fill_buy` now takes the stop/TP from the thesis carried on the order (not the entry price), **accumulates** a second tranche instead of overwriting, and unfilled limit orders **expire** after `limit_order_ttl_days` (default 10) so a dip that never comes can't park a ticker forever.
+- `run_ab_comparison` is pinned to `strategy_v2=False` (v2 force-enables confidence scaling, which would make the A/B arms identical).
+
+### Validation
+- Default backtest on real data: **7 → 243 trades, 63% win rate, profit factor 1.41**, max DD 15.2%. In SPY's worst drawdown window (−19%) the strategy lost only **−5%** — downside protection working as designed.
+- Legacy path (`--legacy`): **7 → 161 trades, 56% win, PF 1.12** with real stop/TP exits (no more fake 0% win rate).
+- Full suite green: **472 passed (+6 new)**.
+
+### Important caveat (carried forward)
+This backtest still uses **synthetic technical theses with zero LLM calls** (`synthetic_thesis.py`) and does not replay the Gemini sentry. It validates the **risk-management and execution machinery**, NOT the AI alpha — and it is **survivorship-biased** to today's watchlist. It is *not* a measure of the live strategy's "real probability of success"; only forward out-of-sample paper/live trading is, and that needs far more than the current ~24 closed trades to be meaningful.
+
 ## Decision 041: Daily log rotation + Gemini 503 model-fallback chain
 **Date**: 2026-06-09
 **Decision**: Two operational fixes from a post-deploy log review (~1 trading day after ADR 040).

@@ -13,14 +13,19 @@ from typing import Any
 
 from titantrade.config import STATE_DIR
 
-# Approximate pricing per 1M tokens (as of 2026-03)
-# Update these when model pricing changes.
+# Approximate pricing per 1M tokens (as of 2026-06). Keys are matched EXACTLY
+# against the model string passed to log_cost — keep them in sync with the
+# model IDs in config.py. Update when model pricing changes.
 _PRICING: dict[str, dict[str, float]] = {
-    # Claude Sonnet 4
-    "claude-sonnet-4-6-20250514": {"input": 3.00, "output": 15.00},
-    # Claude Opus 4
-    "claude-opus-4-6-20260301": {"input": 15.00, "output": 75.00},
-    # Gemini Flash 2.0
+    # Claude (current)
+    "claude-opus-4-8": {"input": 5.00, "output": 25.00},
+    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
+    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
+    # Claude (retired — kept so historical cost records price correctly)
+    "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
+    # Gemini
+    "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.50},
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
     "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
 }
 

@@ -2,7 +2,8 @@
 
 ## AI Features
 
-### Two-Pass Weekly Analysis (Claude)
+### Two-Pass Weekly Analysis (Claude Opus 4.8, adaptive thinking)
+- Runs on `claude-opus-4-8` with adaptive thinking — the most capable model on the strategy's alpha source (Decision 050; replaced the retired `claude-sonnet-4-20250514`)
 - **Pass 1**: Deep per-stock analysis with fundamentals, technicals, news, and filings
 - **Pass 2**: Portfolio-aware ranking that selects top 3-5 diversified trades
 - Market context (SPY, VIX, sector rotation) injected into every analysis
@@ -52,7 +53,8 @@
 - Flutter dashboard shows sentry health badge (green healthy / orange degraded) from the same signal
 - ADJUST flow restores the previous stop on failure so held positions are never unprotected
 - Gemini structured output (`responseMimeType: application/json` + schema) + thinking disabled — valid JSON guaranteed, ~10× fewer tokens per sentry check
-- Backtest A/B runner (`python -m titantrade backtest-ab`) to empirically validate confidence-scaling against the flat baseline
+- Backtest (`python -m titantrade backtest`) mirrors the live strategy by default (near-market entries, ATR trailing, TP1, pyramiding, SPY core); `--legacy` runs the old dip-buy path. Validates risk/execution mechanics on synthetic technical theses (no LLM calls), not the AI alpha
+- Backtest A/B runner (`python -m titantrade backtest-ab`) to empirically validate confidence-scaling against the flat baseline (legacy strategy)
 
 ### Performance Feedback Loop
 - Win/loss rate tracking per ticker and overall
@@ -121,7 +123,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 
 ### Trailing Stops
 - Activates once a position gains 5%+ from entry price
-- Trails 3% below the high-water mark (ratchets up only, never down)
+- Trails 3.0× ATR below the high-water mark (ratchets up only, never down); falls back to a 5% trail when ATR is unavailable. Widened from 2.5× (Decision 048): a full-cycle backtest incl. the 2022 −25% bear showed wider trailing captures more upside in rallies with no added downside (the trailing isn't the binding exit in a bear)
 - Never trails below entry price (locks in at least breakeven)
 - Never trails below the original thesis stop (doesn't widen risk)
 - Cancels the existing stop and replaces with a higher one each execution cycle

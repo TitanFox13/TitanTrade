@@ -34,6 +34,8 @@ class SimOrder:
     qty: int
     limit_price: float | None = None
     stop_price: float | None = None
+    tp_price: float | None = None
+    placed_date: str = ""  # for limit-order expiry
 
 
 class PortfolioSimulator:
@@ -49,12 +51,13 @@ class PortfolioSimulator:
         max_sector_pct: float = 40.0,
         min_confidence: float = 0.70,
         slippage_pct: float = 0.0015,  # 0.15% realistic slippage per fill
+        limit_order_ttl_days: int = 10,  # v1 dip-buy limit orders expire after N days
         use_confidence_scaling: bool = False,
         # ---- Strategy v2 toggles (default off so existing tests/comparison pass) ----
         strategy_v2: bool = False,
         max_position_pct: float = 0.25,
         max_total_overlay_pct: float = 0.70,
-        trailing_atr_multiplier: float = 2.5,
+        trailing_atr_multiplier: float = 3.0,  # mirrors live config (ADR 048)
         core_ticker: str = "SPY",
         core_allocation_pct: float = 0.30,
         pyramid_trigger_pct: float = 0.05,
@@ -80,6 +83,7 @@ class PortfolioSimulator:
 
         self.use_confidence_scaling = use_confidence_scaling
         self.slippage_pct = slippage_pct
+        self.limit_order_ttl_days = limit_order_ttl_days
         self.initial_capital = initial_capital
         self.cash = initial_capital
         self.positions: dict[str, SimPosition] = {}
@@ -166,6 +170,12 @@ class PortfolioSimulator:
         # v2: pending_buys are placed as same-day market-style fills in
         #     _process_entries below, so this loop is mostly a no-op for v2.
         for order in list(self.pending_buys):
+            # Expire unfilled limit orders so a dip that never comes doesn't
+            # park an order forever and permanently block re-entry on that
+            # ticker (the v1 entry path skips tickers with a pending order).
+            if order.placed_date and _days_between(order.placed_date, date) > self.limit_order_ttl_days:
+                self.pending_buys.remove(order)
+                continue
             if order.ticker in bars:
                 bar = bars[order.ticker]
                 if bar["low"] <= (order.limit_price or 0):
@@ -394,15 +404,34 @@ class PortfolioSimulator:
         if cost > self.cash:
             return
         self.cash -= cost
-        self.positions[order.ticker] = SimPosition(
-            ticker=order.ticker,
-            shares=order.qty,
-            entry_price=price,
-            entry_date=date,
-            stop_loss_price=round(price * (1 - self.stop_loss_pct), 2),
-            take_profit_price=order.limit_price,  # Will be overwritten
-            high_water_mark=price,
-        )
+
+        # Stop/TP come from the thesis (carried on the order), NOT the entry
+        # limit price. The old code set take_profit_price=order.limit_price,
+        # so a fill instantly "took profit" at break-even — the source of the
+        # fake 0% win rate in the legacy v1 backtest.
+        stop = order.stop_price or round(price * (1 - self.stop_loss_pct), 2)
+        tp = order.tp_price
+
+        existing = self.positions.get(order.ticker)
+        if existing:
+            # Second tranche of a two-tranche entry: accumulate and average up
+            # rather than overwrite (which silently dropped tranche-1 shares).
+            total_shares = existing.shares + order.qty
+            existing.entry_price = round(
+                (existing.shares * existing.entry_price + order.qty * price) / total_shares, 4
+            )
+            existing.shares = total_shares
+            existing.high_water_mark = max(existing.high_water_mark, price)
+        else:
+            self.positions[order.ticker] = SimPosition(
+                ticker=order.ticker,
+                shares=order.qty,
+                entry_price=price,
+                entry_date=date,
+                stop_loss_price=stop,
+                take_profit_price=tp,
+                high_water_mark=price,
+            )
         self.trade_log.append({
             "date": date, "ticker": order.ticker, "action": "BUY",
             "shares": order.qty, "price": round(price, 2),
@@ -570,12 +599,14 @@ class PortfolioSimulator:
 
             self.pending_buys.append(SimOrder(
                 ticker=ticker, side="buy", order_type="limit",
-                qty=t1, limit_price=entry, stop_price=stop,
+                qty=t1, limit_price=entry, stop_price=stop, tp_price=tp,
+                placed_date=date,
             ))
             if t2 > 0:
                 self.pending_buys.append(SimOrder(
                     ticker=ticker, side="buy", order_type="limit",
                     qty=t2, limit_price=round(entry * 0.985, 2), stop_price=stop,
+                    tp_price=tp, placed_date=date,
                 ))
 
     # Override stop/TP on filled positions from thesis
