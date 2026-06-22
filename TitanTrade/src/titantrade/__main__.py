@@ -20,6 +20,7 @@ def main() -> None:
         "sentry": "titantrade.daily_sentry",
         "execute": "titantrade.executor",
         "pricecheck": "titantrade.price_check",
+        "benchmark": "titantrade.benchmark",
     }
 
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
@@ -31,6 +32,7 @@ def main() -> None:
         print("  sentry           Run daily Gemini sentry check")
         print("  execute          Execute trades via Alpaca")
         print("  pricecheck       Intraday price check (no LLM, pure price)")
+        print("  benchmark [days] Performance vs SPY: beta, alpha, Sharpe (--since YYYY-MM-DD)")
         print("  gapcheck         Check for unfilled stop-limits after gap-downs")
         print("  resubmit         Resubmit expired bracket orders")
         print("  full             Full pipeline (fetch -> analyze -> sentry -> execute)")

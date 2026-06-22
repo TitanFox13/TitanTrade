@@ -276,6 +276,16 @@ def send_daily_summary() -> str:
                 "inline": False,
             })
 
+    # --- Benchmark vs SPY (beta / alpha / Sharpe) ---
+    from .benchmark import format_summary_line, load_metrics
+    bench_line = format_summary_line(load_metrics())
+    if bench_line:
+        fields.append({
+            "name": "Benchmark (vs SPY)",
+            "value": bench_line,
+            "inline": False,
+        })
+
     # --- Trading mode ---
     from .config import load_watchlist
     settings = load_watchlist()

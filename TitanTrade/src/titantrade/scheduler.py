@@ -114,6 +114,17 @@ def _run_resubmit() -> str:
 
 
 def _run_daily_summary() -> str:
+    # Refresh benchmark metrics (beta/alpha/Sharpe vs SPY) before the summary
+    # so the Discord embed reflects today's close. The benchmark call hits
+    # Alpaca + SPY data; never let it block the summary if those are flaky.
+    try:
+        from .benchmark import compute_benchmark
+        from .config import load_config
+
+        compute_benchmark(load_config(), lookback_days=90)
+    except Exception:
+        log.exception("Benchmark refresh failed — daily summary will use stale/no metrics")
+
     from .notifier import send_daily_summary
     return send_daily_summary()
 

@@ -282,6 +282,19 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - **Cost breakdown**: Per-service (Claude, Gemini) call counts, tokens, and spend
 - **Recent API calls**: Last 20 calls with timestamps, descriptions, and costs
 
+## Benchmark Metrics (vs SPY)
+
+### Risk-Adjusted Performance Measurement
+- Judges the strategy on **risk-adjusted** terms, not raw return — a downside-protected, sub-1-beta strategy underperforms SPY in a strong bull by construction
+- **Beta**: realized market exposure (cov/var of daily returns vs SPY)
+- **Alpha (Jensen's, annualized)**: return left over after paying for that beta exposure — the test of stock-selection skill
+- **Sharpe** (strategy vs SPY) and **information ratio**: return per unit of total / tracking risk
+- **Up/down capture**: average move on SPY-up vs SPY-down days — `down < up` is the defensive signature (keeps upside, eats less downside)
+- **Correlation/R², annualized volatility, total + excess return, max drawdown** for both series
+- Source: **Alpaca portfolio-equity history** (true mark-to-market each day), aligned to SPY daily closes by trading date (in market time — Alpaca stamps EOD equity at 20:00 ET)
+- Surfaced via CLI (`python -m titantrade benchmark [days] [--since YYYY-MM-DD]`), API (`GET /api/benchmark`, `/api/benchmark/refresh`), and a line on the daily Discord summary
+- A one-line plain-English verdict classifies the window (adding value / protection-not-selection / dominated by SPY)
+
 ## Test Suite (Zero Token Spend)
 
 All tests run without making real API calls to Claude, Gemini, Alpaca, or FMP.

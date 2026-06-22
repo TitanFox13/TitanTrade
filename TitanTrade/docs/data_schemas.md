@@ -342,3 +342,55 @@ Tracks per-API-call token usage and estimated costs for AI model inference.
 | `output_tokens` | int | Completion/output token count |
 | `estimated_cost_usd` | float | Estimated cost based on published pricing |
 | `run_type` | string | "weekly_analyst" or "daily_sentry" |
+
+## 9. Benchmark Metrics (`state/benchmark_metrics.json`)
+
+Risk-adjusted performance of the strategy vs SPY. Written by `benchmark.py`
+(refreshed by the `daily_summary` job; recomputable via the `benchmark` CLI or
+`/api/benchmark/refresh`). Computed from the Alpaca portfolio-equity history
+aligned to SPY daily closes by trading date.
+
+```json
+{
+  "insufficient_data": false,
+  "n_days": 13,
+  "beta": 0.841,
+  "alpha_annual_pct": 32.46,
+  "sharpe_strategy": 0.46,
+  "sharpe_spy": -1.44,
+  "info_ratio": 3.97,
+  "correlation": 0.883,
+  "r_squared": 0.78,
+  "vol_strategy_annual_pct": 18.72,
+  "vol_spy_annual_pct": 19.66,
+  "total_return_strategy_pct": 0.36,
+  "total_return_spy_pct": -1.54,
+  "excess_return_pct": 1.9,
+  "up_capture": 0.98,
+  "down_capture": 0.71,
+  "up_days": 7,
+  "down_days": 6,
+  "max_drawdown_strategy_pct": -3.68,
+  "max_drawdown_spy_pct": -4.46,
+  "rf_annual_pct": 0.0,
+  "window_start": "2026-06-01",
+  "window_end": "2026-06-18",
+  "since": "2026-06-01",
+  "lookback_days": null,
+  "computed_at": "2026-06-22T16:30:00Z",
+  "verdict": "Adding value — positive alpha AND higher risk-adjusted return than SPY."
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `n_days` | int | Number of daily returns in the window |
+| `beta` | float\|null | Realized exposure to SPY (cov/var of daily returns); null if SPY had zero variance |
+| `alpha_annual_pct` | float\|null | Jensen's alpha, annualized — return after paying for beta. Magnitude is noisy on short windows |
+| `sharpe_strategy` / `sharpe_spy` | float\|null | Annualized return / volatility, strategy vs SPY |
+| `info_ratio` | float\|null | Active return ÷ tracking error (annualized) |
+| `up_capture` / `down_capture` | float\|null | Avg strategy move ÷ avg SPY move on SPY-up / SPY-down days; `down < up` is defensive |
+| `max_drawdown_strategy_pct` / `max_drawdown_spy_pct` | float | Largest peak-to-trough decline over the window (≤ 0) |
+| `window_start` / `window_end` | string | First / last aligned trading date |
+| `since` / `lookback_days` | string\|null / int\|null | Window anchor (one or the other) |
+| `verdict` | string | One-line plain-English classification |

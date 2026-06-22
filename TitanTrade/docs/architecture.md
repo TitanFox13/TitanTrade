@@ -73,6 +73,7 @@ config.py
 ├── weekly_analyst.py       <- Two-pass Claude analysis (uses data_fetcher, performance)
 ├── daily_sentry.py         <- Three-layer sentry (uses data_fetcher, Gemini)
 ├── price_check.py          <- Lightweight intraday price checks (no LLM)
+├── benchmark.py            <- Risk-adjusted metrics vs SPY: beta/alpha/Sharpe/capture (reads Alpaca portfolio history + SPY; pure compute_metrics)
 │
 │   ── Execution layer (ADR 036), dependency flow top → bottom ──
 ├── broker.py               <- Alpaca REST client (the ONLY module that calls Alpaca)
@@ -115,6 +116,7 @@ All state lives in `state/` as JSON files. No database.
 | `thesis_history.json` | Archived theses (52 weeks) | weekly_analyst |
 | `trailing_stops.json` | Per-ticker trailing stop HWM + state | executor |
 | `pricecheck_signals.json` | Latest intraday price check results | price_check |
+| `benchmark_metrics.json` | Beta/alpha/Sharpe/capture vs SPY | benchmark |
 
 ---
 

@@ -1,5 +1,29 @@
 # Important Decisions Log
 
+## Decision 051: Benchmark metrics — beta / alpha / Sharpe vs SPY
+**Date**: 2026-06-22
+**Decision**: Measure the strategy on **risk-adjusted** terms against SPY (beta, Jensen's alpha, Sharpe, capture ratios, tracking-error/information ratio, max drawdown), not raw return, via a new `benchmark.py` module fed by the Alpaca portfolio-equity history.
+
+### Why
+A downside-protected, sub-1-beta strategy underperforms SPY in a strong bull *by construction* — it holds cash, runs stops that clip the right tail, and keeps a partial passive core. Raw return vs SPY therefore can't answer the real question ("is it adding value, or just under-exposed?"). Beta isolates market exposure; alpha is what's left after paying for that exposure; Sharpe and up/down capture say whether the protection earns its keep. These are the numbers that decide whether the strategy can succeed or is dominated by simply holding SPY.
+
+### Implementation
+- `benchmark.py`: pure `compute_metrics(strategy_levels, spy_levels, rf_annual=0)` (population/sample stats in plain Python, no numpy) returning beta, annualized alpha, Sharpe (strategy + SPY), info ratio, correlation/R², annualized vol, total + excess return, up/down capture, and max drawdown for both. `compute_benchmark()` wires it to live data: Alpaca `/v2/account/portfolio/history` (1D equity) + SPY daily closes, aligned by trading date. `classify()` emits a one-line plain-English verdict.
+- Data source: **Alpaca portfolio history**, not trade-log reconstruction — it's the true mark-to-market equity each day.
+- Surfaced three ways: CLI `python -m titantrade benchmark [days] [--since YYYY-MM-DD]`; API `GET /api/benchmark` (+ `/api/benchmark/refresh`); a "Benchmark (vs SPY)" line on the daily Discord summary (the `daily_summary` job refreshes `state/benchmark_metrics.json` before sending).
+- `broker.get_portfolio_history()` added (the only new Alpaca call).
+
+### The off-by-one that would have lied to us
+Alpaca stamps 1D end-of-day equity at the market close in **US/Eastern** (20:00 ET = 00:00 UTC the *next* calendar day). A naive UTC-date conversion is one day late, pairing each strategy day with the *next* session's SPY close — which produced spurious **negative** betas (−0.05 to −0.25) in the first run. Fixed by deriving the session date in market time (`America/New_York`); a regression test locks it. After the fix, betas are sensible and positive (0.42–0.89).
+
+### Findings (paper account, verified live on the server)
+- **Since strategy inception (2026-03-30, 56 trading days)**: strategy +8.7% vs SPY +18.2%. **Beta 0.42**, **alpha +6.6%/yr** (slightly positive), Sharpe 3.35 vs SPY 5.26, vol 11.5% vs 14.5%, max DD −3.7% vs −4.5%, up-capture 0.46 / down-capture 0.40. The underperformance is almost entirely the **low beta** (under-exposure in a straight-line bull), *not* negative selection — alpha was marginally positive.
+- **Stabilized window (since 2026-06-01, 13 days)**: strategy +0.4% vs SPY −1.5%. **Beta 0.84**, Sharpe 0.46 vs SPY −1.44, up-capture 0.98 / **down-capture 0.71** — the ideal defensive signature (keeps the upside, eats less of the downside). Verdict: adding value.
+- Annualized alphas over <20-day windows (+32%, +67%/yr) are noise in magnitude — only the **sign, Sharpe comparison, and capture ratios** are meaningful at this sample size.
+
+### Status
+Built + tested (20 new unit tests, 496 total green; ruff clean). Evaluated against the live paper account. **Not yet deployed** — the API image is baked, so beta/alpha won't appear on the daily summary or `/api/benchmark` until the container is rebuilt (`docker compose build api && docker compose up -d api`). The verdict to watch over a full cycle: is the sentry's protection (down-capture < 1) saving more than its whipsaw costs?
+
 ## Decision 050: Analyst model — retired Sonnet 4 → Opus 4.8 + adaptive thinking (URGENT prod fix)
 **Date**: 2026-06-17
 **Decision**: Switch the weekly analyst from `claude-sonnet-4-20250514` to `claude-opus-4-8` with adaptive thinking.

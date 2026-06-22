@@ -1,5 +1,16 @@
 # TitanTrade TODO
 
+## Phase 1.28: Benchmark metrics — beta / alpha / Sharpe vs SPY (2026-06-22) — Decision 051
+- [x] New `benchmark.py`: pure `compute_metrics` (beta, alpha, Sharpe, info ratio, correlation/R², vol, total/excess return, up/down capture, max drawdown) + `compute_benchmark` live wiring (Alpaca portfolio history + SPY closes, date-aligned) + `classify` verdict.
+- [x] `broker.get_portfolio_history` (Alpaca `/v2/account/portfolio/history`).
+- [x] Caught + fixed the Alpaca EOD-timestamp off-by-one (20:00 ET = 00:00 UTC next day) that yielded spurious negative betas; session date now derived in market time. Regression test added.
+- [x] Surfaced via CLI (`benchmark [days] [--since]`), API (`/api/benchmark`, `/api/benchmark/refresh`), and a daily-summary Discord line (`daily_summary` refreshes `benchmark_metrics.json` first).
+- [x] 20 new unit tests (hand-computable fixtures); 496 total green; ruff clean.
+- [x] Evaluated live: since inception beta 0.42 / alpha +6.6%/yr (underperformance is low-beta, not negative selection); stabilized window up-cap 0.98 / down-cap 0.71 (adding value).
+- [ ] **DEPLOY: rebuild + restart the API container** (`docker compose build api && docker compose up -d api`) so `/api/benchmark` and the daily-summary line go live. (Math + CLI work today; the baked image must be rebuilt for the API/scheduler paths.)
+- [ ] Optional: add a beta/alpha/Sharpe card to the Flutter dashboard (reads `/api/benchmark`).
+- [ ] Re-evaluate after the next genuine SPY drawdown — that's the test of whether down-capture < 1 is saving more than the sentry's whipsaw costs.
+
 ## Phase 1.27: Analyst model — retired Sonnet 4 → Opus 4.8 + adaptive thinking (2026-06-17) — Decision 050
 🔴 **URGENT — deploy before Sunday 2026-06-21.**
 - [x] Found prod-breaking bug: analyst model `claude-sonnet-4-20250514` **404s (retired 2026-06-15)**; confirmed via Models API. Next weekly run (Sun Jun 21) would 404 → no thesis → orphan-close liquidates ALL positions.

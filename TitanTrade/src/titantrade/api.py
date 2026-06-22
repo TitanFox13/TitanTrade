@@ -159,6 +159,32 @@ def trailing_stops() -> dict:
     return _read_state("trailing_stops.json")
 
 
+@app.get("/api/benchmark")
+def benchmark() -> dict:
+    """Performance metrics vs SPY: beta, alpha, Sharpe, capture ratios.
+
+    Returns the last-computed metrics (refreshed by the daily-summary job).
+    Use ``/api/benchmark/refresh`` to recompute live with a custom window.
+    """
+    return _read_state("benchmark_metrics.json") or {
+        "insufficient_data": True,
+        "note": "Not yet computed — runs with the daily summary, or POST a refresh.",
+    }
+
+
+@app.get("/api/benchmark/refresh")
+def benchmark_refresh(days: int = 90, since: str | None = None) -> dict:
+    """Recompute benchmark metrics live from Alpaca + SPY and return them."""
+    try:
+        from .benchmark import compute_benchmark
+        from .config import load_config
+
+        return compute_benchmark(load_config(), lookback_days=days, since=since)
+    except Exception as exc:
+        log.error(f"Benchmark refresh failed: {exc}")
+        raise HTTPException(status_code=503, detail=f"Benchmark unavailable: {exc}")
+
+
 @app.get("/api/pricecheck")
 def pricecheck() -> dict:
     return _read_state("pricecheck_signals.json")

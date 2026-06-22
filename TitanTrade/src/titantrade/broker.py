@@ -48,6 +48,34 @@ def get_positions(cfg: Config) -> list[dict[str, Any]]:
     return resp.json()
 
 
+def get_portfolio_history(
+    cfg: Config,
+    period: str = "3M",
+    timeframe: str = "1D",
+    extended_hours: bool = False,
+) -> dict[str, Any]:
+    """Return the account's mark-to-market equity time series.
+
+    Wraps Alpaca ``GET /v2/account/portfolio/history``. With ``timeframe="1D"``
+    this is the end-of-day equity for each trading day in ``period`` (e.g.
+    "1M", "3M", "6M", "1A", "all"). The response carries parallel arrays:
+    ``timestamp`` (unix seconds), ``equity``, ``profit_loss``,
+    ``profit_loss_pct``, plus a scalar ``base_value``.
+
+    This is the canonical source for benchmark/return analysis — it reflects
+    the true account value each day, so it needs no reconstruction from the
+    trade log.
+    """
+    url = f"{cfg.alpaca.base_url}/v2/account/portfolio/history"
+    params = {
+        "period": period,
+        "timeframe": timeframe,
+        "extended_hours": "true" if extended_hours else "false",
+    }
+    resp = fetch_with_retry("GET", url, headers=_headers(cfg), params=params)
+    return resp.json()
+
+
 def get_position(ticker: str, cfg: Config) -> dict[str, Any] | None:
     """Return position for ticker, or None if not held."""
     url = f"{cfg.alpaca.base_url}/v2/positions/{ticker}"

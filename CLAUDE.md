@@ -22,6 +22,7 @@ uv run python -m titantrade execute      # Execute trades via Alpaca
 uv run python -m titantrade pricecheck   # Intraday price check (no LLM)
 uv run python -m titantrade gapcheck     # Gap-down stop-limit protection
 uv run python -m titantrade resubmit     # Resubmit expired brackets
+uv run python -m titantrade benchmark [days] # Performance vs SPY: beta/alpha/Sharpe (--since YYYY-MM-DD)
 uv run python -m titantrade full             # Full pipeline (fetch → analyze → sentry → execute)
 uv run python -m titantrade backtest [dir]   # Run backtest on historical data
 uv run python -m titantrade download-history [dir]  # Download OHLCV for backtesting
@@ -33,7 +34,7 @@ uv run python -m titantrade download-history [dir]  # Download OHLCV for backtes
 cd TitanTrade && uv run --extra test python -m pytest tests/ -v
 ```
 
-`pytest` lives in the `test` optional-dependency extra, so the `--extra test` flag is required (a bare `uv run` omits it → `No module named pytest`). All 424 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens. `ruff`/`vulture` are in the `dev` extra for lint/dead-code checks.
+`pytest` lives in the `test` optional-dependency extra, so the `--extra test` flag is required (a bare `uv run` omits it → `No module named pytest`). All 496 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens. `ruff`/`vulture` are in the `dev` extra for lint/dead-code checks.
 
 ### Flutter app (from titan_trade_app/)
 
@@ -78,6 +79,7 @@ docker compose run --rm titantrade <command>             # CLI commands
 | `src/titantrade/alerts.py` | Discord observability alerts (stuck-in-cash, ticker churn) |
 | `src/titantrade/risk_manager.py` | 6 risk gates |
 | `src/titantrade/price_check.py` | Intraday price checks (no LLM) |
+| `src/titantrade/benchmark.py` | Risk-adjusted metrics vs SPY (beta/alpha/Sharpe/capture) |
 | `src/titantrade/api.py` | FastAPI HTTP server |
 | `src/titantrade/scheduler.py` | Built-in APScheduler (cron jobs inside API process) |
 | `src/titantrade/indicators.py` | Pure Python RSI/MACD/Bollinger/ATR/SMA |
@@ -108,3 +110,4 @@ This project is strict about documentation. When making changes:
 | `costs.json` | cost_logger (per-API-call tokens) |
 | `portfolio.json` | manual / executor |
 | `peak_portfolio.json` | risk_manager (drawdown tracking) |
+| `benchmark_metrics.json` | benchmark (beta/alpha/Sharpe vs SPY; refreshed by daily_summary) |

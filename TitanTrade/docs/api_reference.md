@@ -150,6 +150,8 @@ The backend exposes these endpoints at `{base_url}/api/`:
 | `/api/costs` | GET | API call costs and token usage |
 | `/api/trailing-stops` | GET | Trailing stop state |
 | `/api/pricecheck` | GET | Intraday price check signals |
+| `/api/benchmark` | GET | Performance vs SPY: beta, alpha, Sharpe, capture ratios (last computed) |
+| `/api/benchmark/refresh` | GET | Recompute benchmark metrics live (`?days=N`, `?since=YYYY-MM-DD`) |
 | `/api/backtest-results` | GET | Latest backtest results |
 | `/api/watchlist` | GET | Current watchlist |
 | `/api/watchlist` | PUT | Update watchlist tickers |
