@@ -366,7 +366,29 @@ def place_native_stop_loss(
         TP1/gap-down race that stranded positions with no stop in production).
       - On any other 4xx we fall back to a plain stop order — historically
         Alpaca paper accounts have rejected stop-limit for some asset types.
+
+    Fractional quantities: Alpaca cannot place a stop (of any time-in-force)
+    on a fractional order — it 422s with "fractional orders must be DAY
+    orders". We floor to whole shares so the bulk of the position is protected
+    by a GTC stop; a sub-1-share remainder is unstoppable dust and we place
+    nothing rather than spam a daily 422 (the JPM/ANET dust bug). This mirrors
+    the fractional guard in ``place_bracket_order`` (the 0.19-share bug).
     """
+    if _is_fractional(qty):
+        floored = float(int(qty))
+        if floored < 1:
+            log.warning(
+                f"Stop for {ticker}: qty {qty} is sub-1-share dust — Alpaca "
+                f"cannot place a stop on a fractional-only position; no stop "
+                f"placed (position too small to protect)"
+            )
+            return {}
+        log.warning(
+            f"Stop qty for {ticker} was fractional ({qty}) — flooring to "
+            f"{floored} whole shares (remainder is unstoppable dust)"
+        )
+        qty = floored
+
     url = f"{cfg.alpaca.base_url}/v2/orders"
 
     def _post_stop_limit(stop_qty: float) -> dict[str, Any]:

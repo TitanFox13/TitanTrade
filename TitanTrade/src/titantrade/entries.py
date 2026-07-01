@@ -385,7 +385,23 @@ def _handle_bullish_entry(
             cfg=cfg,
         )
         _ensure_gtc_stop_on_fill(ticker, bracket1, stop_price, cfg)
-        if tranche2_shares > 0:
+        # Tranche2 buys the 1.5% dip but reuses tranche1's stop. When the stop
+        # sits within 1.5% of entry (tight-stop theses on high-priced/low-vol
+        # names like EQIX), tranche2's lower limit lands at/below the stop and
+        # Alpaca 422s ("stop_price must be <= base_price - 0.01"). tranche1's
+        # entry passed bracket_levels_invalid, but tranche2's lower limit was
+        # never re-validated. Skip the dip tranche rather than error — buying
+        # below our own stop is nonsensical anyway.
+        if tranche2_shares > 0 and bracket_levels_invalid(
+            tranche2_price, stop_price, take_profit_price
+        ):
+            log.info(
+                f"Skipping tranche2 for {ticker}: dip-buy limit "
+                f"${tranche2_price:.2f} is not safely above stop "
+                f"${stop_price:.2f} (would 422); tranche1 of {tranche1_shares} "
+                f"shares placed"
+            )
+        elif tranche2_shares > 0:
             bracket2 = place_bracket_order(
                 ticker=ticker,
                 qty=tranche2_shares,

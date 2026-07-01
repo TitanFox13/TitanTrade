@@ -24,7 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from titantrade.broker import place_bracket_order
+from titantrade.broker import place_bracket_order, place_native_stop_loss
 from titantrade.entries import (
     _handle_bullish_entry,
     open_buy_commitment,
@@ -238,3 +238,107 @@ class TestDowntrendNearMiss:
         rec = data["near_misses"][-1]
         assert rec["ticker"] == "HCA"
         assert rec["failed_gates"] == ["trend_regime"]
+
+
+# ---------------------------------------------------------------------------
+# FIX 7: fractional-dust stops (JPM 0.13 / ANET daily 422 in the 9-day review)
+# ---------------------------------------------------------------------------
+
+class TestFractionalDustStop:
+    """place_native_stop_loss must floor fractional quantities to whole shares
+    (Alpaca 422s "fractional orders must be DAY orders" on ANY fractional stop,
+    and the plain-stop fallback shared the same tif) and place NOTHING for
+    sub-1-share dust — instead of erroring on every executor run (the JPM
+    0.13-share and ANET remainders that spammed [ERROR] daily in production).
+    """
+
+    @patch("titantrade.broker.fetch_with_retry")
+    def test_floors_fractional_qty_to_whole_shares(self, mock_fetch, fake_config):
+        mock_fetch.return_value = _resp({"id": "stop-1", "status": "accepted"})
+        place_native_stop_loss("GE", 5.7, 344.0, fake_config)
+        body = mock_fetch.call_args.kwargs["json_body"]
+        assert body["qty"] == "5.0"            # floored, not 5.7 -> no 422
+        assert body["time_in_force"] == "gtc"  # still a persistent stop
+
+    @patch("titantrade.broker.fetch_with_retry")
+    def test_sub_one_share_dust_places_no_order(self, mock_fetch, fake_config):
+        # JPM 0.13-share remainder: unstoppable dust -> no broker call, no 422.
+        result = place_native_stop_loss("JPM", 0.13, 314.5, fake_config)
+        assert result == {}
+        mock_fetch.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# FIX 8: tranche2 dip-buy reused tranche1's stop -> 422 on tight-stop theses
+# ---------------------------------------------------------------------------
+
+class TestTranche2TightStopSkip:
+    """The 2-tranche entry places tranche2 at entry*0.985 but reuses tranche1's
+    stop. When the stop is within ~1.5% of entry (tight-stop theses on
+    high-priced/low-vol names like EQIX $1050), tranche2's lower limit lands at
+    or below the stop and Alpaca 422s ("stop_price must be <= base_price -
+    0.01"). tranche1 must still place; tranche2 must be skipped, not error.
+    """
+
+    def _thesis(self, entry, stop, tp):
+        return {
+            "ticker": "EQIX", "thesis": "BULLISH", "confidence": 0.70,
+            "selected_for_trading": True, "review_action": "NEW",
+            "target_entry_price": entry, "stop_loss_price": stop,
+            "take_profit_price": tp, "reasoning": "tight stop",
+            "thesis_breach_condition": "x",
+        }
+
+    def _bundle(self):
+        # No SMA data -> "range" regime; current_price patched to None ->
+        # adapt_entry_levels is a no-op, so entry/stop stay exactly as set.
+        return {
+            "market_context": {"vix": {"level": 16.0, "classification": "normal"}},
+            "stocks": {"EQIX": {
+                "atr_14": 5.0,
+                "technical_indicators": {},
+                "earnings": {"is_blocked": False},
+            }},
+        }
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=None)
+    @patch("titantrade.entries._ensure_gtc_stop_on_fill", return_value=None)
+    @patch("titantrade.entries.place_bracket_order", return_value={"id": "br"})
+    @patch("titantrade.entries.get_open_orders", return_value=[])
+    def test_skips_tranche2_when_stop_within_dip(
+        self, mock_orders, mock_bracket, mock_ensure, mock_price,
+        fake_config, sample_positions, monkeypatch, tmp_state_dir,
+    ):
+        monkeypatch.setattr(
+            "titantrade.risk_manager.get_stock_sector", lambda t: "Technology")
+        # entry 200, stop 197 (1.5%): tranche2 limit = 197.00, stop 197 >=
+        # 196.99 -> tranche2 invalid; tranche1 (stop 197 < 199.99) valid.
+        result = _handle_bullish_entry(
+            ticker="EQIX", thesis=self._thesis(200.0, 197.0, 215.0),
+            portfolio_value=100_000, cash_balance=60_000,
+            positions=sample_positions, data_bundle=self._bundle(),
+            sentry=None, cfg=fake_config,
+        )
+        assert result is not None
+        assert mock_bracket.call_count == 1  # tranche1 only, tranche2 skipped
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=None)
+    @patch("titantrade.entries._ensure_gtc_stop_on_fill", return_value=None)
+    @patch("titantrade.entries.place_bracket_order", return_value={"id": "br"})
+    @patch("titantrade.entries.get_open_orders", return_value=[])
+    def test_places_both_tranches_when_stop_clears_dip(
+        self, mock_orders, mock_bracket, mock_ensure, mock_price,
+        fake_config, sample_positions, monkeypatch, tmp_state_dir,
+    ):
+        monkeypatch.setattr(
+            "titantrade.risk_manager.get_stock_sector", lambda t: "Technology")
+        # entry 200, stop 195 (2.5%): tranche2 limit 197.00, stop 195 < 196.99
+        # -> tranche2 valid; both tranches place.
+        result = _handle_bullish_entry(
+            ticker="EQIX", thesis=self._thesis(200.0, 195.0, 230.0),
+            portfolio_value=100_000, cash_balance=60_000,
+            positions=sample_positions, data_bundle=self._bundle(),
+            sentry=None, cfg=fake_config,
+        )
+        assert result is not None
+        assert mock_bracket.call_count == 2  # both tranches placed

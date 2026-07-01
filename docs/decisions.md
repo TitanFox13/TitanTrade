@@ -1,5 +1,20 @@
 # Important Decisions Log
 
+## Decision 052: Two execution bugs from the 9-day log review — fractional-dust stops + tranche2 tight-stop 422
+**Date**: 2026-07-01
+**Decision**: Fix two recurring Alpaca 422s surfaced by reviewing the container logs since the 2026-06-22 restart (ADR 051 deploy). Both were low-severity (no capital at risk, 0 CRITICALs, 0 tracebacks) but one spammed a daily `[ERROR]` and the other silently dropped half of some entries.
+
+### Bug 1 — fractional-dust stop failures (JPM 0.13-share, formerly ANET)
+Every executor run tried to `ADJUST` the stop on a sub-1-share dust remainder and 422'd: `"fractional orders must be DAY orders"`. Root cause: `broker.place_native_stop_loss` hardcoded `time_in_force="gtc"` **and never floored the qty** — unlike `place_bracket_order`, which floors fractional qty to dodge this exact "0.19-share" bug. Both the stop-limit and the plain-stop fallback shared the flaw, so the fallback failed identically. A 0.13-share position can't take a stop at all (Alpaca can't place a stop on a fractional order; flooring → 0).
+**Fix**: `place_native_stop_loss` now floors fractional qty to whole shares (protecting the bulk with a persistent GTC stop; the sub-share remainder is unstoppable dust) and, when the floored qty is < 1, places **nothing** and returns `{}` instead of erroring. Belt-and-suspenders: the executor `ADJUST` path skips positions with `0 < qty < 1` early, avoiding a pointless cancel+replace. Financial impact was trivial ($43 of JPM dust); the fix removes the daily error noise and makes the fractional-stop path correct for any future non-dust fractional position.
+
+### Bug 2 — tranche2 dip-buy reused tranche1's stop → 422 on tight-stop theses (EQIX)
+The 2-tranche entry places tranche2 at `entry × 0.985` (a 1.5% dip-buy) but reuses tranche1's stop. When the (adapted) stop sits within ~1.5% of entry — common for tight-stop theses on high-priced/low-vol names (EQIX: $1050.95 entry, $1045.95 stop = 0.47%) — tranche2's lower limit ($1035.19) lands at/below the stop and Alpaca 422s: `"stop_loss.stop_price must be <= base_price - 0.01"`. `bracket_levels_invalid` validated tranche1's entry against the stop but **never re-validated tranche2's lower limit**. Tranche1 still filled; tranche2 silently never placed — a partial-entry bug that under-deployed capital.
+**Fix**: `entries._handle_bullish_entry` now runs `bracket_levels_invalid(tranche2_price, stop_price, tp)` before placing tranche2 and skips the dip tranche (keeping tranche1) with an INFO log instead of erroring. Buying below one's own stop is nonsensical anyway, so skipping is the correct behavior.
+
+### Status
+Both fixed in `broker.py`, `executor.py`, `entries.py`. 4 new regression tests (`test_bugfix_regressions.py::TestFractionalDustStop`, `::TestTranche2TightStopSkip`); **500 tests green, ruff clean**. Behavior-preserving for all whole-share positions and normal-stop entries. **Not yet deployed** — needs `docker compose build api && docker compose up -d api` on titanserver for the running container to pick it up (the current image predates the fix).
+
 ## Decision 051: Benchmark metrics — beta / alpha / Sharpe vs SPY
 **Date**: 2026-06-22
 **Decision**: Measure the strategy on **risk-adjusted** terms against SPY (beta, Jensen's alpha, Sharpe, capture ratios, tracking-error/information ratio, max drawdown), not raw return, via a new `benchmark.py` module fed by the Alpaca portfolio-equity history.

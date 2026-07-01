@@ -1,5 +1,13 @@
 # TitanTrade TODO
 
+## Phase 1.29: Two execution bugs from the 9-day log review (2026-07-01) — Decision 052
+Log review of `titantrade-api-1` since the 2026-06-22 restart: system healthy (0 tracebacks, 0 CRITICAL, all scheduled jobs firing, every real position stop-protected). Found two recurring 422s.
+- [x] **Bug 1 — fractional-dust stops (JPM 0.13-share, formerly ANET):** `place_native_stop_loss` hardcoded `tif="gtc"` and never floored the qty, so it 422'd (`"fractional orders must be DAY orders"`) on every run for a sub-1-share remainder — the plain-stop fallback shared the flaw. Now floors fractional → whole shares (GTC stop on the bulk) and places nothing for `<1`-share dust; executor `ADJUST` path also skips `0 < qty < 1` early. `broker.py` + `executor.py`.
+- [x] **Bug 2 — tranche2 tight-stop 422 (EQIX):** tranche2 (dip-buy at `entry×0.985`) reused tranche1's stop; when the stop is within ~1.5% of entry the tranche2 limit falls below it → 422, silently dropping the second tranche. Now validates `bracket_levels_invalid(tranche2_price, stop, tp)` and skips tranche2 (keeps tranche1). `entries.py`.
+- [x] 4 new regression tests (`TestFractionalDustStop`, `TestTranche2TightStopSkip`); **500 tests green, ruff clean**. Behavior-preserving for whole-share positions and normal-stop entries.
+- [ ] **DEPLOY: rebuild + restart the API container** (`docker compose build api && docker compose up -d api` on titanserver) — the running image predates the fix (it already contains ADR 050/051, so a rebuild now adds only 052).
+- [ ] Optional cleanup: sweep the JPM 0.13-share dust (a manual/market DAY sell) so it stops showing as an unprotected position; not required (fix already silences the error).
+
 ## Phase 1.28: Benchmark metrics — beta / alpha / Sharpe vs SPY (2026-06-22) — Decision 051
 - [x] New `benchmark.py`: pure `compute_metrics` (beta, alpha, Sharpe, info ratio, correlation/R², vol, total/excess return, up/down capture, max drawdown) + `compute_benchmark` live wiring (Alpaca portfolio history + SPY closes, date-aligned) + `classify` verdict.
 - [x] `broker.get_portfolio_history` (Alpaca `/v2/account/portfolio/history`).

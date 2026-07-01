@@ -619,7 +619,17 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
             if position:
                 qty = float(position.get("qty", 0))
                 new_stop = thesis.get("stop_loss_price")
-                if new_stop and qty > 0:
+                if new_stop and 0 < qty < 1:
+                    # Sub-1-share dust (e.g. a TP1/partial-exit remainder):
+                    # Alpaca can't place a stop on a fractional-only position,
+                    # so cancel+replace would just 422 every run (the JPM/ANET
+                    # daily "fractional orders must be DAY orders" error). The
+                    # remainder is too small to protect — skip it.
+                    log.info(
+                        f"ADJUST {ticker}: {qty} share(s) of dust — no stop "
+                        f"possible on a fractional-only remainder; skipping"
+                    )
+                elif new_stop and qty >= 1:
                     # Idempotency: if an existing stop is already at the target
                     # price, don't cancel+replace. Running cancel→place on every
                     # executor tick churns the broker and hits qty-race 403s
