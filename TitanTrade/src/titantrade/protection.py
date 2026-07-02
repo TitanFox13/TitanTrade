@@ -175,6 +175,29 @@ def check_gap_down_protection(cfg: Config) -> list[dict[str, Any]]:
 
             # Gap-down: price is below the limit price (stop-limit is stale)
             if current_price < limit_price * 0.99:
+                # Cross-check the LIVE market quote before a destructive
+                # market-sell. Alpaca's paper position feed can carry a
+                # stale/corrupted mark — e.g. a phantom split that divides the
+                # price but not the share count (observed on CRWD: position
+                # marked $196 while the market traded $772) — which would trip
+                # this gate and liquidate a HEALTHY position on bad data. If the
+                # live quote shows price still at/above the stop, the position
+                # mark is wrong: skip and leave the resting stop-limit in place.
+                # A missing/failed quote falls through to the sell — never weaken
+                # protection when we can't confirm (the FCX bare-position case).
+                try:
+                    from titantrade.daily_sentry import _fetch_current_price
+                    market_price = _fetch_current_price(ticker, cfg)
+                except Exception:  # noqa: BLE001
+                    market_price = None
+                if market_price and market_price >= stop_price:
+                    log.warning(
+                        f"GAP-DOWN for {ticker} NOT confirmed by live quote: "
+                        f"position mark ${current_price:.2f} but market "
+                        f"${market_price:.2f} >= stop ${stop_price:.2f} — "
+                        f"stale/glitched position price, skipping market-sell"
+                    )
+                    break
                 log.warning(
                     f"GAP-DOWN DETECTED: {ticker} at ${current_price:.2f} "
                     f"below stop-limit ${stop_price:.2f}/${limit_price:.2f}"

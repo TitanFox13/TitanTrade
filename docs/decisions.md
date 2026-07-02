@@ -1,5 +1,19 @@
 # Important Decisions Log
 
+## Decision 053: Gap-down protection cross-checks the live quote before liquidating
+**Date**: 2026-07-02
+**Decision**: `check_gap_down_protection` now fetches the live market quote (`_fetch_current_price`) before firing its market-sell and skips when the live price is at/above the stop — so a stale/corrupted broker position mark can't liquidate a healthy position.
+
+### Why
+The morning after deploying ADR 052, the Alpaca paper account reported **CRWD at $196** on the position endpoint (prev-close $193) while the market-data feed showed the true price **$772.6** — an exact 4:1 ratio, i.e. a **phantom split** applied to the position's price but not its share count. Reported equity dropped ~$9k (entirely CRWD); true equity (`last_equity` $109,046) was unchanged. The sentry was unaffected (it reads the market-data feed), but `check_gap_down_protection` reads `position.current_price` and would have market-sold CRWD at the 09:35 ET gapcheck, mistaking the glitched $196 for a gap-down through the $661 stop — an unwanted liquidation of a healthy, winning position on bad broker data. This exposed a robustness gap: the destructive gap-down sale trusted a single data source.
+
+### Implementation
+- Inside the gap-detected branch, fetch `_fetch_current_price(ticker, cfg)` (local import to avoid a circular import; defensive try/except). If the live quote is present and `>= stop_price`, log and **skip** — the position mark is stale/glitched. A missing/failed quote **falls through to the sell**, so a genuine unprotected position (the FCX bare-position case) is never left bare.
+- Threshold `>= stop_price`: only suppress when the live market says the stop hasn't even been reached — the tightest condition that preserves full protection for any real distress (live price below the stop still sells).
+
+### Status
+`protection.py` + 3 new regression tests (`TestGapDownLiveQuoteCrossCheck`: glitch-skip, confirmed-sell, quote-unavailable-sell); the existing gap test now mocks the quote. **503 tests green; touched files ruff-clean.** Deployed the same morning, before the 13:35 UTC gapcheck. (The CRWD mark itself is a transient Alpaca paper artifact expected to re-mark at the open — this fix guards against it and any future stale-mark misfire.)
+
 ## Decision 052: Two execution bugs from the 9-day log review — fractional-dust stops + tranche2 tight-stop 422
 **Date**: 2026-07-01
 **Decision**: Fix two recurring Alpaca 422s surfaced by reviewing the container logs since the 2026-06-22 restart (ADR 051 deploy). Both were low-severity (no capital at risk, 0 CRITICALs, 0 tracebacks) but one spammed a daily `[ERROR]` and the other silently dropped half of some entries.

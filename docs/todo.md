@@ -1,5 +1,13 @@
 # TitanTrade TODO
 
+## Phase 1.30: Gap-down protection cross-checks the live quote (2026-07-02) — Decision 053
+Morning-after check of the ADR 052 deploy: fix healthy (0 errors across all runs; the 19:30 pre-close run cleanly executed `DVN: SELL (ABORT)`). But spotted an Alpaca paper glitch — CRWD position marked $196 (prev-close $193) vs the real $772.6 market price (exact 4:1 phantom split on price, not share count); reported equity understated ~$9k, true equity unchanged (`last_equity` $109,046).
+- [x] Root cause of the *system* risk: `check_gap_down_protection` trusted `position.current_price` and would have liquidated healthy CRWD at the 09:35 ET gapcheck on the glitched mark.
+- [x] Fix: cross-check `_fetch_current_price` before the market-sell; skip when live price `>= stop_price` (stale/glitched mark); missing quote falls through to the sell (never weaken protection). `protection.py`.
+- [x] 3 new regression tests (`TestGapDownLiveQuoteCrossCheck`); existing gap test mocks the quote; tidied dead imports. **503 tests green, touched files ruff-clean.**
+- [x] Committed, pushed, and deployed (`docker compose build api && up -d api`) before the 13:35 UTC gapcheck.
+- [ ] The CRWD mark is a transient broker artifact — expect it to re-mark at the 13:30 UTC open; confirm equity reads ~$109k again after open.
+
 ## Phase 1.29: Two execution bugs from the 9-day log review (2026-07-01) — Decision 052
 Log review of `titantrade-api-1` since the 2026-06-22 restart: system healthy (0 tracebacks, 0 CRITICAL, all scheduled jobs firing, every real position stop-protected). Found two recurring 422s.
 - [x] **Bug 1 — fractional-dust stops (JPM 0.13-share, formerly ANET):** `place_native_stop_loss` hardcoded `tif="gtc"` and never floored the qty, so it 422'd (`"fractional orders must be DAY orders"`) on every run for a sub-1-share remainder — the plain-stop fallback shared the flaw. Now floors fractional → whole shares (GTC stop on the bulk) and places nothing for `<1`-share dust; executor `ADJUST` path also skips `0 < qty < 1` early. `broker.py` + `executor.py`.

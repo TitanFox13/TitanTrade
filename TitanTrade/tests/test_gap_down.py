@@ -5,14 +5,13 @@ All Alpaca calls mocked. Zero real orders.
 
 from __future__ import annotations
 
-from unittest.mock import patch, call
-
-import pytest
+from unittest.mock import patch
 
 from titantrade.executor import check_gap_down_protection
 
 
 class TestGapDownDetection:
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=169.0)
     @patch("titantrade.protection._append_trade")
     @patch("titantrade.protection.place_market_sell", return_value={"id": "sell_1"})
     @patch("titantrade.protection._wait_for_order_canceled", return_value="canceled")
@@ -21,8 +20,9 @@ class TestGapDownDetection:
     @patch("titantrade.protection.get_positions")
     def test_detects_gap_through_stop_limit(
         self, mock_pos, mock_orders, mock_cancel, mock_wait, mock_sell, mock_append,
-        fake_config, tmp_state_dir,
+        mock_fetch, fake_config, tmp_state_dir,
     ):
+        # Live quote (169) confirms the gap (below stop 176.23) → sell fires.
         mock_pos.return_value = [
             {"symbol": "AAPL", "qty": "50", "current_price": "170.00"},
         ]
@@ -135,3 +135,79 @@ class TestGapDownDetection:
         # 174.47 * 0.99 = 172.72 — current 173.50 is above that threshold
         result = check_gap_down_protection(fake_config)
         assert len(result) == 0
+
+
+class TestGapDownLiveQuoteCrossCheck:
+    """Regression: gap-down protection must cross-check the LIVE market quote
+    before liquidating, so a stale/glitched position mark (e.g. Alpaca paper's
+    phantom-split on CRWD — position marked $196 while the market traded $772)
+    can't trip the gate and sell a healthy position. A missing quote must still
+    fall through to the sell (never weaken protection).
+    """
+
+    _ORDER = {
+        "id": "stop_1", "type": "stop_limit", "side": "sell",
+        "stop_price": "661.00", "limit_price": "654.39",
+    }
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=772.6)
+    @patch("titantrade.protection._append_trade")
+    @patch("titantrade.protection.place_market_sell")
+    @patch("titantrade.protection.cancel_order")
+    @patch("titantrade.protection.get_open_orders")
+    @patch("titantrade.protection.get_positions")
+    def test_skips_sell_when_live_quote_contradicts_glitched_mark(
+        self, mock_pos, mock_orders, mock_cancel, mock_sell, mock_append,
+        mock_fetch, fake_config, tmp_state_dir,
+    ):
+        # Position mark $196 (glitched, below limit) but market $772.6 >= stop.
+        mock_pos.return_value = [
+            {"symbol": "CRWD", "qty": "15", "current_price": "196.16"},
+        ]
+        mock_orders.return_value = [self._ORDER]
+        result = check_gap_down_protection(fake_config)
+        assert result == []                 # no liquidation on a bad mark
+        mock_cancel.assert_not_called()
+        mock_sell.assert_not_called()
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=610.0)
+    @patch("titantrade.protection._append_trade")
+    @patch("titantrade.protection.place_market_sell", return_value={"id": "s1"})
+    @patch("titantrade.protection._wait_for_order_canceled", return_value="canceled")
+    @patch("titantrade.protection.cancel_order")
+    @patch("titantrade.protection.get_open_orders")
+    @patch("titantrade.protection.get_positions")
+    def test_sells_when_live_quote_confirms_gap(
+        self, mock_pos, mock_orders, mock_cancel, mock_wait, mock_sell, mock_append,
+        mock_fetch, fake_config, tmp_state_dir,
+    ):
+        # Live quote $610 < stop $661 → a REAL gap: protection must still fire.
+        mock_pos.return_value = [
+            {"symbol": "CRWD", "qty": "15", "current_price": "605.00"},
+        ]
+        mock_orders.return_value = [self._ORDER]
+        result = check_gap_down_protection(fake_config)
+        assert len(result) == 1
+        assert result[0]["trigger"] == "gap_down_protection"
+        mock_sell.assert_called_once_with("CRWD", 15, fake_config)
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=None)
+    @patch("titantrade.protection._append_trade")
+    @patch("titantrade.protection.place_market_sell", return_value={"id": "s1"})
+    @patch("titantrade.protection._wait_for_order_canceled", return_value="canceled")
+    @patch("titantrade.protection.cancel_order")
+    @patch("titantrade.protection.get_open_orders")
+    @patch("titantrade.protection.get_positions")
+    def test_sells_when_live_quote_unavailable(
+        self, mock_pos, mock_orders, mock_cancel, mock_wait, mock_sell, mock_append,
+        mock_fetch, fake_config, tmp_state_dir,
+    ):
+        # Quote fetch returns None (feed down) → fall through to the sell so a
+        # genuine unprotected position is never left bare.
+        mock_pos.return_value = [
+            {"symbol": "CRWD", "qty": "15", "current_price": "605.00"},
+        ]
+        mock_orders.return_value = [self._ORDER]
+        result = check_gap_down_protection(fake_config)
+        assert len(result) == 1
+        mock_sell.assert_called_once_with("CRWD", 15, fake_config)
