@@ -226,7 +226,7 @@ The data bundle now includes technical indicators, market context, and earnings:
 
 ### Gate Results Object
 
-Each key is a gate name (`confidence`, `earnings`, `drawdown`, `cash_reserve`, `position_size`, `sector_exposure`):
+Each key is a gate name (`confidence`, `earnings`, `drawdown`, `cash_reserve`, `overlay_cap`, `position_size`, `sector_exposure`, `macro_blackout`, `correlation`). Min-notional (dust) blocks report under `position_size`; suspect broker-data blocks report under `drawdown` (Decision 054):
 
 ```json
 {

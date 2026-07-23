@@ -87,9 +87,9 @@ These are programmatic — the AI cannot override them.
 
 1. Confidence >= 0.70
 2. Not within 5 days of earnings
-3. Portfolio drawdown < 8% from peak
+3. Portfolio drawdown < 8% from peak (values ±50% off peak are treated as broker data glitches — block + alert, Decision 054)
 4. Cash reserve >= 20% after trade
-5. Position size valid (ATR-adjusted, max 10%)
+5. Position size valid (ATR-adjusted, max 10%, and >= $500 notional — dust blocked, Decision 054)
 6. Sector exposure < 40% after trade
 
 ---

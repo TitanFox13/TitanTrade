@@ -130,6 +130,9 @@ All state lives in `state/` as JSON files. No database.
 | Confidence gate | AI quality | >= 0.70 required | risk_manager |
 | Earnings blackout | Calendar | 5 days before earnings | risk_manager |
 | Drawdown breaker | Portfolio | Halt at 8% from peak | risk_manager |
+| Min notional | Fixed | $500 per order (dust guard, Decision 054) | risk_manager |
+| Account-value sanity | Data | ±50% vs peak → suspect data: block + alert, peak untouched (Decision 054) | risk_manager |
+| Split guard | Data | Gap >30% below stop → check corporate-actions feed before liquidating (Decision 054) | protection |
 | Cash reserve | Portfolio | 20% minimum cash | risk_manager |
 | Sector exposure | Portfolio | 40% max per sector | risk_manager |
 | Thesis expiry | Time-based | 14 days max | executor |

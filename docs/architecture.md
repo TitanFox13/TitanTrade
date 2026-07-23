@@ -111,4 +111,10 @@ See [docs/agent_instructions.md](agent_instructions.md) for agent design and beh
 Six programmatic gates sit between every AI recommendation and actual trade execution.
 No AI output can bypass them — they are enforced in code, not in prompts.
 
+The gates also defend against *bad broker data*, not just bad AI output (Decision 054):
+orders below a $500 minimum notional are blocked as dust, account values ±50% off the
+recorded peak are treated as data corruption rather than real drawdowns, and gap-down
+liquidations deeper than 30% below the stop are cross-checked against the corporate-actions
+feed so a stock split is never sold as a crash.
+
 See [TitanTrade/docs/risk_management.md](../TitanTrade/docs/risk_management.md) for details.

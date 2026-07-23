@@ -85,6 +85,21 @@ curl https://trade.praguefun.cz/api/health
 # Expected: {"status": "ok"}
 ```
 
+### Updating (redeploy after code changes)
+
+```bash
+git pull
+docker compose build api titantrade   # BOTH images
+docker compose up -d api
+```
+
+The `api` and `titantrade` images drift independently: `api` runs the always-on
+server + built-in scheduler, `titantrade` runs one-off CLI commands. A deploy
+that only rebuilds `api` leaves `docker compose run titantrade ...` silently on
+stale code — this happened in production, where the CLI image ran a month-old
+build (predating the `benchmark` command) until the Decision 054 checkup
+caught it. Rebuild both, every time.
+
 ### Running CLI Commands
 
 Cron jobs use the `titantrade` service which runs one-off commands:

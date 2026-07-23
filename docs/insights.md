@@ -109,3 +109,29 @@ adjust the entry price each morning if price has moved significantly.
 - Use structured JSON logs for machine-parseable analysis
 - Rotate logs monthly to prevent unbounded growth
 - Include input data hashes for reproducibility
+
+### Broker Data Is Not Ground Truth (the CRWD Split, Decision 054)
+CRWD split 4:1 on 2026-07-02. The market traded post-split (~$193) from the
+open, but Alpaca paper adjusted the *position* three trading days later. In
+that gap the account showed a 15-share position "crashing" 71% below its stop,
+and gap-down protection sold a healthy position at the artificial bottom. The
+subtle part: the ADR 053 live-quote cross-check passed, because the quote
+genuinely was $193 — **a real price can still be a broker-state artifact**.
+Days later the same split processing made `GET /v2/account` briefly report
+$22,828 against a real ~$100k equity, tripping the drawdown breaker at a
+phantom "79.1%". Lessons baked into code (Decision 054):
+- Destructive actions need *corroboration across data sources*: a >30% gap now
+  checks the corporate-actions feed before liquidating.
+- Any single account-value observation ±50% off the recorded peak is treated
+  as data corruption — alert and sit out one run; never write it into state
+  (a glitched peak would trip the breaker forever).
+- Phantom equity swings pollute *derived analytics* long after the event: the
+  Jul 2–7 round-trip inflates benchmark drawdown/vol until it rolls out of the
+  90-day window. Know your artifacts before reading your metrics.
+
+### Dust Orders Are Pure Downside
+When nearly all cash is committed, sizing that "reduces to fit" can shrink an
+order to slivers (production: 0.01 URI shares = $11). Dust fills like a real
+trade, pays fees like a real trade, churns like a real trade — but can't carry
+a stop (Alpaca rejects stops on sub-1-share orders). A $500 minimum-notional
+floor turns these into clean near-miss records instead (Decision 054).
