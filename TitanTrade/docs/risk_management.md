@@ -33,6 +33,7 @@ Eight hard gates between the AI and the brokerage, enforced in code:
 - If portfolio drops 8%+ from peak, ALL new entries halted
 - Only resets when portfolio recovers or next weekly analyst runs
 - Prevents cascading losses in correlated selloffs
+- **Suspect-value guard** (Decision 054): a reported portfolio value more than ±50% off the recorded peak is treated as broker data corruption, not market reality (production: Alpaca paper returned $22,828 against a real ~$100k equity mid-way through CRWD's split processing, tripping the breaker at a phantom "79.1%"). Entries still pause for the run (fail-safe), but the block is labeled "suspect broker data" and alerted via Discord (deduped), and `update_peak_value` refuses to record a >+50% spike — a glitch written into the peak file would permanently trip the breaker once real values returned
 
 #### Gate 4: Cash Reserve (5% minimum, net of pending commitments)
 - Always maintain 5% of portfolio in cash (lowered from 20% — see Decision 032; cash is transit, not a destination)
@@ -46,6 +47,7 @@ Eight hard gates between the AI and the brokerage, enforced in code:
 - Low-vol stocks (JPM): larger position (maybe 12%)
 - Capped at 10% regardless (hard upper limit)
 - Falls back to fixed 10% if ATR unavailable
+- **Minimum notional floor** (Decision 054): after the cash-reserve and overlay-cap reductions, an order below `MIN_POSITION_NOTIONAL` ($500) is blocked as dust. Production filled URI 0.01 sh ($11) and ANET 0.19 sh ($35) when nearly all cash was committed — positions that can't carry stops (Alpaca rejects stops on sub-1-share orders) and only generate churn and fees. Blocked dust fails the `position_size` gate and is recorded as a near-miss like any other gate failure
 
 #### Gate 6: Sector Exposure Limit (40% max)
 - Maps each stock to its GICS sector

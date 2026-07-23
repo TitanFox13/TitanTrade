@@ -7,6 +7,7 @@ that talk to Alpaca; everything else in the package goes through here.
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from titantrade.config import Config
@@ -74,6 +75,30 @@ def get_portfolio_history(
     }
     resp = fetch_with_retry("GET", url, headers=_headers(cfg), params=params)
     return resp.json()
+
+
+def get_recent_split_announcements(
+    ticker: str, cfg: Config, lookback_days: int = 10
+) -> list[dict[str, Any]]:
+    """Return split corporate-action announcements for ticker in the recent window.
+
+    Wraps ``GET /v2/corporate_actions/announcements`` (ca_types=split). Used by
+    gap-down protection to distinguish a genuine crash from a stock split the
+    broker hasn't applied to the position yet (the CRWD 4:1 incident: market
+    traded post-split from the ex-date while Alpaca paper adjusted the position
+    three trading days later).
+    """
+    now = datetime.now(timezone.utc)
+    url = f"{cfg.alpaca.base_url}/v2/corporate_actions/announcements"
+    params = {
+        "ca_types": "split",
+        "since": (now - timedelta(days=lookback_days)).date().isoformat(),
+        "until": now.date().isoformat(),
+        "symbol": ticker,
+    }
+    resp = fetch_with_retry("GET", url, headers=_headers(cfg), params=params)
+    announcements = resp.json()
+    return announcements if isinstance(announcements, list) else []
 
 
 def get_position(ticker: str, cfg: Config) -> dict[str, Any] | None:

@@ -1,5 +1,23 @@
 # Important Decisions Log
 
+## Decision 054: Split-artifact hardening + min-notional floor (July monthly checkup)
+**Date**: 2026-07-23
+**Decision**: Three robustness fixes from the July check-up of the live server — (1) gap-down protection consults the corporate-actions feed before liquidating on an implausibly deep gap, (2) the drawdown circuit breaker treats a wildly implausible broker account value as data corruption instead of a real drawdown (and refuses to record it as a peak), (3) a $500 minimum-notional floor in the position-sizing gate blocks dust orders. Strategy behavior is deliberately untouched (the strategy-hold decision stands); all three fire only in abnormal conditions.
+
+### Why — the CRWD 4:1 split incident (2026-07-02 → 07-07)
+CRWD split 4:1 with ex-date Jul 2. The market traded post-split (~$192.67) from the open, but **Alpaca paper applied the position adjustment three trading days late** (corporate-action records dated Jul 6, processed Jul 7). In the gap:
+- **13:35 UTC Jul 2**: `check_gap_down_protection` saw 15 shares at $192.67 vs the (pre-split) $661 stop and market-sold at the artificial bottom. The ADR 053 live-quote cross-check *worked as designed* — the quote genuinely was $192.67 — proving a real quote can still be a split artifact. Equity showed a phantom −7.6% (Jul 2) and +9.1% snap-back (Jul 7) when Alpaca made the account whole; net damage ≈ $0, but the swing still pollutes `benchmark_metrics.json` (max DD −8.15%, vol 27%, Sharpe 0.89 are all artifacts — real numbers are milder).
+- **14:15 UTC Jul 7**: mid-split-processing, `GET /v2/account` returned `portfolio_value` **$22,828** against a real ~$100k equity → circuit breaker tripped at a phantom "79.1% drawdown", blocking all entries that run. The inverse glitch would have been worse: `update_peak_value` would have written the spike into `peak_portfolio.json` and permanently tripped the breaker once real values returned.
+- Separately, the month's logs showed **dust orders filling**: URI 0.01 sh ($11), ANET 0.19 sh ($35), DECK 0.18 sh — sizing shrinks to slivers when nearly all cash is committed, and the position-size gate only blocked *zero*-share orders. Dust can't carry stops (ADR 052) and just adds churn/fees.
+
+### Implementation
+- **Split guard** (`protection.py`, `broker.py`): when the (live-quote-confirmed) gap is deeper than `SPLIT_SUSPECT_GAP_PCT = 30%` below the stop — no organic large-cap overnight gap comes close; CRWD's was 71% — call the new `broker.get_recent_split_announcements(ticker)` (`GET /v2/corporate_actions/announcements`, ca_types=split, 10-day lookback). Announcement found → skip the market-sell, log + Discord alert (`notify_split_suspected`), let the broker's split processing reconcile. No announcement or feed error → sell as before (never weaken protection on missing data — same posture as ADR 053).
+- **Suspect account-value guard** (`risk_manager.py`): `SUSPECT_VALUE_DEVIATION_PCT = 50%` vs the recorded peak. Below −50%: entries stay blocked (sitting out one run is cheap insurance either way) but the event is logged/alerted as *suspect broker data* (`notify_suspect_portfolio_value`, deduped to 1/30min) — not as a real crash — and the gate detail says so. Above +50%: `update_peak_value` refuses the write, preserving the peak file. Drawdown is also clamped at ≥0 so a refused spike can't report a negative drawdown.
+- **Min-notional floor** (`risk_manager.py`): `MIN_POSITION_NOTIONAL = $500` checked in the sizing gate after the cash/overlay reductions; blocked orders fail `position_size` with a "below minimum notional (dust)" detail and flow into near-miss recording like any other gate failure. Covers both fresh entries and bracket resubmissions (both run `pre_trade_check`).
+
+### Status
+14 new regression tests (`TestGapDownSplitGuard` ×5, `TestSuspectPortfolioValue` ×5, `TestMinNotionalGate` ×4); **517 tests green, touched files ruff-clean** (also fixed 7 pre-existing lint findings in `protection.py`/`test_risk_manager.py`). Needs the usual deploy (`docker compose build api && docker compose up -d api` on titanserver). Note for the next checkup: judge benchmark metrics on windows starting ≥ 2026-07-08, or ignore the Jul 2–7 swing.
+
 ## Decision 053: Gap-down protection cross-checks the live quote before liquidating
 **Date**: 2026-07-02
 **Decision**: `check_gap_down_protection` now fetches the live market quote (`_fetch_current_price`) before firing its market-sell and skips when the live price is at/above the stop — so a stale/corrupted broker position mark can't liquidate a healthy position.

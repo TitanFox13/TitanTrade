@@ -1,5 +1,17 @@
 # TitanTrade TODO
 
+## Phase 1.31: July monthly checkup — split-artifact hardening + min-notional floor (2026-07-23) — Decision 054
+Month review of the live server (Jun 23 → Jul 22): all jobs firing, 0 ERROR/CRITICAL logs, $6.25/mo API cost, every position stop-protected. Performance: month −0.1% vs SPY +0.4%; 90d +5.11% vs SPY +5.20% (alpha +6.1%/yr, beta 0.83). Found the CRWD 4:1 split incident (bot sold the position at the post-split "bottom" on Jul 2; Alpaca paper adjusted the position 3 trading days late and made the account whole Jul 7 — net ≈ $0 but benchmark metrics polluted) and dust orders filling (URI 0.01 sh = $11).
+- [x] **Split guard**: gap-down protection consults `GET /v2/corporate_actions/announcements` for gaps >30% below the stop; skips + alerts (`notify_split_suspected`) when a recent split explains the move; no announcement / feed error → sells as before. `protection.py`, `broker.py` (`get_recent_split_announcements`).
+- [x] **Suspect account-value guard**: portfolio value ±50% off the recorded peak is treated as broker data corruption — entries blocked with a "suspect broker data" reason + deduped Discord alert, peak file never takes the glitch (`update_peak_value` refuses >+50% spikes). `risk_manager.py`.
+- [x] **Min-notional floor**: `MIN_POSITION_NOTIONAL = $500` in the sizing gate — dust orders blocked as `position_size` failures, recorded as near-misses. `risk_manager.py`.
+- [x] 14 new regression tests; **517 tests green**; ruff clean on touched files (incl. 7 pre-existing findings fixed).
+- [ ] **DEPLOY: rebuild + restart the API container** (`docker compose build api && docker compose up -d api` on titanserver).
+- [ ] **Rebuild the stale CLI image** on titanserver (`docker compose build titantrade`) — `docker compose run titantrade …` still runs a pre-ADR-051 build (doesn't know `benchmark`).
+- [ ] Optional: flatten the $11 DECK 0.11-share dust position (manual market sell) — unprotected but economically irrelevant.
+- [ ] Strategy watch item (NOT for now — hold decision stands): sentry PRICE-BASED OVERRIDE churn was the month's dominant real drag (~$1.5–2k; 7 of 10 aborts overrode Gemini's own "normal volatility" read; URI whipsawed twice). Revisit the override threshold when the hold period ends.
+- [ ] Benchmark caveat: ignore the Jul 2–7 phantom equity swing when reading `benchmark_metrics.json` (max DD/vol/Sharpe overstated until the window rolls off ~mid-October); prefer `--since 2026-07-08` windows.
+
 ## Phase 1.30: Gap-down protection cross-checks the live quote (2026-07-02) — Decision 053
 Morning-after check of the ADR 052 deploy: fix healthy (0 errors across all runs; the 19:30 pre-close run cleanly executed `DVN: SELL (ABORT)`). But spotted an Alpaca paper glitch — CRWD position marked $196 (prev-close $193) vs the real $772.6 market price (exact 4:1 phantom split on price, not share count); reported equity understated ~$9k, true equity unchanged (`last_equity` $109,046).
 - [x] Root cause of the *system* risk: `check_gap_down_protection` trusted `position.current_price` and would have liquidated healthy CRWD at the 09:35 ET gapcheck on the glitched mark.

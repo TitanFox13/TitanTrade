@@ -9,15 +9,10 @@ IMPORTANT: No AI tokens are spent in these tests.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from titantrade.risk_manager import (
-    MAX_DRAWDOWN_PCT,
-    MAX_SECTOR_EXPOSURE_PCT,
-    MIN_CASH_RESERVE_PCT,
-    MIN_CONFIDENCE,
     check_drawdown_circuit_breaker,
     check_sector_limit,
     confidence_scaled_risk,
@@ -701,3 +696,147 @@ class TestAdjustedConfidenceUsed:
             earnings_blocked=False, cfg=fake_config,
         )
         assert result["allowed"] is True
+
+
+# ---------------------------------------------------------------------------
+# Min-notional dust guard (production: URI 0.01 sh = $11, ANET 0.19 sh = $35)
+# ---------------------------------------------------------------------------
+
+class TestMinNotionalGate:
+    @pytest.fixture(autouse=True)
+    def _mock_sector(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(
+            "titantrade.risk_manager.get_stock_sector", lambda t: "Technology"
+        )
+
+    def test_dust_order_blocked(
+        self, tmp_state_dir, fake_config, bullish_thesis, sample_positions,
+    ):
+        # Cash reserve leaves only $300 investable → sizing shrinks to 1 share
+        # of a $185.50 stock = $185.50 notional < $500 floor → blocked.
+        result = pre_trade_check(
+            ticker="AAPL", thesis=bullish_thesis,
+            portfolio_value=100_000, cash_balance=5_300,
+            positions=sample_positions, stock_atr=3.0,
+            earnings_blocked=False, cfg=fake_config,
+        )
+        assert result["allowed"] is False
+        assert "position_size" in result["failed_gates"]
+        assert "minimum notional" in result["gate_results"]["position_size"]["detail"]
+        assert result["shares"] == 0
+
+    def test_sub_share_dust_blocked(
+        self, tmp_state_dir, fake_config, bullish_thesis, sample_positions,
+    ):
+        # The production shape: a high-priced stock and almost no free cash
+        # produce a fractional sliver (0.16 sh of a $1,106 stock ≈ $177).
+        thesis = dict(bullish_thesis)
+        thesis["target_entry_price"] = 1_106.15
+        result = pre_trade_check(
+            ticker="AAPL", thesis=thesis,
+            portfolio_value=100_000, cash_balance=5_180,
+            positions=sample_positions, stock_atr=3.0,
+            earnings_blocked=False, cfg=fake_config,
+        )
+        assert result["allowed"] is False
+        assert "position_size" in result["failed_gates"]
+        assert "minimum notional" in result["gate_results"]["position_size"]["detail"]
+
+    def test_position_at_floor_passes(
+        self, tmp_state_dir, fake_config, bullish_thesis, sample_positions,
+    ):
+        # $800 investable → 4 shares × $185.50 = $742 ≥ $500 → passes.
+        result = pre_trade_check(
+            ticker="AAPL", thesis=bullish_thesis,
+            portfolio_value=100_000, cash_balance=5_800,
+            positions=sample_positions, stock_atr=3.0,
+            earnings_blocked=False, cfg=fake_config,
+        )
+        assert result["allowed"] is True
+        assert result["shares"] == 4.0
+
+    def test_normal_sizing_unaffected(
+        self, tmp_state_dir, fake_config, bullish_thesis, sample_positions,
+    ):
+        # Plenty of cash: the floor must not change ordinary sizing.
+        result = pre_trade_check(
+            ticker="AAPL", thesis=bullish_thesis,
+            portfolio_value=100_000, cash_balance=50_000,
+            positions=sample_positions, stock_atr=3.0,
+            earnings_blocked=False, cfg=fake_config,
+        )
+        assert result["allowed"] is True
+        assert result["shares"] * bullish_thesis["target_entry_price"] >= 500
+
+
+# ---------------------------------------------------------------------------
+# Suspect portfolio-value guard (production: Alpaca returned $22,828 against
+# a real ~$100k equity mid-way through CRWD split processing, 2026-07-07)
+# ---------------------------------------------------------------------------
+
+class TestSuspectPortfolioValue:
+    def test_phantom_drawdown_blocks_but_preserves_peak(self, tmp_state_dir: Path):
+        # The Jul 7 numbers: peak $109,131.75, reported value $22,828.05.
+        write_state_file(
+            tmp_state_dir, "peak_portfolio.json", {"peak_value": 109_131.75}
+        )
+        tripped, pct = check_drawdown_circuit_breaker(22_828.05)
+        # Entries stay blocked (fail-safe) …
+        assert tripped is True
+        assert pct > 50
+        # … and the peak file is untouched.
+        from titantrade.risk_manager import load_peak_value
+        assert load_peak_value() == 109_131.75
+
+    def test_absurd_spike_not_recorded_as_peak(self, tmp_state_dir: Path):
+        # The inverse glitch: a 5x "gain" must not corrupt the peak file —
+        # that would permanently trip the breaker once real values return.
+        write_state_file(
+            tmp_state_dir, "peak_portfolio.json", {"peak_value": 100_000}
+        )
+        from titantrade.risk_manager import load_peak_value, update_peak_value
+        assert update_peak_value(500_000) == 100_000
+        assert load_peak_value() == 100_000
+        # And the breaker must not report a nonsense negative drawdown.
+        tripped, pct = check_drawdown_circuit_breaker(500_000)
+        assert tripped is False
+        assert pct == 0.0
+
+    def test_moderate_new_high_still_updates_peak(self, tmp_state_dir: Path):
+        # +40% is within the plausibility band — normal peak tracking.
+        write_state_file(
+            tmp_state_dir, "peak_portfolio.json", {"peak_value": 100_000}
+        )
+        from titantrade.risk_manager import load_peak_value, update_peak_value
+        assert update_peak_value(140_000) == 140_000
+        assert load_peak_value() == 140_000
+
+    def test_real_drawdown_still_trips_normally(self, tmp_state_dir: Path):
+        # A genuine 20% drawdown is NOT suspect — trips with the real number.
+        write_state_file(
+            tmp_state_dir, "peak_portfolio.json", {"peak_value": 100_000}
+        )
+        tripped, pct = check_drawdown_circuit_breaker(80_000)
+        assert tripped is True
+        assert pct == 20.0
+
+    def test_suspect_wording_in_pre_trade_check(
+        self, tmp_state_dir, fake_config, bullish_thesis, sample_positions,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setattr(
+            "titantrade.risk_manager.get_stock_sector", lambda t: "Technology"
+        )
+        write_state_file(
+            tmp_state_dir, "peak_portfolio.json", {"peak_value": 109_131.75}
+        )
+        result = pre_trade_check(
+            ticker="AAPL", thesis=bullish_thesis,
+            portfolio_value=22_828.05, cash_balance=10_000,
+            positions=sample_positions, stock_atr=3.0,
+            earnings_blocked=False, cfg=fake_config,
+        )
+        assert result["allowed"] is False
+        assert "drawdown" in result["failed_gates"]
+        detail = result["gate_results"]["drawdown"]["detail"]
+        assert "suspect broker data" in detail

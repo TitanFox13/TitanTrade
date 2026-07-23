@@ -131,6 +131,57 @@ def notify_ticker_churn(ticker: str, round_trips: int, window_days: int) -> None
     )
 
 
+def notify_suspect_portfolio_value(observed: float, peak: float) -> None:
+    """Alert when the broker reports an account value wildly off the recorded
+    peak — almost certainly a data glitch (e.g. mid-split processing), not a
+    real move. Entries are blocked for the run as a precaution; the operator
+    should NOT read this as a real crash/spike.
+    """
+    deviation = (observed - peak) / peak * 100 if peak > 0 else 0.0
+    send_discord(
+        title=f"Suspect portfolio value — ${observed:,.0f} ({deviation:+.0f}% vs peak)",
+        description=(
+            "Alpaca returned an account value implausibly far from the "
+            "recorded peak. This is treated as broker data corruption (seen "
+            "during CRWD split processing), not market reality: new entries "
+            "are paused this run and the peak file is left untouched. If it "
+            "persists across runs, investigate the account manually."
+        ),
+        color=COLOR_FAILURE,
+        fields=[
+            {"name": "Reported value", "value": f"${observed:,.0f}", "inline": True},
+            {"name": "Recorded peak", "value": f"${peak:,.0f}", "inline": True},
+            {"name": "Deviation", "value": f"{deviation:+.1f}%", "inline": True},
+        ],
+    )
+
+
+def notify_split_suspected(
+    ticker: str, price: float, stop_price: float, rate_info: str
+) -> None:
+    """Alert when gap-down protection skipped a liquidation because the "gap"
+    matches a recent split announcement — the position basis/stop are stale,
+    not the market. The broker's split processing should reconcile the
+    position; stops will be re-established on the next executor run.
+    """
+    send_discord(
+        title=f"Split guard — {ticker} gap-down skipped ({rate_info} split)",
+        description=(
+            f"{ticker} trades far below its stop, but a recent split "
+            f"announcement explains the move. Liquidation was skipped to "
+            f"avoid selling a healthy position at an artificial bottom "
+            f"(the CRWD 4:1 lesson). Verify the position after the broker "
+            f"applies the split."
+        ),
+        color=COLOR_STRATEGY,
+        fields=[
+            {"name": "Ticker", "value": ticker, "inline": True},
+            {"name": "Market price", "value": f"${price:,.2f}", "inline": True},
+            {"name": "Stale stop", "value": f"${stop_price:,.2f}", "inline": True},
+        ],
+    )
+
+
 def notify_sentry_degraded(fallback_count: int, total: int, run_type: str) -> None:
     """Alert when Gemini is down and the sentry's news-based layer is offline.
 

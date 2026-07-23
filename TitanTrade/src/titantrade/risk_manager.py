@@ -7,6 +7,7 @@ from correlated selloffs, overconcentration, and volatility mismatches.
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -41,6 +42,23 @@ MACRO_BLACKOUT_HOURS = 6        # No new entries within 6h of high-impact macro 
 # cannot exceed). Up from the de-facto ~10% cap so a 0.95-confidence thesis
 # can take a real position, not a token one.
 MAX_POSITION_PCT = 0.25
+
+# Minimum dollar value for a new position. When nearly all cash is committed,
+# the cash/overlay reductions in the sizing gate can shrink an order to
+# fractional dust (production: URI 0.01 sh = $11, ANET 0.19 sh = $35 — all
+# filled). Dust positions can't carry stops (Alpaca rejects stops on
+# sub-1-share orders, ADR 052) and just generate churn and fees. Below this
+# floor the trade isn't worth having: block instead.
+MIN_POSITION_NOTIONAL = 500.0
+
+# Single-observation deviation vs the recorded peak beyond which a broker-
+# reported portfolio value is treated as corrupted data rather than market
+# reality. A diversified long-only equity book cannot organically move ±50%
+# between two executor runs; production saw Alpaca paper return $22,828
+# against a real ~$100k equity mid-way through processing the CRWD 4:1 split
+# (2026-07-07), tripping the drawdown breaker at a phantom "79.1%". The
+# inverse glitch would silently corrupt peak_portfolio.json forever.
+SUSPECT_VALUE_DEVIATION_PCT = 50.0
 
 # Max % of portfolio across all AI-overlay positions combined. Caps the
 # total stock-picking sleeve so the always-deployed core (30% SPY by default)
@@ -96,8 +114,21 @@ def load_peak_value() -> float:
 
 
 def update_peak_value(current_value: float) -> float:
-    """Update peak if current value is a new high. Returns the peak."""
+    """Update peak if current value is a new high. Returns the peak.
+
+    Refuses implausible upward spikes (> SUSPECT_VALUE_DEVIATION_PCT above
+    the recorded peak): a glitched broker value written into the peak file
+    would permanently trip the drawdown breaker once real values return.
+    """
     peak = load_peak_value()
+    if peak > 0 and current_value > peak * (1 + SUSPECT_VALUE_DEVIATION_PCT / 100):
+        log.warning(
+            f"SUSPECT PORTFOLIO VALUE: ${current_value:,.2f} is >"
+            f"{SUSPECT_VALUE_DEVIATION_PCT:.0f}% above peak ${peak:,.2f} — "
+            f"likely broker data glitch, NOT recording as new peak"
+        )
+        _notify_suspect_value(current_value, peak)
+        return peak
     if current_value > peak:
         peak = current_value
         with open(_peak_state_path(), "w") as f:
@@ -109,18 +140,53 @@ def update_peak_value(current_value: float) -> float:
     return peak
 
 
+# Suspect-value Discord alerts are deduped: the gates run once per candidate
+# ticker, so a single glitched executor run would otherwise fire 8+ webhooks.
+_SUSPECT_ALERT_INTERVAL_S = 1800.0
+_last_suspect_alert: float = 0.0
+
+
+def _notify_suspect_value(observed: float, peak: float) -> None:
+    global _last_suspect_alert
+    now = time.monotonic()
+    if _last_suspect_alert and now - _last_suspect_alert < _SUSPECT_ALERT_INTERVAL_S:
+        return
+    _last_suspect_alert = now
+    try:
+        from titantrade.notifier import notify_suspect_portfolio_value
+        notify_suspect_portfolio_value(observed, peak)
+    except Exception:  # noqa: BLE001 — alerting must never break the gates
+        log.exception("Failed to send suspect-portfolio-value alert")
+
+
 def check_drawdown_circuit_breaker(portfolio_value: float) -> tuple[bool, float]:
     """Check if portfolio drawdown exceeds the max allowed.
 
     Returns (is_tripped, drawdown_pct).
     If tripped, NO new entries should be made.
+
+    A "drawdown" beyond SUSPECT_VALUE_DEVIATION_PCT is treated as broker data
+    corruption (see the constant's comment): entries stay blocked — sitting
+    out one run is cheap insurance either way — but the event is alerted as
+    a data problem so the operator doesn't read it as a real 79% crash.
     """
+    peak = load_peak_value()
+    if peak > 0 and portfolio_value < peak * (1 - SUSPECT_VALUE_DEVIATION_PCT / 100):
+        drawdown_pct = (peak - portfolio_value) / peak * 100
+        log.warning(
+            f"SUSPECT PORTFOLIO VALUE: ${portfolio_value:,.2f} is "
+            f"{drawdown_pct:.1f}% below peak ${peak:,.2f} — likely broker "
+            f"data glitch; blocking entries this run as a precaution"
+        )
+        _notify_suspect_value(portfolio_value, peak)
+        return True, round(drawdown_pct, 2)
+
     peak = update_peak_value(portfolio_value)
 
     if peak <= 0:
         return False, 0.0
 
-    drawdown_pct = (peak - portfolio_value) / peak * 100
+    drawdown_pct = max((peak - portfolio_value) / peak * 100, 0.0)
 
     if drawdown_pct >= MAX_DRAWDOWN_PCT:
         log.warning(
@@ -567,7 +633,15 @@ def pre_trade_check(
     # Gate 3: Drawdown circuit breaker
     breaker_tripped, drawdown = check_drawdown_circuit_breaker(portfolio_value)
     if breaker_tripped:
-        _fail("drawdown", f"Circuit breaker: {drawdown:.1f}% drawdown from peak")
+        if drawdown >= SUSPECT_VALUE_DEVIATION_PCT:
+            _fail(
+                "drawdown",
+                f"Portfolio value ${portfolio_value:,.0f} deviates "
+                f"{drawdown:.0f}% from peak — suspect broker data, "
+                f"blocking as precaution",
+            )
+        else:
+            _fail("drawdown", f"Circuit breaker: {drawdown:.1f}% drawdown from peak")
     else:
         _pass("drawdown", f"Drawdown {drawdown:.1f}% within limit")
         if drawdown > MAX_DRAWDOWN_PCT * 0.7:
@@ -629,7 +703,16 @@ def pre_trade_check(
                     f"(overlay cap, ${overlay_headroom:,.0f} headroom)"
                 )
 
-        if shares <= 0 and "overlay_cap" not in result["failed_gates"]:
+        # Dust guard: an order that survives the cash/overlay reductions can
+        # still be economically meaningless. Block below the notional floor.
+        if 0 < shares * entry_price < MIN_POSITION_NOTIONAL:
+            _fail(
+                "position_size",
+                f"Position ${shares * entry_price:,.0f} below "
+                f"${MIN_POSITION_NOTIONAL:,.0f} minimum notional (dust)",
+            )
+            shares = 0.0
+        elif shares <= 0 and "overlay_cap" not in result["failed_gates"]:
             _fail("position_size", f"Position size is 0 shares at ${entry_price}")
         elif shares > 0:
             pct = (shares * entry_price / portfolio_value * 100) if portfolio_value > 0 else 0

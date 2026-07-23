@@ -7,18 +7,28 @@ from __future__ import annotations
 
 from typing import Any
 
+from titantrade.config import Config
 from titantrade.logger import get_logger, log_decision
 from titantrade.retry import HTTPError
 from titantrade.broker import (
     get_positions, get_open_orders, cancel_order,
     cancel_all_orders_for_ticker, close_position_at_market,
     place_market_sell, _wait_for_order_canceled,
+    get_recent_split_announcements,
 )
 from titantrade.trade_state import _append_trade, _load, _trade_record
 from titantrade.trailing_state import _cleanup_trailing_state
 from titantrade.core_allocation import _is_core_ticker
 
 log = get_logger("protection")
+
+# Gap size (fraction below the stop price) beyond which a "gap-down" is more
+# plausibly a stock split the broker hasn't applied to the position yet than
+# a real overnight crash. The CRWD 4:1 split traded at $192.67 against a $661
+# stop (71% below); organic overnight gaps on large-cap equities don't come
+# close. Above this threshold we consult the corporate-actions feed before
+# liquidating.
+SPLIT_SUSPECT_GAP_PCT = 0.30
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +208,45 @@ def check_gap_down_protection(cfg: Config) -> list[dict[str, Any]]:
                         f"stale/glitched position price, skipping market-sell"
                     )
                     break
+                # A live quote below the stop confirms the *price* is real —
+                # but it can still be a split artifact: on CRWD's 4:1 split
+                # the market genuinely traded at $192.67 while the pre-split
+                # stop sat at $661, and Alpaca paper applied the position
+                # adjustment three trading days late. This gate sold the
+                # (healthy) position at that artificial bottom (2026-07-02).
+                # For a gap this deep, check the corporate-actions feed: a
+                # recent split announcement means the position basis/stop are
+                # stale, not the market — skip and alert; the broker's split
+                # processing will reconcile the position. A feed error falls
+                # through to the sell — never weaken protection on missing
+                # data (same posture as the live-quote check above).
+                effective_price = market_price or current_price
+                if effective_price < stop_price * (1 - SPLIT_SUSPECT_GAP_PCT):
+                    try:
+                        splits = get_recent_split_announcements(ticker, cfg)
+                    except Exception:  # noqa: BLE001
+                        splits = []
+                    if splits:
+                        ann = splits[0]
+                        # Alpaca announces a 4-for-1 split as new_rate=4,
+                        # old_rate=1 — display in the conventional "4:1" order.
+                        rate_info = (
+                            f"{ann.get('new_rate', '?')}:{ann.get('old_rate', '?')}"
+                        )
+                        log.warning(
+                            f"GAP-DOWN for {ticker} looks like a STOCK SPLIT "
+                            f"(${effective_price:.2f} vs stop ${stop_price:.2f}, "
+                            f"announcement rate {rate_info}) — skipping "
+                            f"market-sell, awaiting broker split processing"
+                        )
+                        try:
+                            from titantrade.notifier import notify_split_suspected
+                            notify_split_suspected(
+                                ticker, effective_price, stop_price, rate_info,
+                            )
+                        except Exception:  # noqa: BLE001
+                            log.exception("Failed to send split-guard alert")
+                        break
                 log.warning(
                     f"GAP-DOWN DETECTED: {ticker} at ${current_price:.2f} "
                     f"below stop-limit ${stop_price:.2f}/${limit_price:.2f}"

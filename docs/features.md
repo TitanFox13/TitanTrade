@@ -107,9 +107,9 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 ### Six Entry Gates (ALL must pass)
 1. **Confidence threshold**: AI confidence >= 0.70
 2. **Earnings blackout**: No entry within 5 days of earnings
-3. **Drawdown circuit breaker**: Halts at 8% portfolio drawdown from peak
+3. **Drawdown circuit breaker**: Halts at 8% portfolio drawdown from peak. A reported value ±50% off the peak is treated as broker data corruption (Decision 054): entries pause with a "suspect broker data" reason + Discord alert, and the glitch is never written into the peak file
 4. **Cash reserve**: Maintains 20% minimum cash at all times
-5. **Volatility-adjusted sizing**: ATR-based, targeting 2% risk per position, scaled by confidence (0.7x at 0.70 to 1.3x at 1.00)
+5. **Volatility-adjusted sizing**: ATR-based, targeting 2% risk per position, scaled by confidence (0.7x at 0.70 to 1.3x at 1.00). Orders below a $500 minimum notional are blocked as dust (Decision 054) — they can't carry stops and only add churn
 6. **Sector exposure limit**: Max 40% of portfolio in any single sector
 
 ### Broker-Native Stop-Losses
@@ -118,7 +118,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - Stops live on Alpaca's servers, fire 24/7 even if bot is offline
 - Orphan detection: every run checks held positions have a stop order
 - **Bracket resubmission**: expired day-only brackets are auto-resubmitted next morning with dynamically adjusted entry prices based on current market conditions (resubmits floor to whole shares — a sub-1-share size is skipped, never sent as a fractional bracket that Alpaca rejects with HTTP 422)
-- **Gap-down protection**: detects unfilled stop-limit orders after overnight gaps and immediately market-sells the unprotected position. The stale stop's cancel is polled to a terminal state *before* the market sell so the sell isn't rejected for still-held qty (Decision 035)
+- **Gap-down protection**: detects unfilled stop-limit orders after overnight gaps and immediately market-sells the unprotected position. The stale stop's cancel is polled to a terminal state *before* the market sell so the sell isn't rejected for still-held qty (Decision 035). Before selling, the live market quote is cross-checked (Decision 053), and gaps deeper than 30% below the stop are checked against the corporate-actions feed — a recent split announcement means the stop is stale, not the market, so the sale is skipped and alerted instead of liquidating at a split-artifact bottom (Decision 054, the CRWD 4:1 lesson)
 - **Never-bare guarantee** (Decision 035): after a partial sell (TP1), the sell is polled to `filled` before the breakeven stop is sized; `place_native_stop_loss` clamps to the broker-reported `available` qty if momentarily short. A position is never left without a stop after a partial sell or stop replace.
 
 ### Trailing Stops
