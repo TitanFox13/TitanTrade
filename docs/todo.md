@@ -6,9 +6,9 @@ Month review of the live server (Jun 23 → Jul 22): all jobs firing, 0 ERROR/CR
 - [x] **Suspect account-value guard**: portfolio value ±50% off the recorded peak is treated as broker data corruption — entries blocked with a "suspect broker data" reason + deduped Discord alert, peak file never takes the glitch (`update_peak_value` refuses >+50% spikes). `risk_manager.py`.
 - [x] **Min-notional floor**: `MIN_POSITION_NOTIONAL = $500` in the sizing gate — dust orders blocked as `position_size` failures, recorded as near-misses. `risk_manager.py`.
 - [x] 14 new regression tests; **517 tests green**; ruff clean on touched files (incl. 7 pre-existing findings fixed).
-- [ ] **DEPLOY: rebuild + restart the API container** (`docker compose build api && docker compose up -d api` on titanserver).
-- [ ] **Rebuild the stale CLI image** on titanserver (`docker compose build titantrade`) — `docker compose run titantrade …` still runs a pre-ADR-051 build (doesn't know `benchmark`).
-- [ ] Optional: flatten the $11 DECK 0.11-share dust position (manual market sell) — unprotected but economically irrelevant.
+- [x] **DEPLOYED 2026-07-23 ~09:35 UTC** (commit 76f7595): API container rebuilt + restarted; scheduler verified live (all 8 jobs registered, correct ET next-run times) — well before the day's 13:35 UTC gapcheck.
+- [x] **CLI image rebuilt** (`docker compose build titantrade`) — verified: `benchmark --since 2026-07-08` runs. Clean post-artifact window (9 trading days): strategy +0.01% vs SPY +0.39%, beta 0.64, vol 10.5% (vs the polluted 27%), max DD −1.64% (vs polluted −8.15%), down-capture 0.72.
+- [x] DECK 0.11-share dust: sell_to_close day market order submitted (accepted, fills at the 09:30 ET open).
 - [ ] Strategy watch item (NOT for now — hold decision stands): sentry PRICE-BASED OVERRIDE churn was the month's dominant real drag (~$1.5–2k; 7 of 10 aborts overrode Gemini's own "normal volatility" read; URI whipsawed twice). Revisit the override threshold when the hold period ends.
 - [ ] Benchmark caveat: ignore the Jul 2–7 phantom equity swing when reading `benchmark_metrics.json` (max DD/vol/Sharpe overstated until the window rolls off ~mid-October); prefer `--since 2026-07-08` windows.
 
