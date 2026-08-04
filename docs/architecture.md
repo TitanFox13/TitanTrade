@@ -117,4 +117,9 @@ recorded peak are treated as data corruption rather than real drawdowns, and gap
 liquidations deeper than 30% below the stop are cross-checked against the corporate-actions
 feed so a stock split is never sold as a crash.
 
+Entry validation additionally refuses degenerate setups (Decision 055): a stop closer
+than 1.5% to the entry (a noise-level stop that would tag out within minutes), and any
+entry or bracket resubmission for a ticker whose current sentry signal is ABORT (the
+executor is about to exit it — entering first just forces a same-minute round-trip).
+
 See [TitanTrade/docs/risk_management.md](../TitanTrade/docs/risk_management.md) for details.

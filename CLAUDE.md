@@ -34,7 +34,7 @@ uv run python -m titantrade download-history [dir]  # Download OHLCV for backtes
 cd TitanTrade && uv run --extra test python -m pytest tests/ -v
 ```
 
-`pytest` lives in the `test` optional-dependency extra, so the `--extra test` flag is required (a bare `uv run` omits it → `No module named pytest`). All 496 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens. `ruff`/`vulture` are in the `dev` extra for lint/dead-code checks.
+`pytest` lives in the `test` optional-dependency extra, so the `--extra test` flag is required (a bare `uv run` omits it → `No module named pytest`). All 524 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens. `ruff`/`vulture` are in the `dev` extra for lint/dead-code checks.
 
 ### Flutter app (from titan_trade_app/)
 

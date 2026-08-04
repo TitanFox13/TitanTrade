@@ -133,6 +133,8 @@ All state lives in `state/` as JSON files. No database.
 | Min notional | Fixed | $500 per order (dust guard, Decision 054) | risk_manager |
 | Account-value sanity | Data | ±50% vs peak → suspect data: block + alert, peak untouched (Decision 054) | risk_manager |
 | Split guard | Data | Gap >30% below stop → check corporate-actions feed before liquidating (Decision 054) | protection |
+| Min stop distance | Fixed | Stop < 1.5% below entry → entry/resubmit refused as noise-level (Decision 055) | pricing/entries |
+| Same-run ABORT guard | Sequencing | Current sentry ABORT → no entry/resubmit (exit is coming, Decision 055) | entries |
 | Cash reserve | Portfolio | 20% minimum cash | risk_manager |
 | Sector exposure | Portfolio | 40% max per sector | risk_manager |
 | Thesis expiry | Time-based | 14 days max | executor |

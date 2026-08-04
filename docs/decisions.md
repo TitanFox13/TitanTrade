@@ -1,6 +1,22 @@
 # Important Decisions Log
 
-## Decision 054: Split-artifact hardening + min-notional floor (July monthly checkup)
+## Decision 055: Same-run ABORT entry guard + minimum stop-distance floor (August checkup)
+**Date**: 2026-08-04
+**Decision**: Two execution fixes from the August check-up of the live server (Jul 23 → Aug 4 window — 0 errors, all jobs green, first clean window beating SPY on both raw and risk-adjusted return). Both fix low-cost but structural defects observed in the 2026-07-31 logs; strategy behavior is untouched (the strategy-hold decision stands).
+
+### Fix 1 — bracket resubmission ignored the same-run sentry ABORT (`entries.py`)
+At the Jul 31 14:15 run the sentry wrote `LLY: ABORT` (news-confirmed −4.3%) at 14:15:04; `resubmit_expired_brackets` bought a 12-share LLY bracket at 14:15:27; the abort handler then market-sold those shares at 14:15:45 — an 18-second forced round-trip (~$14 + fees). The 72h re-entry cooldown cannot prevent this: it is recorded when the abort is *handled*, which happens **after** resubmission runs in `execute_trades`. Root cause: the resubmit path (unlike the executor's per-ticker loop, which dispatches ABORT before any entry) never consulted the current signal.
+**Fix**: `resubmit_expired_brackets` — which already loads `sentry_signals.json` for the cooldown override — now skips any ticker whose current signal is ABORT ("exiting, not entering"). Defense-in-depth: `_handle_bullish_entry` gets the same guard at the top (unreachable from the executor loop today, but any other caller now inherits the never-enter-on-ABORT guarantee). Skipping is always safe: if the ABORT is stale, the next sentry run (which always precedes execute in the schedule) refreshes it.
+
+### Fix 2 — no minimum stop-distance floor (`pricing.py`, `entries.py`)
+On Jul 31 19:30 URI entered at $1,084.25 with a $1,081.25 stop — **0.28%** below entry — and the GTC stop tagged out 27 minutes later on ordinary noise. The prompt tells Claude stops under 1.5× ATR get noise-stopped, but nothing in code enforced a floor; `bracket_levels_invalid` (ADR 044) only rejects stop ≥ entry. These degenerate stops typically arise when an ADJUST-review thesis (stop tightened to protect profit on a *held* position) is reused for a fresh entry after the position exits — the same artifact class as ADR 044.
+**Fix**: new pure `pricing.stop_too_tight(entry, stop)` with `MIN_STOP_DISTANCE_PCT = 1.5` — refuses (skip + INFO log, same posture as `bracket_levels_invalid`) any fresh entry or resubmission whose stop sits < 1.5% below entry. Deliberately a **flat** floor, not ATR-scaled: 1× ATR exceeds the normal 3–5% thesis stop distance on high-vol names and would start refusing legitimate entries — the goal is catching degenerate artifacts (0.28%, 0.47% observed), not re-engineering stop policy. Fires only strictly below entry (at/above stays `bracket_levels_invalid`'s report). The existing tranche2 dip-buy validation (ADR 052) is unchanged.
+
+### Also applied (ADR 049 follow-through)
+The FANG → WMT watchlist swap — staged since Jun 17 — was finally applied to the live `data/watchlist.json` on titanserver in this deploy window. FANG was confirmed flat (position sold Jul 27, no open orders/trailing/cooldown state), satisfying ADR 049's "remove only when flat" rule. First WMT thesis arrives with the Sunday Aug 9 analysis.
+
+### Status
+7 new regression tests (`TestResubmitSameRunAbortSkip` ×3, `TestMinStopDistanceFloor` ×4); **524 tests green, touched files ruff-clean**. Deployed 2026-08-04 (both images rebuilt per the ADR 054 CLI-image lesson).
 **Date**: 2026-07-23
 **Decision**: Three robustness fixes from the July check-up of the live server — (1) gap-down protection consults the corporate-actions feed before liquidating on an implausibly deep gap, (2) the drawdown circuit breaker treats a wildly implausible broker account value as data corruption instead of a real drawdown (and refuses to record it as a peak), (3) a $500 minimum-notional floor in the position-sizing gate blocks dust orders. Strategy behavior is deliberately untouched (the strategy-hold decision stands); all three fire only in abnormal conditions.
 

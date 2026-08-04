@@ -1,5 +1,14 @@
 # TitanTrade TODO
 
+## Phase 1.32: August checkup — same-run ABORT guard + min stop-distance floor (2026-08-04) — Decision 055
+Checkup of the live server (Jul 23 → Aug 4): 0 ERROR/CRITICAL in 12 days, all 8 jobs green, $7.80/mo API cost, every overlay position stop-protected. Performance (clean window `--since 2026-07-08`, 18 trading days): **+1.96% vs SPY +1.67%, beta 0.49, Sharpe 2.29 vs 1.74, down-capture 0.64** — first window beating SPY on both raw and risk-adjusted return. ADR 054 guards verified live (13 dust orders blocked as near-misses; split/suspect guards correctly silent).
+- [x] **Fix 1 — resubmit ignores same-run ABORT**: sentry wrote LLY ABORT 14:15:04 (Jul 31), resubmission bought 12 LLY 14:15:27, abort handler sold them 14:15:45. `resubmit_expired_brackets` now skips tickers whose current sentry signal is ABORT; `_handle_bullish_entry` gets the same defensive guard. `entries.py`.
+- [x] **Fix 2 — minimum stop-distance floor**: URI entered $1084.25 / stop $1081.25 (0.28%) and was noise-stopped 27 min later. New `pricing.stop_too_tight` (`MIN_STOP_DISTANCE_PCT = 1.5%`, flat not ATR-scaled) refuses fresh entries/resubmits with noise-level stops. `pricing.py`, `entries.py`.
+- [x] 7 new regression tests; **524 tests green**; touched files ruff-clean.
+- [x] **FANG → WMT watchlist swap applied to live server** (ADR 049 follow-through; FANG confirmed flat since Jul 27). First WMT thesis: Sunday Aug 9 analysis.
+- [x] Deployed 2026-08-04: both images rebuilt (`api` + `titantrade`), API container restarted, scheduler verified.
+- [ ] Abort churn watch item (hold decision stands): Jul 28 cluster (ANET/DVN/URI, ~$1–1.2k incl. re-entry slippage) was all news-confirmed or catastrophic — the graduated-severity design working; churn is now genuine-signal whipsaw, not threshold noise. Sentry override threshold remains the #1 lever when the hold ends.
+
 ## Phase 1.31: July monthly checkup — split-artifact hardening + min-notional floor (2026-07-23) — Decision 054
 Month review of the live server (Jun 23 → Jul 22): all jobs firing, 0 ERROR/CRITICAL logs, $6.25/mo API cost, every position stop-protected. Performance: month −0.1% vs SPY +0.4%; 90d +5.11% vs SPY +5.20% (alpha +6.1%/yr, beta 0.83). Found the CRWD 4:1 split incident (bot sold the position at the post-split "bottom" on Jul 2; Alpaca paper adjusted the position 3 trading days late and made the account whole Jul 7 — net ≈ $0 but benchmark metrics polluted) and dust orders filling (URI 0.01 sh = $11).
 - [x] **Split guard**: gap-down protection consults `GET /v2/corporate_actions/announcements` for gaps >30% below the stop; skips + alerts (`notify_split_suspected`) when a recent split explains the move; no announcement / feed error → sells as before. `protection.py`, `broker.py` (`get_recent_split_announcements`).
@@ -52,7 +61,7 @@ Log review of `titantrade-api-1` since the 2026-06-22 restart: system healthy (0
 - [x] Dropped **FANG** (redundant with held DVN, and not currently held → no forced sell); added **WMT** (Consumer Staples, beta 0.46, 0.17 avg corr — defensive ballast that still trends, so the momentum overlay will use it). Now 15 names / 9 sectors.
 - [x] Decided NOT to add mega-cap tech — the 30% SPY core already holds Mag-7; overlay should complement the core, not duplicate it.
 - [x] Applied to `config.py` default + backtest `SECTOR_MAP`; ADR 049.
-- [ ] **Not live** — update `data/watchlist.json` on the server (Flutter watchlist screen or direct) in a deploy window to activate. Watchlist changes can't be backtested (survivorship); judge on forward paper performance.
+- [x] **Applied to the live server 2026-08-04** (Phase 1.32 deploy window; FANG confirmed flat since Jul 27). Watchlist changes can't be backtested (survivorship); judge WMT on forward paper performance.
 
 ## Phase 1.25: Widen trailing ATR multiplier 2.5 -> 3.0 (2026-06-17) — Decision 048
 Goal: more upside in rallies without losing the downside protection. Trailing width is the asymmetric lever (only affects winners; losers exit at the unchanged initial stop).
