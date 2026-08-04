@@ -23,7 +23,7 @@ from titantrade.trade_state import (
 )
 from titantrade.pricing import (
     compute_trend_regime, adapt_entry_levels, bracket_levels_invalid,
-    stock_atr, earnings_blocked, vix_level,
+    stock_atr, earnings_blocked, vix_level, stop_too_tight,
 )
 from titantrade.cooldown import (
     _is_in_cooldown, cooldown_override_allowed, REENTRY_COOLDOWN_HOURS,
@@ -187,6 +187,14 @@ def _handle_bullish_entry(
         log.warning(f"No entry/stop price for {ticker} - skipping")
         return None
 
+    # Defense-in-depth: never open a position against a current ABORT signal.
+    # The executor loop already dispatches ABORT before reaching this function,
+    # but any other caller must get the same guarantee (see the resubmit-path
+    # fix in resubmit_expired_brackets — the LLY same-run round-trip).
+    if sentry and sentry.get("signal") == "ABORT":
+        log.info(f"Skipping {ticker} bullish entry: current sentry signal is ABORT")
+        return None
+
     # Fetch current price up front — used by both the cooldown override and
     # the trend-aware entry adjustment below.
     try:
@@ -284,6 +292,14 @@ def _handle_bullish_entry(
     invalid = bracket_levels_invalid(entry_price, stop_price, take_profit_price)
     if invalid:
         log.info(f"Skipping {ticker} bullish entry: {invalid}")
+        return None
+
+    # Minimum stop-distance floor: a stop within noise distance of the entry
+    # is valid bracket math but a guaranteed immediate stop-out (production:
+    # URI entered $1084.25 / stop $1081.25 = 0.28%, tagged out 27 min later).
+    too_tight = stop_too_tight(entry_price, stop_price)
+    if too_tight:
+        log.info(f"Skipping {ticker} bullish entry: {too_tight}")
         return None
 
     # ---- Risk-gate inputs from the data bundle ----
@@ -557,6 +573,15 @@ def resubmit_expired_brackets(
             _log_skip(ticker, "thesis no longer bullish/selected")
             continue
 
+        # Same-run sentry ABORT: the executor is about to EXIT this ticker,
+        # and the 72h cooldown only starts once that abort is handled — which
+        # happens *after* this function runs. Without this check the resubmit
+        # buys a bracket the abort handler then market-sells seconds later
+        # (production: LLY bought 14:15:27, abort-sold 14:15:45 on 2026-07-31).
+        if sentry_by_ticker.get(ticker, {}).get("signal") == "ABORT":
+            _log_skip(ticker, "current sentry signal is ABORT — exiting, not entering")
+            continue
+
         if ticker in held_tickers:
             _log_skip(ticker, "already holding position")
             continue
@@ -666,6 +691,13 @@ def resubmit_expired_brackets(
         invalid = bracket_levels_invalid(entry_price, stop_price, take_profit_price)
         if invalid:
             log.info(f"Skipping resubmission for {ticker}: {invalid}")
+            continue
+
+        # Minimum stop-distance floor — same guard as the first-entry path
+        # (a noise-level stop is a guaranteed immediate stop-out).
+        too_tight = stop_too_tight(entry_price, stop_price)
+        if too_tight:
+            _log_skip(ticker, too_tight)
             continue
 
         atr = stock_atr(ticker, data_bundle)

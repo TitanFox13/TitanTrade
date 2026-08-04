@@ -184,3 +184,35 @@ def bracket_levels_invalid(
     if take_profit_price is not None and stop_price is not None and take_profit_price <= stop_price:
         return f"take_profit ${take_profit_price:.2f} <= stop ${stop_price:.2f} (bracket math invalid)"
     return None
+
+
+# A stop closer than this (% of entry) is inside normal intraday noise and
+# gets tagged out within minutes of the fill: production URI entered at
+# $1084.25 with a $1081.25 stop (0.28%) and was stopped out 27 minutes later
+# (2026-07-31). Typical thesis stops run 3-5%, so 1.5% only catches the
+# degenerate artifacts — usually an ADJUST-review thesis whose tightened
+# stop was reused for a fresh entry. Deliberately a flat floor, not
+# ATR-scaled: 1x ATR exceeds the normal stop distance on high-vol names and
+# would start refusing legitimate entries.
+MIN_STOP_DISTANCE_PCT = 1.5
+
+
+def stop_too_tight(entry_price: float | None, stop_price: float | None) -> str | None:
+    """Return a reason string when the stop sits within noise distance of the
+    entry (< ``MIN_STOP_DISTANCE_PCT``% below it), or None if acceptable.
+
+    Only fires for a stop strictly *below* the entry — a stop at/above entry
+    is invalid bracket math and is ``bracket_levels_invalid``'s job to report.
+    """
+    if not entry_price or not stop_price:
+        return None
+    distance_pct = (entry_price - stop_price) / entry_price * 100
+    if distance_pct <= 0:
+        return None
+    if distance_pct < MIN_STOP_DISTANCE_PCT:
+        return (
+            f"stop ${stop_price:.2f} is only {distance_pct:.2f}% below entry "
+            f"${entry_price:.2f} (< {MIN_STOP_DISTANCE_PCT}% floor) — "
+            f"noise-level stop would tag out immediately"
+        )
+    return None

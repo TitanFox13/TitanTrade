@@ -342,3 +342,169 @@ class TestTranche2TightStopSkip:
         )
         assert result is not None
         assert mock_bracket.call_count == 2  # both tranches placed
+
+
+# ---------------------------------------------------------------------------
+# ADR 055 fix 1: resubmission skips tickers with a current-run sentry ABORT
+# ---------------------------------------------------------------------------
+
+class TestResubmitSameRunAbortSkip:
+    """Production 2026-07-31: the sentry wrote LLY ABORT at 14:15:04, the
+    resubmit path bought a 12-share LLY bracket at 14:15:27, and the abort
+    handler market-sold it at 14:15:45 — an 18-second forced round-trip. The
+    72h cooldown can't prevent this because it's recorded when the abort is
+    HANDLED, which happens *after* resubmission runs — so the resubmit path
+    must check the signal itself.
+    """
+
+    def _expired(self, ticker="LLY"):
+        return {
+            "id": "exp-1", "symbol": ticker, "status": "expired",
+            "order_class": "bracket", "side": "buy",
+            "limit_price": "1124.00", "qty": "12",
+        }
+
+    def _thesis_doc(self, ticker="LLY"):
+        return {"theses": [{
+            "ticker": ticker, "thesis": "BULLISH", "confidence": 0.75,
+            "selected_for_trading": True, "review_action": "NEW",
+            "target_entry_price": 1124.0, "stop_loss_price": 1092.0,
+            "take_profit_price": 1272.0, "reasoning": "x",
+        }]}
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=None)
+    @patch("titantrade.entries._ensure_gtc_stop_on_fill", return_value=None)
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_positions", return_value=[])
+    @patch("titantrade.entries.get_open_orders", return_value=[])
+    @patch("titantrade.entries.get_account",
+           return_value={"portfolio_value": "100000", "cash": "60000"})
+    @patch("titantrade.entries.get_expired_brackets")
+    def test_skips_resubmit_when_current_signal_is_abort(
+        self, mock_expired, mock_account, mock_open, mock_pos, mock_bracket,
+        mock_ensure, mock_price, fake_config, tmp_state_dir, monkeypatch,
+    ):
+        from tests.conftest import write_state_file
+        monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: "Healthcare")
+        mock_expired.return_value = [self._expired("LLY")]
+        write_state_file(tmp_state_dir, "sentry_signals.json", {
+            "signals": [{"ticker": "LLY", "signal": "ABORT",
+                         "reasoning": "news-confirmed -4.3% adverse move"}],
+        })
+        result = resubmit_expired_brackets(fake_config, self._thesis_doc(), [], {})
+        assert result == []
+        mock_bracket.assert_not_called()
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=None)
+    @patch("titantrade.entries._ensure_gtc_stop_on_fill", return_value=None)
+    @patch("titantrade.entries.place_bracket_order", return_value={"id": "br"})
+    @patch("titantrade.entries.get_positions", return_value=[])
+    @patch("titantrade.entries.get_open_orders", return_value=[])
+    @patch("titantrade.entries.get_account",
+           return_value={"portfolio_value": "100000", "cash": "60000"})
+    @patch("titantrade.entries.get_expired_brackets")
+    def test_resubmits_when_current_signal_is_continue(
+        self, mock_expired, mock_account, mock_open, mock_pos, mock_bracket,
+        mock_ensure, mock_price, fake_config, tmp_state_dir, monkeypatch,
+    ):
+        from tests.conftest import write_state_file
+        monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: "Healthcare")
+        mock_expired.return_value = [self._expired("LLY")]
+        write_state_file(tmp_state_dir, "sentry_signals.json", {
+            "signals": [{"ticker": "LLY", "signal": "CONTINUE", "reasoning": "clear"}],
+        })
+        result = resubmit_expired_brackets(fake_config, self._thesis_doc(), [], {})
+        assert len(result) == 1
+        mock_bracket.assert_called_once()
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=None)
+    @patch("titantrade.entries.place_bracket_order")
+    def test_bullish_entry_defends_against_abort_signal(
+        self, mock_bracket, mock_price, fake_config, tmp_state_dir,
+    ):
+        # Unreachable from the executor loop (it dispatches ABORT first), but
+        # any other caller must get the same never-enter-on-ABORT guarantee.
+        result = _handle_bullish_entry(
+            ticker="LLY",
+            thesis={"ticker": "LLY", "thesis": "BULLISH", "confidence": 0.75,
+                    "target_entry_price": 1124.0, "stop_loss_price": 1092.0,
+                    "take_profit_price": 1272.0},
+            portfolio_value=100_000, cash_balance=60_000, positions=[],
+            data_bundle={}, sentry={"ticker": "LLY", "signal": "ABORT"},
+            cfg=fake_config,
+        )
+        assert result is None
+        mock_bracket.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# ADR 055 fix 2: minimum stop-distance floor (noise-level stops refused)
+# ---------------------------------------------------------------------------
+
+class TestMinStopDistanceFloor:
+    """Production 2026-07-31: URI entered at $1084.25 with a $1081.25 stop —
+    0.28% below entry, inside ordinary intraday noise — and the GTC stop
+    tagged out 27 minutes after the fill. Entry validation must refuse stops
+    closer than MIN_STOP_DISTANCE_PCT; the analyst's thesis is treated as
+    position-management levels, not a fresh-entry setup.
+    """
+
+    def test_stop_too_tight_flags_noise_level_stop(self):
+        from titantrade.pricing import stop_too_tight
+        # The URI production case: 0.28% distance.
+        assert stop_too_tight(1084.25, 1081.25) is not None
+        # Just inside the floor.
+        assert stop_too_tight(100.0, 98.51) is not None
+
+    def test_stop_too_tight_accepts_normal_stops(self):
+        from titantrade.pricing import stop_too_tight
+        assert stop_too_tight(100.0, 98.5) is None   # exactly 1.5% passes
+        assert stop_too_tight(100.0, 95.0) is None   # typical 5% stop
+        assert stop_too_tight(None, 95.0) is None    # missing entry
+        assert stop_too_tight(100.0, None) is None   # missing stop
+        # Stop at/above entry is bracket_levels_invalid's job, not ours.
+        assert stop_too_tight(100.0, 101.0) is None
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=None)
+    @patch("titantrade.entries.place_bracket_order")
+    def test_bullish_entry_refuses_tight_stop(
+        self, mock_bracket, mock_price, fake_config, tmp_state_dir,
+    ):
+        result = _handle_bullish_entry(
+            ticker="URI",
+            thesis={"ticker": "URI", "thesis": "BULLISH", "confidence": 0.68,
+                    "target_entry_price": 1085.0, "stop_loss_price": 1082.0,
+                    "take_profit_price": 1250.0},
+            portfolio_value=100_000, cash_balance=60_000, positions=[],
+            data_bundle={}, sentry=None, cfg=fake_config,
+        )
+        assert result is None
+        mock_bracket.assert_not_called()
+
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=None)
+    @patch("titantrade.entries._ensure_gtc_stop_on_fill", return_value=None)
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.entries.get_positions", return_value=[])
+    @patch("titantrade.entries.get_open_orders", return_value=[])
+    @patch("titantrade.entries.get_account",
+           return_value={"portfolio_value": "100000", "cash": "60000"})
+    @patch("titantrade.entries.get_expired_brackets")
+    def test_resubmit_refuses_tight_stop(
+        self, mock_expired, mock_account, mock_open, mock_pos, mock_bracket,
+        mock_ensure, mock_price, fake_config, tmp_state_dir, monkeypatch,
+    ):
+        monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: "Industrials")
+        mock_expired.return_value = [{
+            "id": "exp-1", "symbol": "URI", "status": "expired",
+            "order_class": "bracket", "side": "buy",
+            "limit_price": "1085.00", "qty": "6",
+        }]
+        thesis_doc = {"theses": [{
+            "ticker": "URI", "thesis": "BULLISH", "confidence": 0.68,
+            "selected_for_trading": True, "review_action": "NEW",
+            "target_entry_price": 1085.0, "stop_loss_price": 1082.0,
+            "take_profit_price": 1250.0, "reasoning": "x",
+        }]}
+        result = resubmit_expired_brackets(fake_config, thesis_doc, [], {})
+        assert result == []
+        mock_bracket.assert_not_called()
