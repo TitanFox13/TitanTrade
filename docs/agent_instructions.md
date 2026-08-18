@@ -7,8 +7,8 @@ models, and cadences — chosen to match the complexity and latency requirements
 
 | Agent | Model | Cadence | Task |
 |-------|-------|---------|------|
-| The Analyst | Claude Opus/Sonnet | Weekly (Sunday 20:00 UTC) | Deep two-pass portfolio analysis |
-| The Sentry | Gemini Flash | Daily (09:00 + 15:30 EST) | Fast binary conflict detection |
+| The Analyst | Claude Opus 4.8 (adaptive thinking) | Weekly (Sunday 16:00 ET) | Deep two-pass portfolio analysis |
+| The Sentry | Gemini Flash Lite (3.1) | Daily (10:15 + 15:30 ET) | Fast binary conflict detection |
 
 The Analyst sets the thesis. The Sentry watches it. They never talk to each other — their
 outputs are chained via state files (`weekly_thesis.json` → `sentry_signals.json`).
@@ -28,7 +28,7 @@ Two-pass weekly pipeline running every Sunday before Monday market open:
   SEC filings, market context, earnings calendar, performance history). Produces a per-stock
   thesis with entry/stop/take-profit levels and a thesis breach condition.
 
-- **Pass 2**: Sees all 10 theses simultaneously. Applies portfolio-level thinking —
+- **Pass 2**: Sees all watchlist theses simultaneously. Applies portfolio-level thinking —
   sector diversification, correlation, market regime — and selects the top 3-5 trades.
 
 ### Why two passes?
@@ -72,7 +72,7 @@ analysis misses. Each layer is independent — if one fails, others still protec
 
 | Weekly Thesis | Selected by Pass 2? | Sentry Signal | Action |
 |--------------|---------------------|---------------|--------|
-| BULLISH | Yes | CONTINUE | Buy bracket order (if all 6 risk gates pass) |
+| BULLISH | Yes | CONTINUE | Buy bracket order (if all 9 risk gates pass) |
 | BULLISH | Yes | ABORT | Sell at market + cancel all orders |
 | BULLISH | No | * | No action (filtered out) |
 | BEARISH (holding) | * | * | Sell at market (thesis flipped) |
@@ -85,12 +85,15 @@ analysis misses. Each layer is independent — if one fails, others still protec
 
 These are programmatic — the AI cannot override them.
 
-1. Confidence >= 0.70
-2. Not within 5 days of earnings
+1. Confidence >= 0.55 (floor; conviction scales sizing 0.40x-2.50x, not selection)
+2. Not within 2 days of earnings
 3. Portfolio drawdown < 8% from peak (values ±50% off peak are treated as broker data glitches — block + alert, Decision 054)
-4. Cash reserve >= 20% after trade
-5. Position size valid (ATR-adjusted, max 10%, and >= $500 notional — dust blocked, Decision 054)
-6. Sector exposure < 40% after trade
+4. Cash reserve >= 5% after trade, net of pending buy commitments
+5. Position size valid (ATR-adjusted, max 25%, and >= $500 notional — dust blocked, Decision 054)
+6. Sector exposure < 50% after trade
+7. No high-impact macro event (FOMC/NFP/CPI/core PCE/GDP) within 6 hours
+8. Average correlation with held positions < 75%
+9. Total overlay (AI picks) <= 70% of portfolio
 
 ---
 

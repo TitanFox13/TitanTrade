@@ -2,38 +2,49 @@
 
 ## External APIs Used
 
-### 1. Financial Modeling Prep (FMP)
-**Purpose**: Price data, news, market context, earnings, economic calendar
-**Base URL**: `https://financialmodelingprep.com/stable`
-**Auth**: API key as query parameter `?apikey={FMP_KEY}`
+### 1. Market Data — Alpaca + FRED + Finnhub (Decision 040)
 
-#### Endpoints Used
+The former FMP dependency (€25/mo) was replaced with free sources behind the
+`market_data.py` facade. `DATA_PROVIDER=fmp` (+ a valid `FMP_KEY`) reverts to
+the retained FMP provider (`data_providers/fmp.py`) with no code change.
+
+#### Alpaca Data API
+**Purpose**: OHLCV bars, latest quotes, daily change %, news
+**Base URL**: `https://data.alpaca.markets` (IEX feed, free tier; same keys as trading)
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/stable/historical-price-eod/full?symbol=X` | OHLCV daily candles |
-| `/stable/news/stock?symbol=X` | News headlines |
-| `/stable/quote?symbol=X` | Current price quote |
-| `/stable/index-quote?symbol=^VIX` | VIX level |
-| `/stable/profile?symbol=X` | Company profile (sector) |
-| `/stable/treasury-rates` | 10Y and 2Y Treasury yields |
-| `/stable/earnings-calendar` | Upcoming earnings dates |
-| `/stable/economics-calendar` | Macro events (FOMC, CPI, etc.) |
-| `/stable/grades?symbol=X` | Analyst upgrades/downgrades |
-| `/stable/price-target-consensus?symbol=X` | Price target consensus |
+| `/v2/stocks/{symbol}/bars` | OHLCV daily candles (250-day history) |
+| `/v2/stocks/{symbol}/quotes/latest` | Current price quote |
+| `/v1beta1/news` | News headlines (cursor-paginated, deduplicated) |
 
-#### Example: OHLCV Data
-```
-GET /stable/historical-price-eod/full?symbol=AAPL&from=2026-03-24&to=2026-03-29&apikey=xxx
-```
-Response: `[{ "date": "...", "open": ..., "high": ..., "low": ..., "close": ..., "volume": ... }]`
+#### FRED (St. Louis Fed)
+**Purpose**: VIX, treasury yields, economic-release calendar
+**Base URL**: `https://api.stlouisfed.org/fred`
+**Auth**: free `FRED_KEY` as query parameter
 
-#### Example: News
-```
-GET /stable/news/stock?symbol=AAPL&limit=50&apikey=xxx
-```
-Response: `[{ "symbol": "AAPL", "title": "...", "text": "...", "publishedDate": "..." }]`
+| Endpoint | Purpose |
+|----------|---------|
+| `/series/observations` | VIX level, 10Y/2Y treasury yields |
+| `/release/dates?release_id=…` | Upcoming CPI (10), jobs (50), PPI (46), GDP (53), PCE (54), retail (17) release dates |
 
+FOMC meeting dates are not a FRED release — they live in `data/fomc_dates.json`
+(verified against federalreserve.gov).
+
+#### Finnhub
+**Purpose**: per-ticker earnings dates, analyst recommendation trend, sector
+**Base URL**: `https://finnhub.io/api/v1`
+**Auth**: free `FINNHUB_KEY` as query parameter
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/calendar/earnings` | Upcoming earnings dates (blackout gate) |
+| `/stock/recommendation` | Analyst recommendation mix (strong-buy…strong-sell) |
+| `/stock/profile2` | Company sector |
+
+All market-data functions fail open (`[]`/`None`/`{}`) on a missing key or
+error — the gates that consume them skip rather than block. Price-target
+consensus was dropped with FMP (no free source).
 ---
 
 ### 2. SEC EDGAR (free)
@@ -111,9 +122,10 @@ POST /v2/orders
 | `/messages` | POST | Send analysis prompt, receive thesis |
 
 #### Configuration
-- Model: `claude-sonnet-4-20250514` (default) or configurable via `CLAUDE_MODEL` env var
-- Temperature: 0.3 (deterministic analysis)
-- Max tokens: 4096 per stock analysis
+- Model: `claude-opus-4-8` (default) or configurable via `CLAUDE_MODEL` env var (Decision 050 — the analyst is the alpha source, so it runs the most capable model)
+- Adaptive thinking enabled; no `temperature` (Opus 4.8 rejects sampling params)
+- Max tokens: 16000 (headroom for thinking tokens)
+- Refusal stop-reason handling + thinking-aware text extraction
 
 ---
 
@@ -126,12 +138,13 @@ POST /v2/orders
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/models/gemini-2.0-flash:generateContent` | POST | Sentiment classification |
+| `/models/{model}:generateContent` | POST | Sentiment classification |
 
 #### Configuration
-- Model: `gemini-2.0-flash`
-- Temperature: 0.1 (highly deterministic for binary classification)
-- Max tokens: 1024
+- Model: `gemini-3.1-flash-lite` (default; `GEMINI_MODEL` env override)
+- 503-fallback chain (Decision 041): `gemini-2.5-flash` → `gemini-2.5-flash-lite` → `gemini-flash-latest`
+- Structured output (`responseMimeType: application/json` + `responseSchema`), thinking budget 0 (Decision 039)
+- Max tokens: 2048
 
 ---
 

@@ -34,7 +34,7 @@ uv run python -m titantrade download-history [dir]  # Download OHLCV for backtes
 cd TitanTrade && uv run --extra test python -m pytest tests/ -v
 ```
 
-`pytest` lives in the `test` optional-dependency extra, so the `--extra test` flag is required (a bare `uv run` omits it → `No module named pytest`). All 524 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens. `ruff`/`vulture` are in the `dev` extra for lint/dead-code checks.
+`pytest` lives in the `test` optional-dependency extra, so the `--extra test` flag is required (a bare `uv run` omits it → `No module named pytest`). All 534 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens. `ruff`/`vulture` are in the `dev` extra for lint/dead-code checks.
 
 ### Flutter app (from titan_trade_app/)
 
@@ -55,7 +55,7 @@ docker compose run --rm titantrade <command>             # CLI commands
 
 - **The Analyst** (Claude): weekly 2-pass analysis — per-stock thesis + portfolio ranking
 - **The Sentry** (Gemini Flash): daily 3-layer conflict detection (market + price + news)
-- **Risk Manager**: 6 programmatic gates between AI and execution
+- **Risk Manager**: 9 programmatic gates between AI and execution
 - **Executor**: Alpaca bracket orders with broker-native stops + trailing stops
 - **API Server**: FastAPI serving state files, exposed at trade.praguefun.cz via Cloudflare tunnel
 - **Desktop App**: Flutter Riverpod app polling the API
@@ -68,7 +68,7 @@ docker compose run --rm titantrade <command>             # CLI commands
 | `src/titantrade/daily_sentry.py` | 3-layer Gemini sentry |
 | `src/titantrade/executor.py` | Execution **orchestrator** (`execute_trades`) — wires the modules below together |
 | `src/titantrade/broker.py` | Alpaca REST client — the only module that talks to Alpaca |
-| `src/titantrade/entries.py` | New-position entry + expired-bracket resubmission (all 6 risk gates) |
+| `src/titantrade/entries.py` | New-position entry + expired-bracket resubmission (all 9 risk gates) |
 | `src/titantrade/positions.py` | Open-position management: ATR trailing stop, TP1, pyramiding |
 | `src/titantrade/protection.py` | Pre-flight safety: orphan close + gap-down protection |
 | `src/titantrade/core_allocation.py` | Always-on core (SPY) allocation + stress hedge swap |
@@ -77,7 +77,7 @@ docker compose run --rm titantrade <command>             # CLI commands
 | `src/titantrade/trade_state.py` | Trade log / near-miss store, state loader, trade-record builders |
 | `src/titantrade/trailing_state.py` | Per-ticker trailing-stop state (HWM, trail, TP1/pyramid flags) |
 | `src/titantrade/alerts.py` | Discord observability alerts (stuck-in-cash, ticker churn) |
-| `src/titantrade/risk_manager.py` | 6 risk gates |
+| `src/titantrade/risk_manager.py` | 9 risk gates |
 | `src/titantrade/price_check.py` | Intraday price checks (no LLM) |
 | `src/titantrade/benchmark.py` | Risk-adjusted metrics vs SPY (beta/alpha/Sharpe/capture) |
 | `src/titantrade/api.py` | FastAPI HTTP server |
@@ -101,7 +101,7 @@ This project is strict about documentation. When making changes:
 
 | File | Updated By |
 |------|-----------|
-| `weekly_thesis.json` | weekly_analyst (expires after 14 days) |
+| `weekly_thesis.json` | weekly_analyst (refreshed by the weekly review cycle) |
 | `sentry_signals.json` | daily_sentry |
 | `trade_log.json` | executor (append-only) |
 | `near_misses.json` | executor (blocked by <=2 gates) |

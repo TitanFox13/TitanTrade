@@ -10,7 +10,8 @@ a visual dashboard over the backend's state files.
 
 ### TitanTrade Backend (`TitanTrade/`)
 Python backend responsible for all data collection, AI analysis, risk management, and
-trade execution. Runs on a scheduled cadence via Docker + server cron.
+trade execution. Runs on a scheduled cadence via APScheduler inside the always-on
+Docker API container (`data/schedule.json`, ET times).
 
 See [TitanTrade/docs/architecture.md](../TitanTrade/docs/architecture.md) for internals.
 
@@ -32,7 +33,7 @@ See [titan_trade_app/docs/architecture.md](../titan_trade_app/docs/architecture.
                              |
               +--------------+--------------+
               |                             |
-     Sunday 20:00 UTC              Daily 09:00 & 15:30 EST
+     Sunday 16:00 ET               Daily 10:15 & 15:30 ET
               |                             |
     +---------v----------+       +----------v---------+
     | weekly_analyst.py   |       | daily_sentry.py    |
@@ -99,8 +100,8 @@ Two AI models run in distinct roles:
 
 | Agent | Model | Cadence | Role |
 |-------|-------|---------|------|
-| The Analyst | Claude Opus/Sonnet | Weekly (Sunday) | Deep two-pass portfolio analysis |
-| The Sentry | Gemini Flash | Daily (×2) | Fast binary conflict detection |
+| The Analyst | Claude Opus 4.8 (adaptive thinking) | Weekly (Sunday) | Deep two-pass portfolio analysis |
+| The Sentry | Gemini Flash Lite (3.1, structured output) | Daily (×2) | Fast binary conflict detection |
 
 See [docs/agent_instructions.md](agent_instructions.md) for agent design and behavior.
 
@@ -108,8 +109,10 @@ See [docs/agent_instructions.md](agent_instructions.md) for agent design and beh
 
 ## Risk Architecture
 
-Six programmatic gates sit between every AI recommendation and actual trade execution.
-No AI output can bypass them — they are enforced in code, not in prompts.
+Nine programmatic gates sit between every AI recommendation and actual trade execution
+(confidence, earnings, drawdown, cash reserve, overlay cap, position size, sector
+exposure, macro blackout, correlation). No AI output can bypass them — they are
+enforced in code, not in prompts.
 
 The gates also defend against *bad broker data*, not just bad AI output (Decision 054):
 orders below a $500 minimum notional are blocked as dust, account values ±50% off the
@@ -121,5 +124,10 @@ Entry validation additionally refuses degenerate setups (Decision 055): a stop c
 than 1.5% to the entry (a noise-level stop that would tag out within minutes), and any
 entry or bracket resubmission for a ticker whose current sentry signal is ABORT (the
 executor is about to exit it — entering first just forces a same-minute round-trip).
+
+Protective exits are symmetric (Decision 056): a broker-side stop-loss fill starts the
+same 72h re-entry cooldown an ABORT does (with the same sentry-confirmed override), and
+weekly-review ADJUST levels are never applied to a position opened after the review was
+generated — they were computed for a position that no longer exists.
 
 See [TitanTrade/docs/risk_management.md](../TitanTrade/docs/risk_management.md) for details.

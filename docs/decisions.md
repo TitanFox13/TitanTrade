@@ -1,5 +1,27 @@
 # Important Decisions Log
 
+## Decision 056: Stop-out re-entry cooldown + stale-ADJUST guard (mid-August checkup)
+**Date**: 2026-08-18
+**Decision**: Close the two churn paths the DVN sequence of Aug 4–5 exposed — paths the ADR 055 guards deliberately didn't cover — plus a documentation accuracy pass. Strategy selection/sizing untouched; both fixes extend existing protective mechanisms to exits they missed.
+
+### The DVN sequence (2026-08-04 → 08-05)
+DVN's GTC stop filled at the Aug 4 open (13:34 UTC, 217 sh @ $43.42). The 14:15 run **re-bought the ticker 42 minutes later** ($43.65) — no cooldown applied, because the 72h re-entry cooldown is recorded when the executor *handles* an ABORT, and a broker-side stop fill is never "handled" by anything (it executes on Alpaca's servers; broker fills don't even appear in the trade log). The 19:30 run then applied the weekly review's **ADJUST stop $43.50 — computed Sunday for the OLD position** (basis $43.57, protecting profit) — to the NEW $43.65 entry: a 0.34% stop, which tagged out the next morning. Two distinct defects: a protective exit that starts no cooldown, and analyst levels applied to a position they weren't written for.
+
+### Fix 1 — broker-side stop-outs start the re-entry cooldown (`entries.py`, `cooldown.py`, `executor.py`)
+New `entries.record_stop_out_cooldowns(cfg)`, called at the top of `execute_trades` (before resubmission/entries): scans recent closed orders for **filled sell `stop`/`stop_limit` orders** whose fill time is inside the 72h window and records each as a cooldown event. Two deliberate design points:
+- **The cooldown clock is stamped at the FILL time, not now()** (`cooldown._record_stop_out_cooldown`) — the scan runs every cycle, and re-stamping would silently extend the cooldown forever. Recording the fill time makes repeated detection idempotent (equal-or-newer existing record → no-op).
+- **No `after` param on the orders query** — it filters on *submitted* time, and a GTC stop is typically submitted days before it fills; fills are filtered client-side on `filled_at`.
+A protective exit is a protective exit: stop-outs now share the ABORT cooldown **and its override policy** (≥24h + sentry CONTINUE + price ≥1% above stop → early re-entry on confirmed recovery), so a noise stop-out doesn't lock out a genuine recovery leg. Trailing-stop exits cool down too — re-entry after a profit-taking exit is subject to the same confirmation. Scan failures log a warning and return 0 (that run simply behaves like the pre-056 executor).
+
+### Fix 2 — ADJUST levels don't apply to a position opened after the review (`trade_state.py`, `executor.py`)
+New pure `trade_state.position_opened_after(ticker, generated_at)`: True when the ticker's latest **entry-type** BUY in the trade log (trigger `weekly_thesis`/`bracket_resubmission` — pyramid ADDs enlarge a position, they don't open one) is newer than the thesis `generated_at`. The executor's Section 4a consults it before the cancel+replace: if the position was re-opened since the review was generated, the ADJUST levels belong to a position that no longer exists — skip, keep the entry-time stop, let next Sunday's review re-sync. Fails open (missing/damaged trade log or timestamps → apply as before), since applying the analyst's levels is the long-standing default.
+
+### Also — documentation accuracy pass
+Reading the full doc tree during the August checkups surfaced rot with real foot-gun potential, now fixed: `api_reference.md`/`deployment.md` still named **retired models as defaults** (`claude-sonnet-4-20250514` — whose retirement was the ADR 050 near-liquidation — and `gemini-2.0-flash`, which 404s) and documented FMP/SEC-API as the data stack (replaced in ADRs 035/040); parameter tables across `risk_management.md`/`features.md`/`agent_instructions.md` carried pre-ADR-032/046 values (20% cash reserve → 5%, confidence ≥0.70 → 0.55 floor + sizing curve, 5-day earnings blackout → 2, 40% sector cap → 50%, 3% fixed trail → 3.0×ATR, 24h macro blackout → 6h high-impact-only, 10% position cap → 25%, 2% ATR risk budget → 2.5%); gate counts said 6 (actual: 9, with overlay-cap/macro/correlation); "14-day thesis expiry" survived in several places despite the weekly-review cycle replacing it (Phase 1.12); `risk_management.md` still described the pre-ADR-037 pyramid mechanism. Every number was verified against `config.py`/`risk_manager.py`/`earnings.py`/`daily_sentry.py` constants, not against other docs.
+
+### Status
+10 new regression tests (`TestStopOutCooldown` ×5, `TestAdjustStaleReviewGuard` ×5); **534 tests green, touched files ruff-clean**. Deployed 2026-08-18 (both images).
+
 ## Decision 055: Same-run ABORT entry guard + minimum stop-distance floor (August checkup)
 **Date**: 2026-08-04
 **Decision**: Two execution fixes from the August check-up of the live server (Jul 23 → Aug 4 window — 0 errors, all jobs green, first clean window beating SPY on both raw and risk-adjusted return). Both fix low-cost but structural defects observed in the 2026-07-31 logs; strategy behavior is untouched (the strategy-hold decision stands).

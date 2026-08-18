@@ -2,9 +2,10 @@
 
 ## Overview
 
-The TitanTrade backend is a Python CLI application that runs as scheduled Docker containers.
-It has no HTTP server — it reads config files, calls external APIs, writes JSON state files,
-and exits. All scheduling is handled by server cron.
+The TitanTrade backend is a Python application with two faces: a CLI (one-off commands via
+`docker compose run`) and an always-on FastAPI server whose built-in APScheduler runs all
+scheduled jobs (`data/schedule.json`, interpreted in America/New_York — Decisions 028/039).
+Each job reads config, calls external APIs, and writes JSON state files.
 
 For the full system diagram (including the Flutter app), see
 [docs/architecture.md](../../docs/architecture.md).
@@ -13,7 +14,7 @@ For the full system diagram (including the Flutter app), see
 
 ## Pipeline Structure
 
-### Weekly Pipeline (Sunday 20:00 UTC)
+### Weekly Pipeline (Sunday 16:00 ET)
 
 1. **Data Collection** (`data_fetcher.py`)
    - 250 days of OHLCV per stock (for indicator calculation)
@@ -30,11 +31,11 @@ For the full system diagram (including the Flutter app), see
    - Output: per-stock thesis with entry, stop, take-profit, breach condition
 
 3. **Pass 2: Portfolio Ranking** (`weekly_analyst.py`)
-   - Claude sees all 10 theses simultaneously
+   - Claude sees all watchlist theses simultaneously
    - Selects top 3-5 trades considering sector diversification and market regime
    - Output: `state/weekly_thesis.json` with `selected_for_trading` flag per thesis
 
-### Daily Pipeline (09:00 + 15:30 EST)
+### Daily Pipeline (10:15 + 15:30 ET)
 
 1. **Layer 1: Market Health** (`daily_sentry.py`)
    - Check if SPY dropped >2% (market-wide stress signal)
@@ -49,7 +50,7 @@ For the full system diagram (including the Flutter app), see
    - Output: `state/sentry_signals.json`
 
 4. **Risk Gates** (`risk_manager.py`)
-   - Six gates must ALL pass before any new entry
+   - Nine gates must ALL pass before any new entry
 
 5. **Execution** (`executor.py`)
    - Bracket orders with broker-side stop-losses for new entries
@@ -65,8 +66,8 @@ config.py
 ├── logger.py
 ├── retry.py
 ├── indicators.py           <- Pure computation, no API calls
-├── market_context.py       <- SPY, VIX, sectors (uses FMP)
-├── earnings.py             <- Earnings calendar (uses FMP)
+├── market_context.py       <- SPY, VIX, sectors (via market_data: Alpaca+FRED)
+├── earnings.py             <- Earnings calendar (via market_data: Finnhub)
 ├── risk_manager.py         <- All risk gates (uses indicators, market_context)
 ├── performance.py          <- Trade stats + feedback (reads state files)
 ├── data_fetcher.py         <- Master data collection (uses all above)
@@ -124,20 +125,22 @@ All state lives in `state/` as JSON files. No database.
 
 | Control | Type | Value | Enforced In |
 |---------|------|-------|-------------|
-| Position sizing | ATR-based | 2% portfolio risk per ATR | risk_manager |
-| Position cap | Fixed | 10% of portfolio max | risk_manager |
+| Position sizing | ATR-based | 2.5% portfolio risk per ATR | risk_manager |
+| Position cap | Fixed | 25% of portfolio max | risk_manager |
 | Stop-loss | Broker-native | 5% below entry (stop-limit) | executor (Alpaca) |
-| Confidence gate | AI quality | >= 0.70 required | risk_manager |
-| Earnings blackout | Calendar | 5 days before earnings | risk_manager |
+| Confidence gate | AI quality | >= 0.55 floor (sizing-scaled above) | risk_manager |
+| Earnings blackout | Calendar | 2 days before earnings | risk_manager |
 | Drawdown breaker | Portfolio | Halt at 8% from peak | risk_manager |
 | Min notional | Fixed | $500 per order (dust guard, Decision 054) | risk_manager |
 | Account-value sanity | Data | ±50% vs peak → suspect data: block + alert, peak untouched (Decision 054) | risk_manager |
 | Split guard | Data | Gap >30% below stop → check corporate-actions feed before liquidating (Decision 054) | protection |
 | Min stop distance | Fixed | Stop < 1.5% below entry → entry/resubmit refused as noise-level (Decision 055) | pricing/entries |
 | Same-run ABORT guard | Sequencing | Current sentry ABORT → no entry/resubmit (exit is coming, Decision 055) | entries |
-| Cash reserve | Portfolio | 20% minimum cash | risk_manager |
-| Sector exposure | Portfolio | 40% max per sector | risk_manager |
-| Thesis expiry | Time-based | 14 days max | executor |
+| Stop-out cooldown | Sequencing | Broker-side stop fill → 72h re-entry cooldown, fill-time stamped (Decision 056) | entries/cooldown |
+| Stale-ADJUST guard | Data | ADJUST levels skipped for positions opened after the review (Decision 056) | executor/trade_state |
+| Cash reserve | Portfolio | 5% minimum cash (net of pending buys) | risk_manager |
+| Sector exposure | Portfolio | 50% max per sector | risk_manager |
+| Thesis review | Weekly | CONTINUE/ADJUST/CLOSE cycle (no hard expiry) | weekly_analyst |
 | Pass 2 selection | AI quality | Top 3-5 only | executor |
-| Price-based abort | Market | 3% adverse move | daily_sentry |
+| Price-based abort | Market | >=5% always; 3-5% with news confirmation | daily_sentry |
 | Market-wide alert | Market | SPY -2% intraday | daily_sentry |

@@ -5,7 +5,7 @@
 ### Prerequisites
 - Python 3.12+
 - uv (package manager)
-- API keys for: Alpaca, FMP, SEC-API, Anthropic (Claude), Google (Gemini)
+- API keys for: Alpaca, Anthropic (Claude), Google (Gemini), FRED (free), Finnhub (free)
 
 ### Setup
 
@@ -112,26 +112,27 @@ docker compose run --rm titantrade execute    # Execute trades
 docker compose run --rm titantrade full       # Full pipeline: fetch -> analyze -> sentry -> execute
 ```
 
-### Cron Schedule (Server)
+### Scheduling (built-in APScheduler — no host cron needed)
 
-Add these to your server's crontab (`crontab -e`):
+All jobs run inside the always-on `api` container via APScheduler
+(Decision 028), defined in `data/schedule.json` and interpreted in
+**America/New_York** so wall-clock times track US DST (Decision 039):
 
-```crontab
-# Weekly analyst: Sunday 20:00 UTC
-0 20 * * 0 cd /path/to/TitanTrade && docker compose run --rm titantrade full >> /var/log/titantrade-weekly.log 2>&1
+| Job | Time (ET) | Command |
+|-----|-----------|---------|
+| `weekday_fetch` | 09:00 Mon-Fri | fetch (refresh data bundle) |
+| `weekday_gapcheck` | 09:35 Mon-Fri | gapcheck |
+| `weekday_sentry_morning` | 10:15 Mon-Fri | sentry + execute |
+| `weekday_pricecheck_midday` | 12:00 Mon-Fri | pricecheck |
+| `weekday_pricecheck_afternoon` | 14:00 Mon-Fri | pricecheck |
+| `weekday_sentry_preclose` | 15:30 Mon-Fri | sentry + execute |
+| `daily_summary` | 16:30 Mon-Fri | Discord daily summary (+ benchmark refresh) |
+| `sunday_full` | 16:00 Sun | full pipeline (fetch → analyze → sentry → execute) |
 
-# Gap-down check: Weekdays 13:35 UTC (09:35 EST, 5 min after open)
-35 13 * * 1-5 cd /path/to/TitanTrade && docker compose run --rm titantrade gapcheck >> /var/log/titantrade-daily.log 2>&1
-
-# Daily sentry + execute: Weekdays 14:15 UTC (10:15 EST, after opening volatility settles)
-15 14 * * 1-5 cd /path/to/TitanTrade && docker compose run --rm titantrade sentry && docker compose run --rm titantrade execute >> /var/log/titantrade-daily.log 2>&1
-
-# Intraday price checks: Weekdays 16:00 + 18:00 UTC (11:00 + 13:00 EST)
-0 16,18 * * 1-5 cd /path/to/TitanTrade && docker compose run --rm titantrade pricecheck >> /var/log/titantrade-daily.log 2>&1
-
-# Daily sentry + execute pre-close: Weekdays 20:30 UTC (15:30 EST)
-30 20 * * 1-5 cd /path/to/TitanTrade && docker compose run --rm titantrade sentry && docker compose run --rm titantrade execute >> /var/log/titantrade-daily.log 2>&1
-```
+Manage via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`,
+`PUT /api/scheduler/{id}/enabled`, or the Flutter Scheduler screen.
+Host-level cron (`docker compose run --rm titantrade <cmd>` lines) remains a
+documented fallback but is not used in production.
 
 ### Docker Services
 
@@ -167,7 +168,8 @@ Add these secrets in GitHub Settings > Secrets and variables > Actions:
 |-------------|-------------|
 | `ALPACA_KEY` | Alpaca API Key ID |
 | `ALPACA_SECRET` | Alpaca API Secret Key |
-| `FMP_KEY` | Financial Modeling Prep API Key |
+| `FRED_KEY` | FRED API key (free — VIX/treasury/econ calendar) |
+| `FINNHUB_KEY` | Finnhub API key (free — earnings/analyst/sector) |
 | `SEC_USER_AGENT` | User-Agent string for SEC EDGAR (with contact email) |
 | `CLAUDE_KEY` | Anthropic Claude API Key |
 | `GEMINI_KEY` | Google Gemini API Key |
@@ -201,15 +203,19 @@ After each run, GitHub Actions commits updated state files back to the repo:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ALPACA_KEY` | Yes | Alpaca API Key ID |
-| `ALPACA_SECRET` | Yes | Alpaca API Secret Key |
-| `ALPACA_BASE_URL` | No | Override API base URL (default: paper) |
-| `FMP_KEY` | Yes | Financial Modeling Prep API Key |
-| `SEC_USER_AGENT` | No | User-Agent for SEC EDGAR (e.g. `TitanTrade/1.0 (you@example.com)`) |
+| `ALPACA_PAPER_KEY` / `ALPACA_PAPER_SECRET` | Yes | Alpaca paper credentials (`ALPACA_KEY`/`ALPACA_SECRET` accepted as legacy fallback) |
+| `ALPACA_LIVE_KEY` / `ALPACA_LIVE_SECRET` | No | Alpaca live credentials (required only to enable live mode) |
 | `CLAUDE_KEY` | Yes | Anthropic Claude API Key |
-| `CLAUDE_MODEL` | No | Model override (default: claude-sonnet-4-6-20250514) |
+| `CLAUDE_MODEL` | No | Model override (default: `claude-opus-4-8`) |
 | `GEMINI_KEY` | Yes | Google Gemini API Key |
-| `GEMINI_MODEL` | No | Model override (default: gemini-2.0-flash) |
+| `GEMINI_MODEL` | No | Model override (default: `gemini-3.1-flash-lite`) |
+| `FRED_KEY` | Recommended | FRED key (free) — VIX/treasury/econ calendar; gates fail open without it |
+| `FINNHUB_KEY` | Recommended | Finnhub key (free) — earnings/analyst/sector; gates fail open without it |
+| `SEC_USER_AGENT` | No | User-Agent for SEC EDGAR (e.g. `TitanTrade/1.0 (you@example.com)`) |
+| `DISCORD_WEBHOOK_URL` | No | Discord notifications (job alerts + daily summary); no-op if unset |
+| `DATA_PROVIDER` | No | `native` (default: Alpaca+FRED+Finnhub) or `fmp` (legacy, needs `FMP_KEY`) |
+| `FMP_KEY` | No | Only used when `DATA_PROVIDER=fmp` |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Docker only | Cloudflare tunnel for trade.praguefun.cz |
 | `TRADING_MODE` | No | Override watchlist setting (paper/live) |
 | `LOG_LEVEL` | No | Logging level (default: INFO) |
 
@@ -228,7 +234,7 @@ After each run, GitHub Actions commits updated state files back to the repo:
 - Monitor `state/portfolio.json` for unexpected changes
 - Review `state/trade_log.json` for trade patterns
 
-### Alerts (Future)
-- Slack webhook on ABORT signals
-- Email on execution errors
-- Daily portfolio summary notification
+### Alerts (Discord, live)
+- Per-job completion/failure embeds + daily portfolio summary at 16:30 ET
+- Observability alerts: sentry degraded (>30% fallback), stuck-in-cash (≥70% for 3+ days), ticker churn (2+ round-trips/7d), split-suspected gap, suspect broker data, cooldown overrides
+- Configure via the single optional `DISCORD_WEBHOOK_URL` env var

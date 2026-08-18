@@ -12,9 +12,9 @@
 
 ### Three-Layer Daily Sentry (Gemini Flash)
 - **Layer 1 - Market-wide**: SPY drop >2% flags ALL positions
-- **Layer 2 - Price-based**: 3% adverse move triggers hard ABORT override
+- **Layer 2 - Price-based**: graduated severity — >=5% adverse always ABORTs; 3-5% ABORTs only with Gemini news confirmation (Decision 045)
 - **Layer 3 - News-based**: Gemini Flash checks headlines vs thesis breach conditions
-- Conservative default: when in doubt, ABORT (capital preservation > opportunity)
+- Decision asymmetry (Decision 034): false ABORTs cost money, false CONTINUEs are caught by the broker-side stop — news-only ABORTs without price confirmation are downgraded
 - Truncated JSON repair: salvages Gemini responses that hit token limits mid-output
 - SPY change computed from price/previousClose fallback when API field missing
 - Regime-aware reviews: inverse ETF positions get explicit warnings in non-bearish regimes
@@ -39,8 +39,9 @@
 - Pass 2 target trade count scales with market regime (6 in strong_bullish
   down to 1 in crisis); the confidence-scaled sizing now correctly uses
   Pass-2's `adjusted_confidence`
-- Bracket resubmission gives up after 5 chasing attempts on the same
-  ticker; resumes only after the next weekly thesis refresh
+- Bracket resubmission gives up after 20 chasing attempts on the same
+  ticker (raised from 5 once trend-aware entries replaced dip-buys);
+  resumes only after the next weekly thesis refresh
 - Sentry price-move check references the actual broker
   `avg_entry_price` for held positions, not the stale thesis target
 - Narrower 2-day earnings blackout (was 5 days)
@@ -89,9 +90,8 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - Economic calendar: FOMC, CPI, jobs, GDP, PPI events for the next 7 days
 
 ### Enhanced Data per Stock
-- Analyst consensus ratings and recent upgrades/downgrades (FMP)
-- Price target consensus (high, low, median)
-- Insider trading: Form 4 filings from the last 30 days (SEC-API)
+- Analyst recommendation mix — strong-buy/buy/hold/sell/strong-sell (Finnhub)
+- Insider trading: Form 4 filings from the last 30 days (SEC EDGAR)
 - Relative strength vs SPY over 5d, 20d, 60d periods
 - Pairwise correlation matrix with other watchlist stocks
 
@@ -104,13 +104,16 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 
 ## Risk Management
 
-### Six Entry Gates (ALL must pass)
-1. **Confidence threshold**: AI confidence >= 0.70
-2. **Earnings blackout**: No entry within 5 days of earnings
+### Nine Entry Gates (ALL must pass)
+1. **Confidence threshold**: AI confidence >= 0.55 floor; above it, confidence drives sizing (0.40x at 0.55 → 2.50x at 0.95+), not selection
+2. **Earnings blackout**: No entry within 2 days of earnings
 3. **Drawdown circuit breaker**: Halts at 8% portfolio drawdown from peak. A reported value ±50% off the peak is treated as broker data corruption (Decision 054): entries pause with a "suspect broker data" reason + Discord alert, and the glitch is never written into the peak file
-4. **Cash reserve**: Maintains 20% minimum cash at all times
-5. **Volatility-adjusted sizing**: ATR-based, targeting 2% risk per position, scaled by confidence (0.7x at 0.70 to 1.3x at 1.00). Orders below a $500 minimum notional are blocked as dust (Decision 054) — they can't carry stops and only add churn
-6. **Sector exposure limit**: Max 40% of portfolio in any single sector
+4. **Cash reserve**: Maintains 5% minimum cash, net of cash already committed to pending buy orders (Decision 035)
+5. **Volatility-adjusted sizing**: ATR-based, targeting 2.5% risk per 1-ATR move, scaled by confidence and VIX, capped at 25% per name. Orders below a $500 minimum notional are blocked as dust (Decision 054) — they can't carry stops and only add churn
+6. **Sector exposure limit**: Max 50% of portfolio in any single sector
+7. **Macro event blackout**: No entry within 6h of a high-impact event (FOMC, NFP, CPI, core PCE, GDP)
+8. **Correlation limit**: Blocked when average 60-day correlation with held positions exceeds 75%
+9. **Total overlay cap**: Combined AI-pick positions ≤ 70% of portfolio (protects the ~30% SPY core)
 
 ### Broker-Native Stop-Losses
 - Bracket orders: entry + stop + take-profit submitted atomically to Alpaca
@@ -119,6 +122,8 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - Orphan detection: every run checks held positions have a stop order
 - **Bracket resubmission**: expired day-only brackets are auto-resubmitted next morning with dynamically adjusted entry prices based on current market conditions (resubmits floor to whole shares — a sub-1-share size is skipped, never sent as a fractional bracket that Alpaca rejects with HTTP 422). Resubmission skips any ticker whose current sentry signal is ABORT — the executor is about to exit it, and the 72h cooldown only starts once that abort is handled, after resubmission runs (Decision 055, the LLY 18-second round-trip)
 - **Minimum stop-distance floor**: fresh entries and resubmissions are refused when the stop sits less than 1.5% below the entry (`pricing.stop_too_tight`, Decision 055) — a noise-level stop is a guaranteed immediate stop-out (production: URI entered with a 0.28% stop and was tagged out 27 minutes later). Typically a degenerate artifact of reusing an ADJUST-review thesis (stop tightened on a held position) for a new entry
+- **Stop-out re-entry cooldown**: a broker-side protective-stop fill starts the same 72h cooldown an ABORT does (Decision 056) — stop fills execute on Alpaca's servers with nothing running, so nothing "handled" the exit and DVN was re-bought 42 minutes after its stop fired. The scan stamps the cooldown at the fill time (idempotent) and the sentry-confirmed override policy still allows early re-entry on recovery
+- **Stale-ADJUST guard**: weekly-review ADJUST levels are skipped for a position opened *after* the review was generated (Decision 056) — they were computed for a position that no longer exists (DVN: the old position's $43.50 stop re-applied 0.34% below a fresh $43.65 re-entry). The entry-time stop is kept until the next review re-syncs
 - **Gap-down protection**: detects unfilled stop-limit orders after overnight gaps and immediately market-sells the unprotected position. The stale stop's cancel is polled to a terminal state *before* the market sell so the sell isn't rejected for still-held qty (Decision 035). Before selling, the live market quote is cross-checked (Decision 053), and gaps deeper than 30% below the stop are checked against the corporate-actions feed — a recent split announcement means the stop is stale, not the market, so the sale is skipped and alerted instead of liquidating at a split-artifact bottom (Decision 054, the CRWD 4:1 lesson)
 - **Never-bare guarantee** (Decision 035): after a partial sell (TP1), the sell is polled to `filled` before the breakeven stop is sized; `place_native_stop_loss` clamps to the broker-reported `available` qty if momentarily short. A position is never left without a stop after a partial sell or stop replace.
 
@@ -187,16 +192,25 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 
 ## Data Sources
 
-### Financial Modeling Prep (FMP)
-- 250-day OHLCV for indicator calculation
-- News headlines with deduplication
-- Earnings calendar (60-day forward look)
-- Current quotes for market context
+### Alpaca Data API (primary, free — Decision 040)
+- 250-day OHLCV for indicator calculation (IEX feed)
+- News headlines with syndication-aware deduplication
+- Current quotes for market context and live price cross-checks
 
-### SEC-API.io
-- Real-time 8-K filing monitoring
-- 10-Q and 10-K detection
-- Filing descriptions for AI analysis
+### FRED (free)
+- VIX level, 10Y/2Y Treasury yields
+- Economic-release calendar (CPI/jobs/PPI/GDP/PCE/retail) + `data/fomc_dates.json` for FOMC
+
+### Finnhub (free)
+- Earnings calendar (blackout gate)
+- Analyst recommendation mix, company sector
+
+### SEC EDGAR (free — replaced paid SEC-API.io, Decision 035)
+- 8-K / 10-Q / 10-K filings, Form 4 insider activity
+- Requires only a `User-Agent` header with contact email
+
+### FMP (legacy, optional)
+- The original provider is retained behind `DATA_PROVIDER=fmp` for one-line revert (Decision 040)
 
 ### Alpaca Markets
 - Dual credential support: separate paper and live API key pairs
