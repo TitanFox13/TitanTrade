@@ -28,6 +28,46 @@ def _load(filename: str) -> dict[str, Any]:
         return json.load(f)
 
 
+def position_opened_after(ticker: str, generated_at: str | None) -> bool:
+    """True when the ticker's current position was opened AFTER ``generated_at``
+    (a thesis/review timestamp).
+
+    Used by the ADJUST flow (ADR 056): the weekly review's stop/TP levels were
+    computed for the position the analyst saw on Sunday. If the ticker exited
+    and was RE-ENTERED since then, those levels belong to a position that no
+    longer exists — production DVN was stopped out at the Aug 4 open,
+    re-entered 42 minutes later at $43.65, and the stale ADJUST stop ($43.50,
+    set for the old basis) was re-applied 0.34% below the fresh entry and
+    tagged it out the next morning.
+
+    "Opened" means the most recent entry-type BUY (weekly_thesis /
+    bracket_resubmission). Pyramid ADDs enlarge an existing position — they
+    must not mark it as newer than the review. Fails open (False → ADJUST
+    applies as before) on missing/damaged data, since applying the analyst's
+    levels is the long-standing default behavior.
+    """
+    if not generated_at:
+        return False
+    try:
+        gen_ts = datetime.fromisoformat(generated_at)
+    except (ValueError, TypeError):
+        return False
+    doc = _load("trade_log.json")
+    trades = doc.get("trades", []) if isinstance(doc, dict) else (doc or [])
+    for rec in reversed(trades):
+        if rec.get("ticker") != ticker or rec.get("action") != "BUY":
+            continue
+        if rec.get("trigger") == "pyramid":
+            continue
+        try:
+            buy_ts = datetime.fromisoformat(rec.get("timestamp", ""))
+            return buy_ts > gen_ts
+        except (ValueError, TypeError):
+            # Malformed or naive-vs-aware mismatch — can't compare safely.
+            return False
+    return False
+
+
 # Cap the size of append-only state files. Older records get spilled to a
 # timestamped archive next to the live file. Without this the files grow
 # linearly forever — production trade_log.json was approaching MBs after a

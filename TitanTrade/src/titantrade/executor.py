@@ -25,11 +25,15 @@ import time  # noqa: F401
 from titantrade.config import Config, load_config
 from titantrade.logger import get_logger, log_decision
 from titantrade.market_context import load_stock_sectors
-from titantrade.entries import _handle_bullish_entry, resubmit_expired_brackets
+from titantrade.entries import (
+    _handle_bullish_entry, record_stop_out_cooldowns, resubmit_expired_brackets,
+)
 from titantrade.positions import manage_trailing_stop, maybe_pyramid_position
 from titantrade.core_allocation import manage_core_position
 from titantrade.protection import check_gap_down_protection, close_orphaned_positions
-from titantrade.trade_state import _append_trade, _load, _trade_record
+from titantrade.trade_state import (
+    _append_trade, _load, _trade_record, position_opened_after,
+)
 from titantrade.alerts import _maybe_alert_stuck_in_cash, _maybe_alert_ticker_churn
 from titantrade.cooldown import _record_abort_cooldown
 from titantrade.trailing_state import _cleanup_trailing_state
@@ -433,6 +437,19 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
         except Exception as exc:
             log.error(f"Core position management failed: {exc}")
 
+    # ADR 056: detect broker-side stop-loss exits and start re-entry
+    # cooldowns for them. ABORT exits record a cooldown when the executor
+    # handles them, but a protective stop fills on Alpaca's servers with
+    # nothing of ours running — without this scan a stopped-out ticker could
+    # be re-bought minutes later (DVN re-entered 42 min after its stop fired).
+    # Must run BEFORE resubmission/entries so this run's decisions see the
+    # cooldown. The abort-cooldown override policy still allows early
+    # re-entry on confirmed recovery.
+    try:
+        record_stop_out_cooldowns(cfg)
+    except Exception as exc:
+        log.warning(f"Stop-out cooldown scan failed: {exc}")
+
     # Resubmit any expired bracket orders before processing new entries
     try:
         resubs = resubmit_expired_brackets(cfg, thesis_doc, positions, data_bundle)
@@ -617,6 +634,22 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
         if review_action == "ADJUST" and ticker in held_tickers:
             position = get_position(ticker, cfg)
             if position:
+                # ADR 056: the ADJUST levels were computed for the position
+                # the analyst reviewed on Sunday. If the ticker exited and was
+                # RE-ENTERED since the review was generated, those levels
+                # belong to a position that no longer exists — production DVN
+                # was stopped out at the Aug 4 open, re-entered 42 min later
+                # at $43.65, and the stale $43.50 ADJUST stop (set for the old
+                # basis) was re-applied 0.34% below the fresh entry and tagged
+                # it out the next morning. Keep the entry-time stop; next
+                # Sunday's review re-syncs the levels.
+                if position_opened_after(ticker, thesis_doc.get("generated_at")):
+                    log.info(
+                        f"ADJUST {ticker}: position was re-opened after the "
+                        f"weekly review was generated — its levels don't apply "
+                        f"to this position. Keeping the entry-time stop."
+                    )
+                    continue
                 qty = float(position.get("qty", 0))
                 new_stop = thesis.get("stop_loss_price")
                 if new_stop and 0 < qty < 1:

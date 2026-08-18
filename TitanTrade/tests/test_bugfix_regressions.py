@@ -508,3 +508,148 @@ class TestMinStopDistanceFloor:
         result = resubmit_expired_brackets(fake_config, thesis_doc, [], {})
         assert result == []
         mock_bracket.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# ADR 056 fix 1: broker-side stop-outs start a re-entry cooldown
+# ---------------------------------------------------------------------------
+
+class TestStopOutCooldown:
+    """Production 2026-08-04: DVN's GTC stop filled at the open (13:34 UTC)
+    and the 14:15 run re-bought the ticker 42 minutes later. ABORT exits
+    record a cooldown when handled, but a protective stop fills broker-side
+    with nothing of ours running — the scan closes that asymmetry. The clock
+    is stamped at the FILL time so re-scanning the same fill is idempotent.
+    """
+
+    def _closed_order(self, **overrides):
+        from datetime import datetime, timedelta, timezone
+        base = {
+            "symbol": "DVN", "side": "sell", "type": "stop_limit",
+            "status": "filled",
+            "filled_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+            "filled_avg_price": "43.42", "stop_price": "43.50",
+        }
+        base.update(overrides)
+        return base
+
+    @patch("titantrade.entries.fetch_with_retry")
+    def test_records_cooldown_for_recent_stop_fill(
+        self, mock_fetch, fake_config, tmp_state_dir,
+    ):
+        from titantrade.entries import record_stop_out_cooldowns
+        from titantrade.cooldown import _is_in_cooldown
+        mock_fetch.return_value = _resp([self._closed_order()])
+        assert record_stop_out_cooldowns(fake_config) == 1
+        in_cd, hours = _is_in_cooldown("DVN")
+        assert in_cd
+        assert 1.5 < hours < 2.5  # clock anchored at the FILL time, not now()
+
+    @patch("titantrade.entries.fetch_with_retry")
+    def test_handles_alpaca_z_suffix_timestamps(
+        self, mock_fetch, fake_config, tmp_state_dir,
+    ):
+        from datetime import datetime, timedelta, timezone
+        from titantrade.entries import record_stop_out_cooldowns
+        from titantrade.cooldown import _is_in_cooldown
+        z_stamp = (datetime.now(timezone.utc) - timedelta(hours=3)).strftime(
+            "%Y-%m-%dT%H:%M:%S.%f") + "Z"
+        mock_fetch.return_value = _resp([self._closed_order(filled_at=z_stamp)])
+        assert record_stop_out_cooldowns(fake_config) == 1
+        in_cd, hours = _is_in_cooldown("DVN")
+        assert in_cd and 2.5 < hours < 3.5
+
+    @patch("titantrade.entries.fetch_with_retry")
+    def test_idempotent_across_runs(self, mock_fetch, fake_config, tmp_state_dir):
+        from titantrade.entries import record_stop_out_cooldowns
+        from titantrade.cooldown import _is_in_cooldown
+        mock_fetch.return_value = _resp([self._closed_order()])
+        assert record_stop_out_cooldowns(fake_config) == 1
+        # Second scan sees the same fill: no new record, clock NOT re-stamped.
+        assert record_stop_out_cooldowns(fake_config) == 0
+        _, hours = _is_in_cooldown("DVN")
+        assert hours > 1.5  # still anchored at the original fill time
+
+    @patch("titantrade.entries.fetch_with_retry")
+    def test_ignores_old_and_non_stop_fills(
+        self, mock_fetch, fake_config, tmp_state_dir,
+    ):
+        from datetime import datetime, timedelta, timezone
+        from titantrade.entries import record_stop_out_cooldowns
+        from titantrade.cooldown import _is_in_cooldown
+        old_fill = (datetime.now(timezone.utc) - timedelta(hours=100)).isoformat()
+        mock_fetch.return_value = _resp([
+            self._closed_order(symbol="URI", filled_at=old_fill),   # outside window
+            self._closed_order(symbol="LLY", type="market"),        # abort/TP1 sell
+            self._closed_order(symbol="GE", side="buy"),            # buy-side stop
+            self._closed_order(symbol="FCX", status="canceled", filled_at=None),
+        ])
+        assert record_stop_out_cooldowns(fake_config) == 0
+        for ticker in ("URI", "LLY", "GE", "FCX"):
+            assert _is_in_cooldown(ticker) == (False, 0.0)
+
+    @patch("titantrade.entries.fetch_with_retry", side_effect=RuntimeError("api down"))
+    def test_scan_failure_returns_zero_never_raises(
+        self, mock_fetch, fake_config, tmp_state_dir,
+    ):
+        from titantrade.entries import record_stop_out_cooldowns
+        assert record_stop_out_cooldowns(fake_config) == 0
+
+
+# ---------------------------------------------------------------------------
+# ADR 056 fix 2: ADJUST levels don't apply to a position opened after review
+# ---------------------------------------------------------------------------
+
+class TestAdjustStaleReviewGuard:
+    """Production 2026-08-04/05: the analyst's ADJUST stop ($43.50, computed
+    Sunday for the OLD 217-share DVN position) was re-applied to a NEW
+    position entered at $43.65 after the old one stopped out — a 0.34% stop
+    that tagged out the next morning. ``position_opened_after`` is the guard
+    the executor's Section 4a now consults before applying ADJUST levels
+    (inline-pattern wiring, same as TestAdjustStopSafety).
+    """
+
+    GEN = "2026-08-16T20:07:00+00:00"
+
+    def _buy(self, ticker, ts, trigger="weekly_thesis"):
+        return {"ticker": ticker, "action": "BUY", "trigger": trigger,
+                "timestamp": ts, "shares": 10, "price": 43.65}
+
+    def _write_log(self, state_dir, *records):
+        from tests.conftest import write_state_file
+        write_state_file(state_dir, "trade_log.json", {"trades": list(records)})
+
+    def test_true_when_position_reopened_after_review(self, tmp_state_dir):
+        from titantrade.trade_state import position_opened_after
+        self._write_log(tmp_state_dir, self._buy("DVN", "2026-08-17T14:15:00+00:00"))
+        assert position_opened_after("DVN", self.GEN) is True
+
+    def test_false_when_position_predates_review(self, tmp_state_dir):
+        from titantrade.trade_state import position_opened_after
+        self._write_log(tmp_state_dir, self._buy("DVN", "2026-08-14T14:15:00+00:00"))
+        assert position_opened_after("DVN", self.GEN) is False
+
+    def test_pyramid_add_does_not_count_as_reopen(self, tmp_state_dir):
+        from titantrade.trade_state import position_opened_after
+        # Entry predates the review; a pyramid ADD after it merely enlarged
+        # the reviewed position — the ADJUST levels still apply.
+        self._write_log(
+            tmp_state_dir,
+            self._buy("GE", "2026-08-10T14:15:00+00:00"),
+            self._buy("GE", "2026-08-17T19:30:00+00:00", trigger="pyramid"),
+        )
+        assert position_opened_after("GE", self.GEN) is False
+
+    def test_fails_open_on_missing_data(self, tmp_state_dir):
+        from titantrade.trade_state import position_opened_after
+        # No trade log at all -> can't tell -> apply ADJUST as before.
+        assert position_opened_after("DVN", self.GEN) is False
+        # No generated_at -> same.
+        self._write_log(tmp_state_dir, self._buy("DVN", "2026-08-17T14:15:00+00:00"))
+        assert position_opened_after("DVN", None) is False
+        assert position_opened_after("DVN", "not-a-timestamp") is False
+
+    def test_fails_open_on_malformed_buy_timestamp(self, tmp_state_dir):
+        from titantrade.trade_state import position_opened_after
+        self._write_log(tmp_state_dir, self._buy("DVN", "garbage"))
+        assert position_opened_after("DVN", self.GEN) is False

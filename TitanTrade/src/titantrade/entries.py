@@ -6,6 +6,7 @@ Extracted from executor.py (behavior-preserving).
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from titantrade.config import Config
@@ -27,6 +28,7 @@ from titantrade.pricing import (
 )
 from titantrade.cooldown import (
     _is_in_cooldown, cooldown_override_allowed, REENTRY_COOLDOWN_HOURS,
+    _record_stop_out_cooldown,
 )
 from titantrade.risk_manager import pre_trade_check
 
@@ -463,6 +465,65 @@ def _handle_bullish_entry(
         },
     )
     return trade
+
+
+def record_stop_out_cooldowns(cfg: Config) -> int:
+    """Detect broker-side stop-loss exits and start re-entry cooldowns (ADR 056).
+
+    ABORT exits record a cooldown when the executor handles them — but a
+    protective stop fills on Alpaca's servers with nothing of ours running,
+    so the executor never "handles" the exit and the cooldown never starts.
+    Production DVN: GTC stop filled at the Aug 4 open (13:34 UTC), and the
+    14:15 run re-bought the ticker 42 minutes later. A protective exit is a
+    protective exit — both kinds now cool down, and both share the same
+    override policy (>=24h + sentry CONTINUE + price recovered above stop).
+
+    Scans recent closed orders for filled protective-stop sells (type stop /
+    stop_limit) whose fill time is inside the cooldown window and records each
+    as a cooldown event stamped at the FILL time — idempotent across runs
+    (see ``_record_stop_out_cooldown``). The 500-order page covers weeks of
+    this system's volume; a fill older than the window is ignored anyway.
+
+    Returns the number of new cooldown records written. Never raises — a
+    failed scan just means this run behaves like the pre-ADR-056 executor.
+    """
+    url = f"{cfg.alpaca.base_url}/v2/orders"
+    # No `after` param: it filters on SUBMITTED time, and a GTC stop is often
+    # submitted days before it fills. Filter on filled_at client-side instead.
+    params = {"status": "closed", "limit": "500", "direction": "desc"}
+    try:
+        resp = fetch_with_retry("GET", url, headers=_headers(cfg), params=params)
+        orders = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"Stop-out cooldown scan failed: {exc}")
+        return 0
+
+    now = datetime.now(timezone.utc)
+    recorded = 0
+    for o in orders:
+        if o.get("side") != "sell" or o.get("type") not in ("stop", "stop_limit"):
+            continue
+        if o.get("status") != "filled" or not o.get("filled_at"):
+            continue
+        try:
+            filled_dt = datetime.fromisoformat(o["filled_at"])
+            age_hours = (now - filled_dt).total_seconds() / 3600
+        except (ValueError, TypeError):
+            continue
+        if age_hours >= REENTRY_COOLDOWN_HOURS or age_hours < 0:
+            continue
+        ticker = o.get("symbol", "")
+        price = o.get("filled_avg_price") or o.get("stop_price") or "?"
+        if _record_stop_out_cooldown(
+            ticker, o["filled_at"], f"stop-loss exit @ ${price} (broker-side fill)",
+        ):
+            log.info(
+                f"Stop-out cooldown recorded for {ticker}: protective stop "
+                f"filled {o['filled_at']} @ ${price} — re-entry suppressed "
+                f"(override policy applies)"
+            )
+            recorded += 1
+    return recorded
 
 
 def get_expired_brackets(cfg: Config) -> list[dict[str, Any]]:

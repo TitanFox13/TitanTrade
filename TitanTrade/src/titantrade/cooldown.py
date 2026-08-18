@@ -80,6 +80,41 @@ def _is_in_cooldown(ticker: str) -> tuple[bool, float]:
     return True, hours
 
 
+def _record_stop_out_cooldown(ticker: str, exited_at: str, reason: str) -> bool:
+    """Record a broker-side stop-loss exit as a cooldown event (ADR 056).
+
+    Unlike ``_record_abort_cooldown`` this stamps the cooldown clock with the
+    stop order's FILL time, not now() — the scan that detects these runs on
+    every executor cycle, and re-stamping with now() would silently extend the
+    cooldown forever. Recording the fill time makes repeated detection of the
+    same fill idempotent.
+
+    Returns True when a new record was written, False when an equal-or-newer
+    event already covers this ticker.
+    """
+    try:
+        exited_dt = datetime.fromisoformat(exited_at)
+    except (ValueError, TypeError):
+        return False
+    data = _load_abort_cooldowns()
+    entry = data.get(ticker)
+    if entry:
+        try:
+            existing_dt = datetime.fromisoformat(entry.get("aborted_at", ""))
+            if existing_dt >= exited_dt:
+                return False  # already covered by an equal-or-newer event
+        except (ValueError, TypeError):
+            pass  # damaged record — overwrite with the valid one
+    data[ticker] = {
+        # Normalize through fromisoformat→isoformat so _is_in_cooldown's
+        # parser always accepts what we store (Alpaca stamps use 'Z').
+        "aborted_at": exited_dt.isoformat(),
+        "reason": reason[:200],
+    }
+    _save_abort_cooldowns(data)
+    return True
+
+
 # Minimum hours after ABORT before sentry-confirmed override can re-enter.
 # A 24h buffer prevents same-day whipsaw round-trips (the GS case) while
 # still allowing the recovery leg after a one-day shakeout.
