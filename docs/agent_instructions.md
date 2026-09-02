@@ -54,11 +54,14 @@ Separating concerns produces better output than a single mega-prompt.
 Three-layer conflict detection running twice daily on active positions:
 
 - **Layer 1 — Market-wide** (no AI): SPY drop >2% flags all positions as "market stress"
-- **Layer 2 — Price-based** (no AI): Stock moved >3% against thesis → hard ABORT override
+- **Layer 2 — Price-based** (no AI): graduated — a >=5% adverse move is a hard ABORT regardless of news; a 3–5% move ABORTs only when Layer 3 corroborates it (conflicting headlines or market stress), otherwise it is logged as noise and the broker-side stop stays the protection (Decisions 045, 057)
 - **Layer 3 — News-based** (Gemini Flash): Compare today's headlines vs the thesis breach condition
 
-Layer 2 is a hard programmatic override — even if Gemini says CONTINUE, a 3%+ adverse move
-forces ABORT. Price doesn't lie; waiting for news confirmation costs money.
+Layer 2's >=5% tier is a hard programmatic override — even if Gemini says CONTINUE, a catastrophic
+move forces ABORT. Price doesn't lie. The 3–5% tier is deliberately softer: single-stock moves of
+that size happen constantly in normal volatility, and aborting on them was measured as the dominant
+churn cost (Decisions 045, 057). Gemini's `price_concern` flag does not count as corroboration — the
+prompt shows it the price alert, so the flag would confirm the move with itself.
 
 ### Why three layers?
 

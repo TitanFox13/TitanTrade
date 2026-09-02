@@ -390,15 +390,25 @@ def check_stock(
     #
     # New policy — graduated by severity:
     #   - >= 5% adverse: catastrophic, always ABORT (regardless of news)
-    #   - 3-5% adverse + Gemini flagged news concern: confirmed ABORT
+    #   - 3-5% adverse + Gemini flagged news concern (conflicting headlines
+    #     or market stress — NOT its price_concern flag, ADR 057): confirmed ABORT
     #   - 3-5% adverse + Gemini clean: WARN but don't override CONTINUE
     #     (likely noise — let our broker-side stop handle a real breakdown)
     move_pct = price_check.get("move_pct", 0) or 0
     is_adverse = price_check.get("adverse_move", False)
     is_catastrophic = move_pct <= -PRICE_MOVE_HARD_ABORT_PCT
+    # ADR 057: corroboration of a moderate adverse move must come from
+    # something OTHER than the price move itself. Gemini's ``price_concern``
+    # flag used to count — but the prompt shows Gemini the very price alert
+    # that put us in this branch and asks whether the move "is a factor", so
+    # the flag came back true almost every time Gemini said CONTINUE. The
+    # "Gemini clean → noise" tier below was effectively dead code: 36 of 39
+    # "news-confirmed" ABORTs between ADR 045 (2026-05-12) and 2026-09-01 had
+    # ZERO conflicting headlines and no market concern, and Gemini's own
+    # reasoning called the move normal volatility. Only conflicting headlines
+    # or market stress corroborate now.
     has_news_concern = (
         len(signal.get("conflicting_headlines") or []) > 0
-        or bool(signal.get("price_concern"))
         or bool(signal.get("market_concern"))
     )
 

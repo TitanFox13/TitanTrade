@@ -185,6 +185,60 @@ class TestCheckStock:
         assert result["signal"] == "ABORT"
         assert "confirmed by Gemini news" in result["reasoning"].lower() or "confirmed by gemini" in result["reasoning"].lower()
 
+    def test_moderate_price_with_continue_and_price_concern_only_stays_continue(
+        self, fake_config, thesis, price_check_adverse, market_check_ok,
+    ):
+        """ADR 057 regression: Gemini CONTINUE + ``price_concern: true`` but NO
+        conflicting headlines and NO market concern must NOT become a
+        "news-confirmed" ABORT.
+
+        The prompt shows Gemini the adverse-price alert and asks whether the
+        move "is a factor", so the flag is true almost whenever this branch
+        runs — counting it as corroboration let the price move confirm itself.
+        Production: 36 of 39 "news-confirmed" ABORTs (2026-05-12 → 09-01) had
+        exactly this shape, each with Gemini reasoning that the move was normal
+        volatility (GE 08-20, URI 08-25, EQIX 08-31, ...).
+        """
+        custom = json.dumps({
+            "ticker": "AAPL",
+            "signal": "CONTINUE",
+            "conflicting_headlines": [],
+            "price_concern": True,
+            "market_concern": False,
+            "reasoning": (
+                "The current price decline is within the expected volatility "
+                "range and does not meet the thesis breach conditions."
+            ),
+        })
+        with patch("titantrade.daily_sentry._call_gemini", return_value=custom):
+            result = check_stock("AAPL", thesis, [], price_check_adverse, market_check_ok, fake_config)
+        assert result["signal"] == "CONTINUE"
+        assert "no news corroboration" in result["reasoning"].lower()
+        # The concern is still surfaced in the payload for the operator.
+        assert result["price_concern"] is True
+
+    def test_moderate_price_with_continue_but_market_concern_aborts(
+        self, fake_config, thesis, price_check_adverse,
+    ):
+        """Market stress remains a valid corroborator for a 3-5% adverse move
+        (ADR 045 tier 2 keeps ``market_concern``; ADR 057 only dropped the
+        circular ``price_concern`` flag)."""
+        market_stress = {"market_stress": True, "spy_change_pct": -2.4, "alert": "STRESS"}
+        custom = json.dumps({
+            "ticker": "AAPL",
+            "signal": "CONTINUE",
+            "conflicting_headlines": [],
+            "price_concern": False,
+            "market_concern": True,
+            "reasoning": "Broad market selloff is weighing on the name",
+        })
+        with patch("titantrade.daily_sentry._call_gemini", return_value=custom):
+            result = check_stock("AAPL", thesis, [], price_check_adverse, market_stress, fake_config)
+        assert result["signal"] == "ABORT"
+        assert "confirmed by gemini" in result["reasoning"].lower()
+        # Price-driven override → executor treats it as urgent (market sell).
+        assert result["price_concern"] is True
+
     def test_catastrophic_price_move_always_aborts(
         self, fake_config, thesis, price_check_catastrophic, market_check_ok,
     ):

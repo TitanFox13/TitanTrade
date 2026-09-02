@@ -12,7 +12,7 @@
 
 ### Three-Layer Daily Sentry (Gemini Flash)
 - **Layer 1 - Market-wide**: SPY drop >2% flags ALL positions
-- **Layer 2 - Price-based**: graduated severity — >=5% adverse always ABORTs; 3-5% ABORTs only with Gemini news confirmation (Decision 045)
+- **Layer 2 - Price-based**: graduated severity — >=5% adverse always ABORTs; 3-5% ABORTs only when Gemini corroborates with conflicting headlines or market stress — its `price_concern` flag doesn't count, it merely echoes the price alert (Decisions 045, 057)
 - **Layer 3 - News-based**: Gemini Flash checks headlines vs thesis breach conditions
 - Decision asymmetry (Decision 034): false ABORTs cost money, false CONTINUEs are caught by the broker-side stop — news-only ABORTs without price confirmation are downgraded
 - Truncated JSON repair: salvages Gemini responses that hit token limits mid-output
@@ -30,8 +30,9 @@
 - Bracket math sanity check refuses invalid (stop >= entry) brackets before
   the broker rejects them — happens when ADJUSTed thesis is reused for a
   new entry
-- Graduated price-ABORT severity: 3-5% needs Gemini news confirmation,
-  >=5% always aborts. Reduces noise-driven churn in normal volatility.
+- Graduated price-ABORT severity: 3-5% needs Gemini news confirmation
+  (conflicting headlines or market stress — Decision 057), >=5% always aborts.
+  Reduces noise-driven churn in normal volatility.
 - 72-hour re-entry cooldown after every ABORT — prevents the "sell low,
   buy higher" cycles previously observed in production
 - High-impact-only macro blackout (FOMC, NFP, CPI, core PCE, GDP); 6h

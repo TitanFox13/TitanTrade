@@ -127,9 +127,17 @@ Layers 1 and 2 are programmatic (no AI). Layer 3 is the only AI call in the sent
 
 `signal` is strictly `"CONTINUE"` or `"ABORT"`. Any other value is treated as ABORT.
 
-### Hard Override (Layer 2)
+### Price Override (Layer 2, graduated — Decisions 045 + 057)
 
-If Layer 2 detects a 3%+ adverse price move, the system forces ABORT regardless of
-what Gemini returns. This override happens in code (`daily_sentry.py`) before the
-Layer 3 result is used. Gemini still runs (its reasoning is logged), but its signal
-is discarded.
+The override happens in code (`daily_sentry.py`) after Gemini returns; Gemini always
+runs and its reasoning is logged either way.
+
+- **>= 5% adverse**: catastrophic — ABORT regardless of what Gemini returned.
+- **3–5% adverse**: ABORT only if Gemini corroborated it with `conflicting_headlines`
+  or `market_concern`. Its `price_concern` flag does *not* count: the prompt shows
+  Gemini the price alert and asks whether it "is a factor", so the flag merely echoes
+  the trigger (it was true on 36 of 39 overrides while Gemini's reasoning called the
+  move normal volatility). Without corroboration the move is logged as noise and the
+  broker-side stop remains the protection.
+- **Gemini ABORT with no adverse move**: downgraded to CONTINUE — news alone cannot
+  kill a position (Decision 034).

@@ -1,5 +1,49 @@
 # Important Decisions Log
 
+## Decision 057: Sentry price-override corroboration excludes Gemini's `price_concern` flag (September checkup)
+**Date**: 2026-09-02
+**Decision**: A moderate (3–5%) adverse move is "confirmed" into an ABORT only by Gemini's `conflicting_headlines` (non-empty) or `market_concern`. Its `price_concern` flag no longer counts. This restores the behaviour Decision 045 specified — "3–5% adverse + Gemini clean → warn, do NOT override CONTINUE" — which had been effectively dead code since it shipped. Strategy selection, sizing, stops and cooldowns untouched. **Deployed 2026-09-02** (operator decision taken the same morning — see "Relationship to the strategy hold" below).
+
+### September checkup (2026-08-18 → 2026-09-01, 10 trading days)
+Ops: 0 ERROR/CRITICAL/tracebacks in 3,548 log lines, all 8 scheduler jobs completed on time, public API healthy, both images current with `67281b3`, AI cost $3.24 (Claude $2.99 / Gemini $0.25), 7 open GTC stops covering all 7 overlay positions (SPY core ~34%, cash 17% after the Sep 1 stop-outs). Only noise: transient FRED 502s, every one retried successfully.
+
+Performance (`compute_benchmark(persist=False)`):
+
+| Window | Strategy | SPY | Beta | Alpha/yr | Sharpe (S / SPY) | Up / down capture | Max DD (S / SPY) |
+|---|---|---|---|---|---|---|---|
+| Clean window since 2026-07-08 (39 td) | **+2.58%** | +2.19% | 0.60 | +8.4% | 1.39 / 1.27 | 0.82 / 0.73 | −3.11% / −3.36% |
+| Since last checkup 2026-08-18 (10 td) | −0.90% | −0.75% | 0.93 | −4.8% | −1.81 / −2.41 | 1.16 / 1.17 | −2.52% / −1.24% |
+| Since the equity peak 2026-08-12 (14 td) | −3.11% | −1.41% | 0.60 | −41% | −4.95 / −3.19 | 0.51 / 1.16 | −3.11% / −2.08% |
+
+Still adding value on the clean window, but the edge narrowed from the Aug 18 reading (+4.29% vs +4.16%, Sharpe 3.18 vs 3.06), and the first pullback since the hold decision has the wrong shape: down-capture 1.16 over the 14 sessions off the peak. Short-window betas and alphas are noise, but the *mechanism* is visible in the fills — 11 exits (7 broker stop-outs, 3 sentry aborts, 1 dust) and 9 re-entries in 10 sessions on a −1.4% SPY tape. Two of the three churn paths are documented below; the third (the sentry override) is the defect this decision fixes.
+
+### The defect
+The sentry prompt shows Gemini the price-action alert that put us in the 3–5% branch, then asks it to set `price_concern: true if an adverse price move is a factor in your decision`. Gemini, honestly, says yes — it looked at the alert — while its `signal` says CONTINUE and its reasoning says "within the expected volatility range". `check_stock()` then counted that flag as "Gemini flagged a news concern" and forced ABORT. The price move confirmed itself.
+
+Every sentry decision logged since Decision 045 shipped (2026-05-12 → 2026-09-01; 2,398 records):
+
+| Outcome of a 3–5% adverse move where Gemini said CONTINUE | Count |
+|---|---|
+| Forced ABORT, "confirmed" by `price_concern` alone (no headlines, no market concern) | **36** |
+| Forced ABORT, confirmed by conflicting headlines | 2 |
+| Forced ABORT, confirmed by market concern | 1 |
+| Left as CONTINUE (the designed noise branch) | 9 |
+
+In all 36 cases Gemini's own reasoning called the move normal volatility / no breach. The three in the checkup window: GE 08-20 (−4.8%, 3 sh sold $344.25), URI 08-25 (−3.5%, 8 sh sold $1,056.41, −$309 realised), EQIX 08-31 (−3.1%, 10 sh sold $1,031.74, −$321 realised, then re-bought 25 h later at $1,032.65 through the cooldown override — a pure round-trip). The July checkup had already measured this pattern as the month's dominant real drag (~$1.5–2k; "7 of 10 aborts overrode Gemini's own normal-volatility read") but framed it as a threshold-tuning question parked behind the strategy hold. It isn't a threshold: the graduated policy never ran as designed. The 3-of-39 cases with a real corroborator would still ABORT after this fix.
+
+### Fix
+`daily_sentry.check_stock()`: `has_news_concern = conflicting_headlines or market_concern`. Everything else is unchanged — ≥5% still hard-ABORTs regardless of Gemini; both override branches still stamp `price_concern = True` so the executor market-sells (urgent) rather than limit-sells; the noise branch still records `price_concern = True` for operator visibility; the news-only-ABORT downgrade (Decision 034) is untouched; `price_check.py` (no LLM, ≥5% only) is unaffected. Two regression tests in `TestCheckStock` (`price_concern`-only stays CONTINUE with the "no news corroboration" reasoning; `market_concern` still confirms and keeps `price_concern = True` for the executor). **536 tests green**; touched files ruff-clean apart from two pre-existing E402s in the test module.
+
+### Relationship to the strategy hold (2026-06-22)
+This changes live abort frequency in the 3–5% band — the sentry sensitivity the hold decision froze. The checkup presented it as a defect fix with the deploy left to the operator, who chose to deploy the same morning (both images rebuilt, API restarted before the day's first job). Expected live effect: the 36-style aborts stop; a position down 3–5% with clean news rides to its broker-side stop (typically 5–7% below entry, or the analyst's ADJUST level) or to the ≥5% hard tier. In hindsight the checkup window's three price-only aborts split: URI exited ahead of a further −6% (right), GE roughly break-even (GE closed Sep 1 near the abort price), EQIX pure churn (re-bought at the abort price a day later). The July cluster (ANET/DXCM/DVN/URI) was mostly churn. Decision 045 chose stop-based exits over these; this decision makes that choice real.
+
+### Also observed, not changed (watch items — todo Phase 1.34)
+1. **Analyst ADJUST stops are noise-tight.** Measured against the Friday close and 14-day ATR at each review: Aug 30 set HCA $413 (0.49×ATR, 1.16% below close), FCX $73.60 (1.03×), DASH $228.50 (1.16×) — all three tagged at the Sep 1 open on a −0.7% SPY day. Aug 16 set JPM $354 (1.81×), ANET $184 (1.69×), EQIX $1,055 (2.14×), URI $1,094 (2.38×) — all four tagged Aug 19–20 on a −1.3% SPY move, then JPM/ANET/EQIX were re-bought higher Aug 24–25 (ANET: out $183.84, closed $202 six sessions later). The system's own trail is 3.0×ATR; the Decision 055 floor (1.5%, flat) covers entries only — HCA's raise would have failed even that. Candidate: an ATR-scaled floor on ADJUST raises (keep the existing stop when the analyst's is tighter than ~1.5×ATR). It overrides the analyst's explicit "lock gains" intent, so it is a strategy-design choice → parked under the hold.
+2. **The cooldown override is nearly always satisfied.** "Price recovered" means ≥1% above the *thesis stop* — which any 3–5% abort trivially meets — so the 72 h cooldown is effectively the 24 h `COOLDOWN_OVERRIDE_MIN_HOURS` (EQIX above; 15 override log lines in 16 days). Candidate: measure recovery against the abort price instead. Parked.
+3. **Stale docs fixed in this pass**: `docs/agent_instructions.md`, `TitanTrade/docs/agent_instructions.md` and `TitanTrade/docs/architecture.md` still described the pre-045 "3% hard override regardless of Gemini" — four months stale, survived the Decision 056 accuracy pass.
+4. **Housekeeping (titanserver)**: disk was 78% (8.1 GB free) with 14 GB of unused docker images (98% reclaimable, other projects' included) and 3 GB build cache. Unused images pruned at deploy time on the operator's instruction; build cache left alone.
+5. **Benchmark caveat still applies**: the persisted 90-day `benchmark_metrics.json` (Jun 1 → Aug 31) carries the Jul 2–7 CRWD split artifact until ~mid-October — its −8.15% max DD, 27% vol and 1.11 down-capture are polluted; read `--since 2026-07-08`.
+
 ## Decision 056: Stop-out re-entry cooldown + stale-ADJUST guard (mid-August checkup)
 **Date**: 2026-08-18
 **Decision**: Close the two churn paths the DVN sequence of Aug 4–5 exposed — paths the ADR 055 guards deliberately didn't cover — plus a documentation accuracy pass. Strategy selection/sizing untouched; both fixes extend existing protective mechanisms to exits they missed.

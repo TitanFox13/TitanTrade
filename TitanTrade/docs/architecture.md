@@ -42,7 +42,9 @@ For the full system diagram (including the Flutter app), see
 
 2. **Layer 2: Price-Based Check** (`daily_sentry.py`)
    - Check if any held stock moved >3% against thesis since entry
-   - Hard override: forces ABORT regardless of news assessment
+   - Graduated override (Decisions 045, 057): >=5% forces ABORT regardless of news;
+     3-5% ABORTs only if Layer 3 corroborates (conflicting headlines or market
+     stress), otherwise logged as noise — the broker-side stop remains the protection
 
 3. **Layer 3: News-Based Check** (`daily_sentry.py`)
    - Gemini Flash compares today's headlines vs thesis breach condition

@@ -99,10 +99,14 @@ Nine hard gates between the AI and the brokerage, enforced in code:
 - All positions flagged for enhanced review
 - Gemini receives this as context in its prompt
 
-### Layer 2: Price-Based Override (graduated, Decision 045)
+### Layer 2: Price-Based Override (graduated, Decisions 045 + 057)
 - >= 5% adverse move = catastrophic, always ABORT (regardless of news)
 - 3-5% adverse move ABORTs only with Gemini news confirmation; without it the
   move is logged as noise and the broker-side stop remains the protection
+- "Confirmation" means Gemini returned `conflicting_headlines` or `market_concern`.
+  Its `price_concern` flag is not corroboration — the prompt shows Gemini the price
+  alert, so the flag was true on 36 of 39 overrides while Gemini's reasoning called
+  the move normal volatility (Decision 057)
 - Catches pre-news institutional selling without whipsawing on normal volatility
 
 ### Layer 3: News-Based AI Check
