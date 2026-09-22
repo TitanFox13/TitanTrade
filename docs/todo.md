@@ -9,7 +9,7 @@ Sweep of the live server (Sep 8 → Sep 21): 0 errors in 3,460 log lines, 8 jobs
 - [x] **Fix 5 — SIP benchmark bars**: `benchmark_metrics.json` always ended one session early (IEX daily bar not published at 20:30 UTC). `get_ohlcv(..., feed=...)` override; SIP queries end at now − 16 min (free-plan recency rule, verified on the server). `data_providers/native.py`, `fmp.py`, `market_data.py`, `benchmark.py`. **Verify at the Sep 22 20:30 UTC summary that `window_end` = 2026-09-22.**
 - [x] Withdrawn finding — "ghost" sentry checks on sold review-thesis tickers are the gate that stops Section 2 re-buying them under the stale thesis; left unchanged (Decision 058 §Withdrawn).
 - [x] 26 new regression tests; **562 tests green**; touched files ruff-clean.
-- [ ] Deploy 2026-09-22: both images (`api` + `titantrade`), API restarted, 8 jobs verified before the 13:00 UTC fetch.
+- [x] **Deployed 2026-09-22 10:19 UTC** (commit `bb77507`): both images rebuilt (`api` + `titantrade`, verified to contain the ADR 058 symbols), API restarted, health ok, 8 scheduler jobs registered — 2 h 40 min before the day's 13:00 UTC fetch.
 - [ ] Watch item — ATR-scaled ADJUST floor (strategy, parked): book on Sep 21 carries DASH 0.82×ATR, FCX 1.23×, JPM 1.30× analyst stops vs the 3.0× system trail.
 - [ ] Housekeeping (titanserver): disk 60% — build cache 6.8 GB (`docker builder prune -a -f`) + 3 dangling PG 15 volumes (332 MB) pending the operator; untracked `data/historical_long/` (2.5 MB) to gitignore or delete.
 
