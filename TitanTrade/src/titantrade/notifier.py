@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -19,6 +20,12 @@ COLOR_SUCCESS = 0x2ECC71  # green
 COLOR_FAILURE = 0xE74C3C  # red
 COLOR_SUMMARY = 0x3498DB  # blue
 COLOR_STRATEGY = 0xF39C12  # orange — v2-strategy events (pyramid, tp1, core, override)
+
+# Decision 058: one Discord POST is a single point of failure for the
+# operator's only push channel — production lost a job notification to a
+# transient 503 (2026-09-17). Retry transport errors, 429 and 5xx a couple of
+# times with a short backoff; other 4xx are our bug, not the network's.
+_RETRY_DELAYS_S: tuple[float, ...] = (1.0, 2.0)
 
 
 def _get_webhook_url() -> str | None:
@@ -49,12 +56,32 @@ def send_discord(
 
     payload = {"embeds": [embed]}
 
-    try:
-        resp = httpx.post(url, json=payload, timeout=5.0)
-        if resp.status_code >= 400:
-            log.warning(f"Discord webhook returned {resp.status_code}: {resp.text[:200]}")
-    except Exception:
-        log.exception("Failed to send Discord notification")
+    attempts = len(_RETRY_DELAYS_S) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = httpx.post(url, json=payload, timeout=5.0)
+        except Exception as exc:
+            if attempt < attempts:
+                log.warning(
+                    f"Discord webhook transport error on attempt {attempt}/{attempts}: "
+                    f"{exc!r} — retrying"
+                )
+                time.sleep(_RETRY_DELAYS_S[attempt - 1])
+                continue
+            log.exception("Failed to send Discord notification")
+            return
+        if resp.status_code < 400:
+            return
+        retryable = resp.status_code == 429 or resp.status_code >= 500
+        if retryable and attempt < attempts:
+            log.warning(
+                f"Discord webhook returned {resp.status_code} on attempt "
+                f"{attempt}/{attempts}: {resp.text[:200]} — retrying"
+            )
+            time.sleep(_RETRY_DELAYS_S[attempt - 1])
+            continue
+        log.warning(f"Discord webhook returned {resp.status_code}: {resp.text[:200]}")
+        return
 
 
 def notify_job_completed(job_name: str, result: str | None, duration_seconds: float) -> None:

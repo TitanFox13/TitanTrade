@@ -140,7 +140,8 @@ All state lives in `state/` as JSON files. No database.
 | Same-run ABORT guard | Sequencing | Current sentry ABORT → no entry/resubmit (exit is coming, Decision 055) | entries |
 | Stop-out cooldown | Sequencing | Broker-side stop fill → 72h re-entry cooldown, fill-time stamped (Decision 056) | entries/cooldown |
 | Stale-ADJUST guard | Data | ADJUST levels skipped for positions opened after the review (Decision 056) | executor/trade_state |
-| Cash reserve | Portfolio | 5% minimum cash (net of pending buys) | risk_manager |
+| ADJUST live-price floor | Fixed | Analyst raise at/above the live mark or < 1.5% below it → existing stop kept (Decision 058) | pricing/executor |
+| Cash reserve | Portfolio | 5% minimum cash (net of pending buys; account re-read after each executed entry, Decision 058) | risk_manager/executor |
 | Sector exposure | Portfolio | 50% max per sector | risk_manager |
 | Thesis review | Weekly | CONTINUE/ADJUST/CLOSE cycle (no hard expiry) | weekly_analyst |
 | Pass 2 selection | AI quality | Top 3-5 only | executor |

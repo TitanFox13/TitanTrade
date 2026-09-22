@@ -1,5 +1,70 @@
 # Important Decisions Log
 
+## Decision 058: ADJUST live-price floor, in-run cash refresh, real days-held, Discord retry, SIP benchmark bars (September 22 sweep)
+**Date**: 2026-09-22
+**Decision**: five independent correctness fixes surfaced by the Sep 8 → Sep 21 sweep. None changes strategy selection, sizing curves, sentry sensitivity, trail width or cooldown policy — the 2026-06-22 hold stands.
+1. **ADJUST live-price floor** — Section 4a measures the analyst's new stop against the position's live mark (`pricing.adjust_stop_too_tight`, same 1.5% floor as Decision 055). A raise at/above the live price or inside the floor is *not* applied while an existing stop protects the position (WARNING + keep). With no stop on the book the level is placed anyway — unprotected is worse than tight. Missing live price → unchanged behaviour (fails open).
+2. **In-run cash refresh** — Section 2 re-reads the account after every executed entry, so later tickers in the same run are sized against post-fill cash (mirrors what `resubmit_expired_brackets` already did).
+3. **Real "Days held"** — the weekly review derives it from the trade log (`trade_state.position_opened_at`, the same opening-BUY lookup the Decision 056 guard uses) instead of a fallback chain that always produced 0.
+4. **Discord retry** — webhook POSTs retry transport errors, 429 and 5xx twice (1 s, 2 s backoff); other 4xx are ours and are logged once.
+5. **SIP benchmark bars** — `benchmark._spy_close_series` fetches SPY with `feed="sip"`; the native provider ends a SIP query ≥16 min in the past (the free plan refuses ranges reaching into the last 15 minutes), so the 20:30 UTC daily summary includes the session that just closed.
+
+### September 22 sweep (2026-09-08 → 2026-09-21, 10 trading days)
+Ops: 0 ERROR/CRITICAL/tracebacks in 3,460 log lines, all 8 scheduler jobs completed, public API healthy, both images current with the Sep 2 build (`1055865` is docs-only since), AI cost $4.61 (Claude $4.35 / Gemini $0.26; $7.80/30 d), 536 tests green. Equity $112,104; 9 overlay positions + SPY core (34%), every position covered by a GTC stop-limit with matching qty; cash 2.6% (see Finding 2). Noise only: 8 FRED 502s all retried, one Discord 503 (Finding 4), crawler 404s on the bare domain. Disk 43% → 60% — a 6.8 GB Docker build cache from a resevolve rebuild (~Sep 18) plus 3 orphaned PG 15 volumes (332 MB); not cleaned in this pass (operator's call, pattern in Decision 057 §4).
+
+Performance (`compute_benchmark(persist=False)`, windows end Sep 21):
+
+| Window | Strategy | SPY | Beta | Alpha/yr | Sharpe (S / SPY) | Up / down capture | Max DD (S / SPY) |
+|---|---|---|---|---|---|---|---|
+| Clean window since 2026-07-08 (52 td) | +3.61% | **+3.79%** | 0.68 | +5.3% | 1.44 / 1.61 | 0.81 / 0.76 | −4.64% / −3.36% |
+| Since last checkup 2026-09-04 (10 td) | **+0.66%** | +0.43% | 0.90 | +6.8% | 1.34 / 0.91 | 0.90 / 0.82 | −1.91% / −2.09% |
+| Since the equity peak 2026-08-12 (27 td) | −2.14% | **+0.13%** | 0.83 | −20.9% | −1.59 / 0.16 | 0.70 / 1.01 | −4.64% / −3.06% |
+| Since Decision 057 deploy 2026-09-02 (12 td) | **+1.57%** | +1.10% | 0.96 | +10.9% | 2.52 / 1.86 | 0.99 / 0.85 | −2.32% / −2.47% |
+
+The two-week window beat SPY; the Aug–Sep churn lag (~2.3 pp off the Aug 12 peak) has not closed and the clean window is marginally behind for the first time. The Sep 8–16 SPY dip was −2.1% and fully recovered by Sep 21 — **not** the genuine drawdown the hold decision waits for.
+
+**Dip churn**: 9 exits (DXCM price-check −5.7%; GE catastrophic −6.1%; GS and FCX news-confirmed; FCX, EQIX, ANET, JPM, DVN broker stops) and 8 re-entries in 9 sessions. FIFO-realised on the exits −$1,934: FCX −$982 over two round trips (a +4.5% `strong_up` chase to $76.22 on Sep 9, −7% the next day; re-bought $71.98, sold $68.98, re-bought $69.67), JPM −$334 (stopped $343.50, re-bought $346.38 next day), GS −$308, EQIX −$241 (re-bought +2.4% higher), DXCM −$240 (re-bought +5% higher two weeks later on a fresh thesis), GE −$163, ANET −$104 (Finding 1), DVN −$43. CRWD TP1 +$481 and a pyramid add; now +15%. Cooldown overrides fired at 24.7 h / 27.6 h / 29.2 h — Decision 057 watch item 2 re-confirmed.
+
+**Decision 057 in its first dip (tiny sample)**: the noise branch delayed three exits (DXCM, GE, GS) that all went on to breach 5% — ≈$280 worse than the old code — against the ≈$340 ANET whipsaw it avoided Sep 2–4. Net a wash; the mechanism works as designed, and a trending-down tape is where it costs.
+
+### Finding 1 — the ADJUST stop is applied blind at Monday 14:15 UTC (third occurrence)
+The Sep 13 review raised ANET's stop $181 → $191 — 4.37% / **1.29×ATR** below the $199.74 Friday close. The 14:15 UTC Monday run (`ADJUST: Replacing stop for ANET to $191.00`) placed it while ANET traded $189.82 (open, after a −5% gap); the stop-limit filled the same second at $189.91 (−$104 realised). ANET closed $187.83 that day and $205.66 on Sep 21; it was re-bought at $202.36 with 22 shares instead of 36. The same review's DVN raise ($47.75, 2.17×ATR) tagged a week later at breakeven. On Sep 21 the book carried analyst stops at 0.82×ATR (DASH, 2.9% below), 1.23× (FCX) and 1.30× (JPM) against a 3.0×ATR system trail. Section 4a had no check of the new level against anything: the off-hours guard deliberately defers Sunday's raise to Monday, and Monday applied it without looking at the price.
+
+A stop placed at or inside noise distance of the live price is a market exit, not a stop — that is a defect, not a strategy choice, so the flat Decision 055 floor is extended to ADJUST raises measured from the live mark. The ATR-scaled floor (Decision 057 watch item 1) would also have caught DASH at 0.82×ATR; it overrides the analyst's explicit "lock gains" intent and stays parked under the hold.
+
+| Situation at the market-open ADJUST run | Before | After (Decision 058) |
+|---|---|---|
+| Raise at/above the live price, existing stop on the book | cancel + place → instant fill | WARNING, existing stop kept |
+| Raise < 1.5% below the live price, existing stop | cancel + place | WARNING, existing stop kept |
+| Raise too tight, **no** stop on the book | place | place anyway (+ WARNING) |
+| Raise ≥ 1.5% below the live price | cancel + place | cancel + place |
+| No usable `current_price` on the position | cancel + place | cancel + place |
+
+### Finding 2 — cash goes stale within a run
+`execute_trades` read cash once (line ~415) and passed that value to every `_handle_bullish_entry`; `open_buy_commitment` nets only *open* orders. On Sep 21: cash $10,042 before the 14:15 run → ANET's bracket ($4,452) filled instantly and was no longer open → DXCM was sized against $10,042: "Position reduced to 50.0 shares (cash reserve)" allowed $4,454 against a 5% reserve of $5,605 that only had $1,138 of headroom left → 30 filled, cash $2,924 = **2.6%** (1.0% had tranche 2 filled). In a margin account that is the path back to the negative-cash incident Decision 035 fixed. The bullish-entry loop now re-reads the account after each executed trade, as the resubmission loop already did.
+
+### Finding 3 — "Days held: 0" on every review since inception
+`review_position` read `position.get("entry_date", existing_thesis.get("generated_at"))`; Alpaca positions have no `entry_date` and per-ticker theses no `generated_at` (only the document does), so every review prompt said "Days held: 0" and every log line `(…, 0d held)`. The trade log knows: `position_opened_at(ticker)` returns the most recent non-pyramid BUY (weekly_thesis / bracket_resubmission), which `position_opened_after` (Decision 056) now shares. The log records submissions, so an expired-then-resubmitted bracket resolves to the resubmission that filled — accurate to the session. `_days_held_from` is pure, clamps future dates to 0 and fails open to 0.
+
+### Finding 4 — Discord was a single POST
+`send_discord` posted once with a 5 s timeout; a 503 at 14:15:43 on Sep 17 lost that job's notification. Transport errors, 429 and 5xx now retry twice (`_RETRY_DELAYS_S = (1.0, 2.0)`); the final failure is logged as before and never raises into the job.
+
+### Finding 5 — the persisted benchmark always ended one session early
+`benchmark_metrics.json` computed 2026-09-21 20:30 UTC had `window_end = 2026-09-18`. The provider requested SPY daily bars from the configured IEX feed with a date-only `end`; verified on the server: `end=<date>` is inclusive and IEX does return the bar next morning, so the daily bar simply is not published by 20:30 UTC. SIP has it minutes after the close, and the paper key serves SIP history, but a SIP query whose range reaches into the last 15 minutes fails with "subscription does not permit querying recent SIP data" — so `native.get_ohlcv(..., feed="sip")` ends the range at now − 16 min (RFC-3339). Only the benchmark asks for SIP; indicator/ATR bars stay on the configured feed. SIP closes differ from IEX by cents (773.50 vs 773.52 on Sep 21) — the consolidated print is the better reference. **Verify at the Sep 22 20:30 UTC summary: `window_end` should read 2026-09-22.**
+
+### Withdrawn — "ghost" sentry checks after a mid-week exit are the re-entry gate
+The sweep initially flagged Gemini re-evaluating GE for four days after it was sold ("Catastrophic price-based ABORT for GE" ×10, executor "no position to close"). Reading the code: for a review thesis with no position the price check falls back to `target_entry_price`, and that ABORT is exactly what stops Section 2 from re-buying under the stale review thesis — with a synthetic CONTINUE, GE at −6% would have met the cooldown-override test ($290 stop + 1%) and been re-bought the next day. Left unchanged.
+
+### Tests, docs, deploy
+26 new regression tests (`TestAdjustLivePriceFloor`, `TestReviewDaysHeld`, `TestBenchmarkSpySipFeed` in `test_bugfix_regressions.py`; `TestAdjustLivePriceFloorEndToEnd` — five `execute_trades` drives incl. gap-through, inside-floor, healthy raise, no-stop and missing-price — and `TestEntryCashRefresh` in `test_executor.py`; `TestSendDiscordRetry` in `test_notifier.py`). **562 tests green**; touched files ruff-clean (four pre-existing findings in the test modules untouched). Docs: features, risk_management, both architectures, agent_instructions, deployment, CLAUDE.md, todo Phase 1.35. Deployed 2026-09-22 (both images) — see todo Phase 1.35 for the deploy record.
+
+### Watch items carried forward (todo Phase 1.35)
+1. ATR-scaled ADJUST floor (strategy) — parked; DASH 0.82×, FCX 1.23×, JPM 1.30× analyst stops live on Sep 21.
+2. Cooldown override still effectively 24–29 h — parked (Decision 057 item 2).
+3. titanserver disk 60%: `docker builder prune -a -f` (6.8 GB) + the 3 dangling PG 15 volumes (332 MB) pending the operator's go; never `docker image prune -a` here.
+4. `benchmark_metrics.json` 90-day window carries the CRWD split artifact until ~mid-October; read `--since 2026-07-08`.
+5. Untracked `data/historical_long/` on the server (2.5 MB, Jul 2 backtest download) — harmless; gitignore or delete.
+
 ## Decision 057: Sentry price-override corroboration excludes Gemini's `price_concern` flag (September checkup)
 **Date**: 2026-09-02
 **Decision**: A moderate (3–5%) adverse move is "confirmed" into an ABORT only by Gemini's `conflicting_headlines` (non-empty) or `market_concern`. Its `price_concern` flag no longer counts. This restores the behaviour Decision 045 specified — "3–5% adverse + Gemini clean → warn, do NOT override CONTINUE" — which had been effectively dead code since it shipped. Strategy selection, sizing, stops and cooldowns untouched. **Deployed 2026-09-02** (operator decision taken the same morning — see "Relationship to the strategy hold" below).

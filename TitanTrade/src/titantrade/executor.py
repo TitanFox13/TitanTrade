@@ -29,6 +29,7 @@ from titantrade.entries import (
     _handle_bullish_entry, record_stop_out_cooldowns, resubmit_expired_brackets,
 )
 from titantrade.positions import manage_trailing_stop, maybe_pyramid_position
+from titantrade.pricing import adjust_stop_too_tight
 from titantrade.core_allocation import manage_core_position
 from titantrade.protection import check_gap_down_protection, close_orphaned_positions
 from titantrade.trade_state import (
@@ -307,6 +308,18 @@ def _manage_held_bullish(
     return trades
 
 
+def _position_live_price(position: dict[str, Any] | None) -> float | None:
+    """Best available live mark for a broker position (Alpaca ``current_price``),
+    or None when missing/non-numeric — callers fail open (Decision 058)."""
+    if not position:
+        return None
+    try:
+        price = float(position.get("current_price") or 0)
+    except (TypeError, ValueError):
+        return None
+    return price if price > 0 else None
+
+
 def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     """Core execution: read thesis + sentry, run risk gates, place/cancel broker orders.
 
@@ -516,6 +529,15 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                     executed.append(trade)
                     # Refresh positions list for sector exposure checks
                     positions = get_positions(cfg)
+                    # Decision 058: refresh cash too. A bracket that fills
+                    # instantly (production ANET 2026-09-21) is no longer an
+                    # *open* order, so open_buy_commitment() can't see it and
+                    # the next ticker in this same run would be sized against
+                    # pre-fill cash (DXCM was: 5% reserve → 2.6% cash).
+                    # resubmit_expired_brackets already refreshes per entry.
+                    account = get_account(cfg)
+                    portfolio_value = float(account.get("portfolio_value", portfolio_value))
+                    cash_balance = float(account.get("cash", cash_balance))
             except Exception as exc:
                 log.error(f"Bullish entry failed for {ticker}: {exc}")
 
@@ -707,6 +729,31 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                                 f"${new_stop:.2f} until next market-open run"
                             )
                         continue
+
+                    # Decision 058: the analyst's level was computed against
+                    # Friday's close; this run applies it ~45 min into the
+                    # session, after any gap. A stop at/inside noise distance
+                    # of the LIVE price is a market exit, not a stop —
+                    # production ANET 2026-09-14 (raise $181 → $191, opened
+                    # $189.82, filled the same second, +8% within a week).
+                    # Same 1.5% floor as Decision 055, measured from the live
+                    # mark. When an existing stop protects the position we
+                    # keep it; with no stop at all we still place the analyst's
+                    # level — unprotected is worse than tight. Fails open when
+                    # the broker position carries no usable price.
+                    live_price = _position_live_price(position)
+                    too_tight = adjust_stop_too_tight(live_price, float(new_stop))
+                    if too_tight and existing_stop is not None:
+                        log.warning(
+                            f"ADJUST {ticker}: NOT applying analyst stop — {too_tight}. "
+                            f"Keeping existing stop @ ${existing_price:.2f}"
+                        )
+                        continue
+                    if too_tight:
+                        log.warning(
+                            f"ADJUST {ticker}: {too_tight} — but the position has "
+                            f"no stop at all, placing it anyway"
+                        )
 
                     # Remember the old stop price so we can restore it if the
                     # cancel+replace half-fails (cancel succeeded, place failed).

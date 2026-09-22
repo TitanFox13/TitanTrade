@@ -91,7 +91,7 @@ These are programmatic — the AI cannot override them.
 1. Confidence >= 0.55 (floor; conviction scales sizing 0.40x-2.50x, not selection)
 2. Not within 2 days of earnings
 3. Portfolio drawdown < 8% from peak (values ±50% off peak are treated as broker data glitches — block + alert, Decision 054)
-4. Cash reserve >= 5% after trade, net of pending buy commitments
+4. Cash reserve >= 5% after trade, net of pending buy commitments (cash re-read from the broker after each executed entry in the run, Decision 058)
 5. Position size valid (ATR-adjusted, max 25%, and >= $500 notional — dust blocked, Decision 054)
 6. Sector exposure < 50% after trade
 7. No high-impact macro event (FOMC/NFP/CPI/core PCE/GDP) within 6 hours

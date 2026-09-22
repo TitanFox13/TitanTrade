@@ -36,8 +36,12 @@ def _provider(cfg: Config):
 
 # --- Prices / quotes / news -------------------------------------------------
 
-def get_ohlcv(ticker: str, cfg: Config, days: int = 250) -> list[dict[str, Any]]:
-    return _provider(cfg).get_ohlcv(ticker, cfg, days=days)
+def get_ohlcv(
+    ticker: str, cfg: Config, days: int = 250, feed: str | None = None,
+) -> list[dict[str, Any]]:
+    """Daily OHLCV. ``feed`` (Alpaca-only) overrides the configured data feed
+    for this call — e.g. ``"sip"`` when today's close must be present."""
+    return _provider(cfg).get_ohlcv(ticker, cfg, days=days, feed=feed)
 
 
 def get_latest_price(ticker: str, cfg: Config) -> float | None:

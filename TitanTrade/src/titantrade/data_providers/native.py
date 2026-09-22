@@ -36,21 +36,41 @@ def _alpaca_data_headers(cfg: Config) -> dict[str, str]:
     }
 
 
-def get_ohlcv(ticker: str, cfg: Config, days: int = 250) -> list[dict[str, Any]]:
+# Alpaca's free data plan serves consolidated (SIP) history but refuses any
+# query whose range reaches into the last 15 minutes ("subscription does not
+# permit querying recent SIP data"). Keep the end bound comfortably behind now.
+SIP_RECENCY_LAG = timedelta(minutes=16)
+
+
+def get_ohlcv(
+    ticker: str, cfg: Config, days: int = 250, feed: str | None = None,
+) -> list[dict[str, Any]]:
     """Historical daily OHLCV from Alpaca, oldest-first.
 
     Shape: ``[{date, open, high, low, close, volume}]``.
+
+    ``feed`` overrides ``cfg.alpaca.data_feed`` for this call. The default IEX
+    feed publishes the current session's daily bar only after close-of-day
+    processing (not there at 20:30 UTC), while SIP has it minutes after the
+    close — so callers that need *today's* close (the benchmark) ask for
+    ``feed="sip"`` (Decision 058). A SIP query must end ≥15 min in the past.
     """
-    today = datetime.now(timezone.utc).date()
+    now = datetime.now(timezone.utc)
+    today = now.date()
     start = today - timedelta(days=int(days * 1.6))  # pad for weekends/holidays
+    effective_feed = feed or cfg.alpaca.data_feed
+    if effective_feed == "sip":
+        end = (now - SIP_RECENCY_LAG).strftime("%Y-%m-%dT%H:%M:%SZ")
+    else:
+        end = today.isoformat()
     url = f"{cfg.alpaca.data_base_url}/v2/stocks/{ticker}/bars"
     params = {
         "timeframe": "1Day",
         "start": start.isoformat(),
-        "end": today.isoformat(),
+        "end": end,
         "limit": "10000",
         "adjustment": "split",
-        "feed": cfg.alpaca.data_feed,
+        "feed": effective_feed,
     }
     bars: list[dict[str, Any]] = []
     page_token: str | None = None

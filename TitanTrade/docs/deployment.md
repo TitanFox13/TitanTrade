@@ -126,7 +126,7 @@ All jobs run inside the always-on `api` container via APScheduler
 | `weekday_pricecheck_midday` | 12:00 Mon-Fri | pricecheck |
 | `weekday_pricecheck_afternoon` | 14:00 Mon-Fri | pricecheck |
 | `weekday_sentry_preclose` | 15:30 Mon-Fri | sentry + execute |
-| `daily_summary` | 16:30 Mon-Fri | Discord daily summary (+ benchmark refresh) |
+| `daily_summary` | 16:30 Mon-Fri | Discord daily summary (+ benchmark refresh; SPY bars from SIP so the just-closed session is included, Decision 058) |
 | `sunday_full` | 16:00 Sun | full pipeline (fetch → analyze → sentry → execute) |
 
 Manage via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`,
@@ -236,5 +236,6 @@ After each run, GitHub Actions commits updated state files back to the repo:
 
 ### Alerts (Discord, live)
 - Per-job completion/failure embeds + daily portfolio summary at 16:30 ET
+- Webhook posts retry transient failures (network error, 429, 5xx) twice with 1 s / 2 s backoff (Decision 058)
 - Observability alerts: sentry degraded (>30% fallback), stuck-in-cash (≥70% for 3+ days), ticker churn (2+ round-trips/7d), split-suspected gap, suspect broker data, cooldown overrides
 - Configure via the single optional `DISCORD_WEBHOOK_URL` env var

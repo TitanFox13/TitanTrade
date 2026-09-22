@@ -653,3 +653,197 @@ class TestAdjustStaleReviewGuard:
         from titantrade.trade_state import position_opened_after
         self._write_log(tmp_state_dir, self._buy("DVN", "garbage"))
         assert position_opened_after("DVN", self.GEN) is False
+
+
+# ---------------------------------------------------------------------------
+# ADR 058 fix 1: ADJUST stop measured against the LIVE price (Decision 055 floor)
+# ---------------------------------------------------------------------------
+
+class TestAdjustLivePriceFloor:
+    """Production 2026-09-14: the Sunday review raised ANET's stop $181 → $191
+    (1.29×ATR below the $199.74 Friday close). The Monday 14:15 UTC run placed
+    it while ANET traded $189.82 — the fresh stop-limit filled the same second
+    at $189.91; ANET closed $205 a week later. Section 4a now measures the
+    analyst's level against the live mark (``pricing.adjust_stop_too_tight``)
+    and keeps the existing stop when the raise is at/inside the 1.5% floor.
+    End-to-end wiring is covered in test_executor.TestAdjustLivePriceFloorEndToEnd.
+    """
+
+    def test_stop_at_or_above_live_price_is_refused(self):
+        from titantrade.pricing import adjust_stop_too_tight
+        reason = adjust_stop_too_tight(189.82, 191.0)
+        assert reason and "at/above the live price" in reason
+        assert adjust_stop_too_tight(191.0, 191.0)  # equal counts too
+
+    def test_stop_inside_floor_is_refused(self):
+        from titantrade.pricing import adjust_stop_too_tight
+        reason = adjust_stop_too_tight(200.0, 198.0)  # 1.0% below
+        assert reason and "1.00% below the live price" in reason
+
+    def test_stop_at_or_beyond_floor_is_accepted(self):
+        from titantrade.pricing import adjust_stop_too_tight
+        assert adjust_stop_too_tight(200.0, 197.0) is None    # exactly 1.5%
+        assert adjust_stop_too_tight(200.0, 190.0) is None
+        assert adjust_stop_too_tight(199.74, 181.0) is None   # ANET's pre-review stop
+
+    def test_fails_open_without_prices(self):
+        from titantrade.pricing import adjust_stop_too_tight
+        assert adjust_stop_too_tight(None, 191.0) is None
+        assert adjust_stop_too_tight(189.82, None) is None
+        assert adjust_stop_too_tight(0, 191.0) is None
+        assert adjust_stop_too_tight(189.82, 0) is None
+
+    def test_position_live_price_helper(self):
+        from titantrade.executor import _position_live_price
+        assert _position_live_price({"current_price": "189.82"}) == 189.82
+        assert _position_live_price({"current_price": 205.0}) == 205.0
+        assert _position_live_price({"current_price": "0"}) is None
+        assert _position_live_price({"current_price": "n/a"}) is None
+        assert _position_live_price({}) is None
+        assert _position_live_price(None) is None
+
+
+# ---------------------------------------------------------------------------
+# ADR 058 fix 2: weekly review "Days held" comes from the trade log, not 0
+# ---------------------------------------------------------------------------
+
+class TestReviewDaysHeld:
+    """Production: every weekly review logged ``(…, 0d held)`` and every review
+    prompt said "Days held: 0" — broker positions carry no entry date and
+    per-ticker theses no ``generated_at``, so the fallback chain always yielded
+    0. ``trade_state.position_opened_at`` resolves the opening BUY instead.
+    """
+
+    def _buy(self, ticker, ts, trigger="weekly_thesis"):
+        return {"ticker": ticker, "action": "BUY", "trigger": trigger,
+                "timestamp": ts, "shares": 10, "price": 200.0}
+
+    def _write_log(self, state_dir, *records):
+        from tests.conftest import write_state_file
+        write_state_file(state_dir, "trade_log.json", {"trades": list(records)})
+
+    def test_latest_entry_buy_wins_and_pyramid_is_skipped(self, tmp_state_dir):
+        from titantrade.trade_state import position_opened_at
+        self._write_log(
+            tmp_state_dir,
+            self._buy("ANET", "2026-09-01T14:15:00+00:00"),
+            {"ticker": "ANET", "action": "SELL", "timestamp": "2026-09-14T14:15:38+00:00"},
+            self._buy("ANET", "2026-09-21T14:15:00+00:00", trigger="bracket_resubmission"),
+            self._buy("ANET", "2026-09-22T19:30:00+00:00", trigger="pyramid"),
+            self._buy("CRWD", "2026-09-23T14:15:00+00:00"),
+        )
+        assert position_opened_at("ANET") == "2026-09-21T14:15:00+00:00"
+        assert position_opened_at("CRWD") == "2026-09-23T14:15:00+00:00"
+
+    def test_none_when_unknown(self, tmp_state_dir):
+        from titantrade.trade_state import position_opened_at
+        assert position_opened_at("ANET") is None            # no log at all
+        self._write_log(tmp_state_dir, {"ticker": "ANET", "action": "BUY", "timestamp": ""})
+        assert position_opened_at("ANET") is None            # empty timestamp
+        assert position_opened_at("ZZZ") is None             # never traded
+
+    def test_position_opened_after_still_agrees(self, tmp_state_dir):
+        # The ADR 056 guard now shares the lookup — behaviour must be unchanged.
+        from titantrade.trade_state import position_opened_after
+        self._write_log(tmp_state_dir, self._buy("DVN", "2026-08-17T14:15:00+00:00"))
+        assert position_opened_after("DVN", "2026-08-16T20:07:00+00:00") is True
+        assert position_opened_after("DVN", "2026-08-18T20:07:00+00:00") is False
+        assert position_opened_after("DVN", None) is False
+
+    def test_days_held_from(self):
+        from datetime import datetime, timezone
+        from titantrade.weekly_analyst import _days_held_from
+        now = datetime(2026, 9, 20, 20, 0, tzinfo=timezone.utc)
+        assert _days_held_from("2026-09-13T14:15:00+00:00", now) == 7
+        assert _days_held_from("2026-09-13T14:15:00Z", now) == 7
+        assert _days_held_from("2026-09-13T14:15:00", now) == 7       # naive → UTC
+        assert _days_held_from("2026-09-01", now) == 19                # date-only
+        assert _days_held_from("2026-09-25T00:00:00+00:00", now) == 0  # future → clamp
+        assert _days_held_from(None, now) == 0
+        assert _days_held_from("", now) == 0
+        assert _days_held_from("garbage", now) == 0
+
+    def test_review_prompt_carries_real_days_held(self, tmp_state_dir, fake_config):
+        from datetime import datetime, timedelta, timezone
+        from titantrade import weekly_analyst as wa
+        opened = (datetime.now(timezone.utc) - timedelta(days=7, hours=2)).isoformat()
+        self._write_log(tmp_state_dir, self._buy("ANET", opened))
+        captured: dict[str, str] = {}
+
+        def _fake_claude(system, prompt, cfg, cost_label=""):
+            captured["prompt"] = prompt
+            return json.dumps({
+                "ticker": "ANET", "thesis": "BULLISH", "confidence": 0.7,
+                "review_action": "CONTINUE", "stop_loss_price": 181.0,
+                "take_profit_price": 221.0, "target_entry_price": 199.0,
+                "thesis_breach_condition": "x", "reasoning": "y",
+            })
+
+        with patch("titantrade.weekly_analyst._call_claude", side_effect=_fake_claude):
+            wa.review_position(
+                "ANET",
+                {"ticker": "ANET", "thesis": "BULLISH", "confidence": 0.7,
+                 "stop_loss_price": 181.0, "take_profit_price": 221.0},
+                {"symbol": "ANET", "avg_entry_price": "192.8", "current_price": "199.74"},
+                {}, {"market_regime": "neutral"}, "", fake_config,
+            )
+        assert "Days held: 7" in captured["prompt"]
+
+
+# ---------------------------------------------------------------------------
+# ADR 058 fix 4b: benchmark fetches SPY from the SIP feed (today's bar present)
+# ---------------------------------------------------------------------------
+
+class TestBenchmarkSpySipFeed:
+    """Production: ``benchmark_metrics.json`` computed at 20:30 UTC always
+    ended one session early because IEX's daily bar for the session is not
+    published yet at that time (SIP has it minutes after the close). The
+    free plan refuses SIP queries reaching into the last 15 minutes, so the
+    SIP path uses a timestamp end bound ≥16 min in the past.
+    """
+
+    class _Resp:
+        def json(self):
+            return {"bars": [], "next_page_token": None}
+
+    def test_native_sip_uses_lagged_timestamp_end(self, fake_config):
+        from datetime import datetime, timezone
+        from titantrade.data_providers import native
+        seen: dict = {}
+
+        def _fake(method, url, headers=None, params=None, **kw):
+            seen.update(params)
+            return self._Resp()
+
+        with patch("titantrade.data_providers.native.fetch_with_retry", side_effect=_fake):
+            native.get_ohlcv("SPY", fake_config, days=10, feed="sip")
+        assert seen["feed"] == "sip"
+        end = datetime.strptime(seen["end"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        lag_min = (datetime.now(timezone.utc) - end).total_seconds() / 60
+        assert 15.5 <= lag_min <= 20
+
+    def test_native_default_feed_keeps_date_end(self, fake_config):
+        from datetime import datetime, timezone
+        from titantrade.data_providers import native
+        seen: dict = {}
+
+        def _fake(method, url, headers=None, params=None, **kw):
+            seen.update(params)
+            return self._Resp()
+
+        with patch("titantrade.data_providers.native.fetch_with_retry", side_effect=_fake):
+            native.get_ohlcv("SPY", fake_config, days=10)
+        assert seen["feed"] == fake_config.alpaca.data_feed
+        assert seen["end"] == datetime.now(timezone.utc).date().isoformat()
+
+    def test_benchmark_requests_sip(self, fake_config):
+        from titantrade.benchmark import _spy_close_series
+        with patch("titantrade.market_data.get_ohlcv", return_value=[]) as m:
+            _spy_close_series(fake_config, days=5)
+        assert m.call_args.kwargs.get("feed") == "sip"
+
+    def test_fmp_provider_accepts_feed_kwarg(self, fake_config):
+        # market_data passes ``feed`` provider-agnostically; FMP must tolerate it.
+        import inspect
+        from titantrade.data_providers import fmp
+        assert "feed" in inspect.signature(fmp.get_ohlcv).parameters

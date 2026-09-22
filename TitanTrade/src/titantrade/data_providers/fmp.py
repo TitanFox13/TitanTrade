@@ -30,7 +30,10 @@ _STABLE = "https://financialmodelingprep.com/stable"
 # Prices / quotes / news
 # ---------------------------------------------------------------------------
 
-def get_ohlcv(ticker: str, cfg: Config, days: int = 250) -> list[dict[str, Any]]:
+def get_ohlcv(
+    ticker: str, cfg: Config, days: int = 250, feed: str | None = None,
+) -> list[dict[str, Any]]:
+    # ``feed`` is Alpaca-only; accepted so callers can pass it provider-agnostically.
     """Historical OHLCV from FMP, oldest-first."""
     today = datetime.now(timezone.utc).date()
     from_date = today - timedelta(days=int(days * 1.5))

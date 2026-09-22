@@ -23,6 +23,8 @@ from titantrade.notifier import (
 def _mock_env(monkeypatch: pytest.MonkeyPatch):
     """Set a fake webhook URL for all tests by default."""
     monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/test/fake")
+    # ADR 058 retry backoff must not slow the suite down.
+    monkeypatch.setattr("titantrade.notifier.time.sleep", lambda _s: None)
 
 
 class TestSendDiscord:
@@ -217,3 +219,51 @@ class TestDailySummary:
             # Should not raise — send_discord swallows the exception
             result = send_daily_summary()
             assert result == "daily summary sent"
+
+
+class TestSendDiscordRetry:
+    """ADR 058: a transient 503 (production 2026-09-17) lost a job notification
+    because the webhook was a single POST. Transport errors, 429 and 5xx are
+    retried twice with backoff; other 4xx are ours and are not retried."""
+
+    def test_503_then_200_posts_twice(self):
+        with patch("titantrade.notifier.httpx.post") as mock_post:
+            mock_post.side_effect = [
+                MagicMock(status_code=503, text="upstream connect error"),
+                MagicMock(status_code=204, text=""),
+            ]
+            send_discord("Test")
+            assert mock_post.call_count == 2
+
+    def test_transport_error_then_200_posts_twice(self):
+        with patch("titantrade.notifier.httpx.post") as mock_post:
+            mock_post.side_effect = [ConnectionError("reset"), MagicMock(status_code=204, text="")]
+            send_discord("Test")
+            assert mock_post.call_count == 2
+
+    def test_429_is_retried(self):
+        with patch("titantrade.notifier.httpx.post") as mock_post:
+            mock_post.side_effect = [
+                MagicMock(status_code=429, text="rate limited"),
+                MagicMock(status_code=204, text=""),
+            ]
+            send_discord("Test")
+            assert mock_post.call_count == 2
+
+    def test_other_4xx_is_not_retried(self):
+        with patch("titantrade.notifier.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=400, text="bad embed")
+            send_discord("Test")
+            mock_post.assert_called_once()
+
+    def test_gives_up_after_three_attempts_without_raising(self):
+        with patch("titantrade.notifier.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=503, text="still down")
+            send_discord("Test")
+            assert mock_post.call_count == 3
+
+    def test_success_first_time_posts_once(self):
+        with patch("titantrade.notifier.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=204, text="")
+            send_discord("Test")
+            mock_post.assert_called_once()

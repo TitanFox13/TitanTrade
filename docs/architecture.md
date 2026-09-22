@@ -125,6 +125,12 @@ than 1.5% to the entry (a noise-level stop that would tag out within minutes), a
 entry or bracket resubmission for a ticker whose current sentry signal is ABORT (the
 executor is about to exit it — entering first just forces a same-minute round-trip).
 
+The same floor guards the weekly review's stop raises (Decision 058): the market-open run
+that applies Sunday's ADJUST level measures it against the position's live mark and keeps the
+existing stop when the raise sits at/above the price or inside 1.5% of it — Sunday's level
+meets Monday's gap. Within one run the executor also re-reads the broker's cash after every
+executed entry, so an instantly-filled bracket (no longer an open order) cannot be spent twice.
+
 Protective exits are symmetric (Decision 056): a broker-side stop-loss fill starts the
 same 72h re-entry cooldown an ABORT does (with the same sentry-confirmed override), and
 weekly-review ADJUST levels are never applied to a position opened after the review was

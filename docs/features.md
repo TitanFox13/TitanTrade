@@ -109,7 +109,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 1. **Confidence threshold**: AI confidence >= 0.55 floor; above it, confidence drives sizing (0.40x at 0.55 → 2.50x at 0.95+), not selection
 2. **Earnings blackout**: No entry within 2 days of earnings
 3. **Drawdown circuit breaker**: Halts at 8% portfolio drawdown from peak. A reported value ±50% off the peak is treated as broker data corruption (Decision 054): entries pause with a "suspect broker data" reason + Discord alert, and the glitch is never written into the peak file
-4. **Cash reserve**: Maintains 5% minimum cash, net of cash already committed to pending buy orders (Decision 035)
+4. **Cash reserve**: Maintains 5% minimum cash, net of cash already committed to pending buy orders (Decision 035). Cash is re-read from the broker after every executed entry in a run, so an instantly-filled bracket (no longer an *open* order) cannot be double-spent by the next ticker (Decision 058)
 5. **Volatility-adjusted sizing**: ATR-based, targeting 2.5% risk per 1-ATR move, scaled by confidence and VIX, capped at 25% per name. Orders below a $500 minimum notional are blocked as dust (Decision 054) — they can't carry stops and only add churn
 6. **Sector exposure limit**: Max 50% of portfolio in any single sector
 7. **Macro event blackout**: No entry within 6h of a high-impact event (FOMC, NFP, CPI, core PCE, GDP)
@@ -123,6 +123,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - Orphan detection: every run checks held positions have a stop order
 - **Bracket resubmission**: expired day-only brackets are auto-resubmitted next morning with dynamically adjusted entry prices based on current market conditions (resubmits floor to whole shares — a sub-1-share size is skipped, never sent as a fractional bracket that Alpaca rejects with HTTP 422). Resubmission skips any ticker whose current sentry signal is ABORT — the executor is about to exit it, and the 72h cooldown only starts once that abort is handled, after resubmission runs (Decision 055, the LLY 18-second round-trip)
 - **Minimum stop-distance floor**: fresh entries and resubmissions are refused when the stop sits less than 1.5% below the entry (`pricing.stop_too_tight`, Decision 055) — a noise-level stop is a guaranteed immediate stop-out (production: URI entered with a 0.28% stop and was tagged out 27 minutes later). Typically a degenerate artifact of reusing an ADJUST-review thesis (stop tightened on a held position) for a new entry
+- **ADJUST live-price floor** (Decision 058): a weekly-review stop raise is measured against the position's live mark at the market-open run that applies it; a level at/above the price or less than 1.5% below it is not applied while an existing stop protects the position (`pricing.adjust_stop_too_tight`). Sunday's level meets Monday's gap — ANET 2026-09-14 was stopped the same second the raise was placed, then rallied 8%. With no stop on the book the level is still placed.
 - **Stop-out re-entry cooldown**: a broker-side protective-stop fill starts the same 72h cooldown an ABORT does (Decision 056) — stop fills execute on Alpaca's servers with nothing running, so nothing "handled" the exit and DVN was re-bought 42 minutes after its stop fired. The scan stamps the cooldown at the fill time (idempotent) and the sentry-confirmed override policy still allows early re-entry on recovery
 - **Stale-ADJUST guard**: weekly-review ADJUST levels are skipped for a position opened *after* the review was generated (Decision 056) — they were computed for a position that no longer exists (DVN: the old position's $43.50 stop re-applied 0.34% below a fresh $43.65 re-entry). The entry-time stop is kept until the next review re-syncs
 - **Gap-down protection**: detects unfilled stop-limit orders after overnight gaps and immediately market-sells the unprotected position. The stale stop's cancel is polled to a terminal state *before* the market sell so the sell isn't rejected for still-held qty (Decision 035). Before selling, the live market quote is cross-checked (Decision 053), and gaps deeper than 30% below the stop are checked against the corporate-actions feed — a recent split announcement means the stop is stale, not the market, so the sale is skipped and alerted instead of liquidating at a split-artifact bottom (Decision 054, the CRWD 4:1 lesson)
@@ -143,8 +144,8 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 ### Portfolio-Level Protection
 - Peak portfolio tracking for drawdown calculation
 - Sector concentration monitoring
-- Cash reserve enforcement before any new entry — **nets out cash already committed to pending buy orders** so simultaneous entries can't collectively breach the reserve into margin (Decision 035)
-- Weekly position reviews: CONTINUE, ADJUST (update levels), or CLOSE (explicit exit)
+- Cash reserve enforcement before any new entry — **nets out cash already committed to pending buy orders** so simultaneous entries can't collectively breach the reserve into margin (Decision 035) — and re-checks the broker's cash after each executed entry within a run (Decision 058)
+- Weekly position reviews: CONTINUE, ADJUST (update levels), or CLOSE (explicit exit) — the review prompt carries the real days-held from the trade log (Decision 058; it had read 0 for every position)
 - Pass 2 selection filter (only top 3-5 new trades execute)
 
 ### Bear Market Hedging
@@ -271,6 +272,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - Includes job name, result summary, and duration
 - Error messages included in failure notifications (truncated to 1000 chars)
 - Notification failures never crash the underlying job
+- Transient failures (network error, 429, 5xx) are retried twice with 1 s / 2 s backoff before the warning is logged (Decision 058)
 
 ### Daily Portfolio Summary
 - Sent weekdays at 21:00 UTC (4 PM EST) after the last sentry run
@@ -309,6 +311,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - **Correlation/R², annualized volatility, total + excess return, max drawdown** for both series
 - Source: **Alpaca portfolio-equity history** (true mark-to-market each day), aligned to SPY daily closes by trading date (in market time — Alpaca stamps EOD equity at 20:00 ET)
 - Surfaced via CLI (`python -m titantrade benchmark [days] [--since YYYY-MM-DD]`), API (`GET /api/benchmark`, `/api/benchmark/refresh`), and a line on the daily Discord summary
+- SPY history comes from Alpaca's consolidated SIP feed (ended ≥16 min in the past — free-plan recency rule) so the 20:30 UTC daily refresh includes the session that just closed; indicator bars stay on the configured feed (Decision 058)
 - A one-line plain-English verdict classifies the window (adding value / protection-not-selection / dominated by SPY)
 
 ## Test Suite (Zero Token Spend)

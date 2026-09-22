@@ -216,3 +216,35 @@ def stop_too_tight(entry_price: float | None, stop_price: float | None) -> str |
             f"noise-level stop would tag out immediately"
         )
     return None
+
+
+def adjust_stop_too_tight(live_price: float | None, new_stop: float | None) -> str | None:
+    """Return a reason string when an ADJUST stop would sit at/above the live
+    price or within ``MIN_STOP_DISTANCE_PCT``% below it, else None (Decision 058).
+
+    The analyst's ADJUST level is computed against Friday's close; the first
+    market-open run applies it ~45 minutes into Monday's session, after any
+    gap. A stop at or inside noise distance of the *live* price is a market
+    exit, not a stop (production ANET 2026-09-14: review raised $181 → $191,
+    ANET opened $189.82, the fresh stop-limit filled the same second at
+    $189.91, ANET closed $205 a week later).
+
+    Unlike ``stop_too_tight`` this also flags a stop at/above the reference,
+    because for a held position that is the worst case, not invalid input.
+    Returns None (fail open) when either price is missing or non-positive.
+    """
+    if not live_price or not new_stop or live_price <= 0 or new_stop <= 0:
+        return None
+    if new_stop >= live_price:
+        return (
+            f"analyst stop ${new_stop:.2f} is at/above the live price "
+            f"${live_price:.2f} — would fill immediately"
+        )
+    distance_pct = (live_price - new_stop) / live_price * 100
+    if distance_pct < MIN_STOP_DISTANCE_PCT:
+        return (
+            f"analyst stop ${new_stop:.2f} is only {distance_pct:.2f}% below the "
+            f"live price ${live_price:.2f} (< {MIN_STOP_DISTANCE_PCT}% floor) — "
+            f"noise-level stop would tag out immediately"
+        )
+    return None

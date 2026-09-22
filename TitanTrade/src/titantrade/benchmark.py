@@ -278,7 +278,10 @@ def _spy_close_series(cfg: Any, days: int) -> list[tuple[str, float]]:
     """Daily (date, close) for SPY, oldest-first."""
     from titantrade.market_data import get_ohlcv
 
-    bars = get_ohlcv("SPY", cfg, days=days)
+    # Decision 058: the daily summary runs 30 min after the close; IEX's daily
+    # bar for the session isn't published yet, so the persisted metrics always
+    # ended one session early. SIP has the bar within minutes of the close.
+    bars = get_ohlcv("SPY", cfg, days=days, feed="sip")
     out: list[tuple[str, float]] = []
     for b in bars:
         date = str(b.get("date") or b.get("t") or "")[:10]

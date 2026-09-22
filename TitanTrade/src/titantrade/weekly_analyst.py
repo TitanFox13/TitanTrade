@@ -22,6 +22,7 @@ from titantrade.data_fetcher import build_data_bundle, save_data_bundle
 from titantrade.logger import get_logger, log_decision
 from titantrade.market_context import get_stock_sector
 from titantrade.performance import generate_feedback_prompt, save_thesis_to_history
+from titantrade.trade_state import position_opened_at
 
 log = get_logger("analyst")
 
@@ -580,6 +581,23 @@ def rank_and_select(
     return ranking
 
 
+def _days_held_from(entry_date: str | None, now: datetime | None = None) -> int:
+    """Whole days between ``entry_date`` (ISO timestamp or YYYY-MM-DD) and
+    ``now`` (UTC). 0 when the date is missing or unparseable (fail open)."""
+    if not entry_date:
+        return 0
+    try:
+        if "T" in entry_date:
+            entry_dt = datetime.fromisoformat(entry_date.replace("Z", "+00:00"))
+            if entry_dt.tzinfo is None:
+                entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+        else:
+            entry_dt = datetime.strptime(entry_date[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return max((now or datetime.now(timezone.utc)) - entry_dt, timedelta(0)).days
+    except (ValueError, TypeError):
+        return 0
+
+
 def review_position(
     ticker: str,
     existing_thesis: dict[str, Any],
@@ -593,17 +611,18 @@ def review_position(
     sector = get_stock_sector(ticker)
     entry_price = float(position.get("avg_entry_price", 0))
     current_price = float(position.get("current_price", 0))
-    entry_date = position.get("entry_date", existing_thesis.get("generated_at", ""))
+    # Decision 058: broker positions carry no entry date and per-ticker theses
+    # no ``generated_at``, so the old fallback chain always yielded 0 and every
+    # review prompt said "Days held: 0". The trade log knows when the position
+    # was opened; the legacy keys stay as fallbacks for hand-built positions.
+    entry_date = (
+        position_opened_at(ticker)
+        or position.get("entry_date")
+        or existing_thesis.get("generated_at", "")
+    )
 
     pnl_pct = round((current_price - entry_price) / entry_price * 100, 2) if entry_price else 0
-    days_held = 0
-    if entry_date:
-        try:
-            from datetime import datetime, timezone
-            entry_dt = datetime.fromisoformat(entry_date.replace("Z", "+00:00")) if "T" in entry_date else datetime.strptime(entry_date[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            days_held = (datetime.now(timezone.utc) - entry_dt).days
-        except (ValueError, TypeError):
-            pass
+    days_held = _days_held_from(entry_date)
 
     regime = market_ctx.get("market_regime", "neutral")
     is_hedge = ticker in cfg.trading.hedge_instruments

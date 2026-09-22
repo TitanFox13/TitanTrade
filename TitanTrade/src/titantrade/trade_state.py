@@ -52,6 +52,29 @@ def position_opened_after(ticker: str, generated_at: str | None) -> bool:
         gen_ts = datetime.fromisoformat(generated_at)
     except (ValueError, TypeError):
         return False
+    opened_at = position_opened_at(ticker)
+    if opened_at is None:
+        return False
+    try:
+        buy_ts = datetime.fromisoformat(opened_at)
+        return buy_ts > gen_ts
+    except (ValueError, TypeError):
+        # Malformed or naive-vs-aware mismatch — can't compare safely.
+        return False
+
+
+def position_opened_at(ticker: str) -> str | None:
+    """ISO timestamp of the trade-log BUY that opened the ticker's current
+    position, or None when the log has no such record.
+
+    "Opened" means the most recent entry-type BUY (weekly_thesis /
+    bracket_resubmission); pyramid ADDs enlarge an existing position and are
+    skipped. The log records submissions, so a bracket that expired and was
+    resubmitted resolves to the resubmission that filled — accurate to the
+    session, which is what "days held" needs (Decision 058: the weekly review
+    had been telling the analyst "Days held: 0" for every position because
+    broker positions carry no entry date and per-ticker theses no timestamp).
+    """
     doc = _load("trade_log.json")
     trades = doc.get("trades", []) if isinstance(doc, dict) else (doc or [])
     for rec in reversed(trades):
@@ -59,13 +82,9 @@ def position_opened_after(ticker: str, generated_at: str | None) -> bool:
             continue
         if rec.get("trigger") == "pyramid":
             continue
-        try:
-            buy_ts = datetime.fromisoformat(rec.get("timestamp", ""))
-            return buy_ts > gen_ts
-        except (ValueError, TypeError):
-            # Malformed or naive-vs-aware mismatch — can't compare safely.
-            return False
-    return False
+        ts = rec.get("timestamp")
+        return ts if isinstance(ts, str) and ts else None
+    return None
 
 
 # Cap the size of append-only state files. Older records get spilled to a

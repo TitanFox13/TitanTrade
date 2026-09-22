@@ -2313,3 +2313,149 @@ class TestEnsureGtcStopOnFill:
         # No exception, no work when the order dict is missing/empty
         _ensure_gtc_stop_on_fill("AAPL", None, 95.0, fake_config)
         _ensure_gtc_stop_on_fill("AAPL", {}, 95.0, fake_config)
+
+
+# ---------------------------------------------------------------------------
+# ADR 058 fix 1 — Section 4a measures the ADJUST stop against the LIVE price
+# ---------------------------------------------------------------------------
+
+def _write_adjust_state(state_dir, *, new_stop: float):
+    write_state_file(state_dir, "weekly_thesis.json", {
+        "generated_at": "2026-09-13T20:08:00+00:00",
+        "next_review_at": "2026-09-20T20:00:00+00:00",
+        "theses": [{
+            "ticker": "ANET", "thesis": "BULLISH", "confidence": 0.72,
+            "target_entry_price": 192.8, "stop_loss_price": new_stop,
+            "take_profit_price": 221.0, "selected_for_trading": True,
+            "review_action": "ADJUST", "reasoning": "lock gains",
+        }],
+    })
+    write_state_file(state_dir, "sentry_signals.json", {
+        "generated_at": "2026-09-14T14:15:00+00:00",
+        "signals": [{"ticker": "ANET", "signal": "CONTINUE"}],
+    })
+    write_state_file(state_dir, "data_bundle.json", {"stocks": {}})
+
+
+class TestAdjustLivePriceFloorEndToEnd:
+    """Production ANET 2026-09-14: Sunday's ADJUST raised the stop $181 → $191;
+    Monday's 14:15 run placed it while ANET traded $189.82 and it filled the
+    same second. Drive execute_trades through Section 4a with a live mark on
+    the position and verify the broker-call sequence.
+    """
+
+    POSITION = {
+        "symbol": "ANET", "qty": "36", "qty_available": "36",
+        "held_for_orders": "0", "avg_entry_price": "192.8",
+    }
+    EXISTING_STOP = [{"id": "stop-181", "side": "sell", "type": "stop_limit",
+                      "qty": "36", "stop_price": "181.00", "limit_price": "179.19"}]
+
+    def _run(self, monkeypatch, tmp_state_dir, fake_config, *, live: str,
+             new_stop: float, open_orders: list):
+        _write_adjust_state(tmp_state_dir, new_stop=new_stop)
+        position = {**self.POSITION, "current_price": live}
+        mocks = _stub_e2e_mocks(
+            monkeypatch, market_open=True, position=position, open_orders=open_orders,
+        )
+        cancel_all = MagicMock(return_value=None)
+        monkeypatch.setattr("titantrade.executor.cancel_all_orders_for_ticker", cancel_all)
+        mocks["cancel_all_orders_for_ticker"] = cancel_all
+        monkeypatch.setattr("titantrade.executor.manage_core_position", MagicMock(return_value=None))
+        monkeypatch.setattr("titantrade.executor.record_stop_out_cooldowns", MagicMock(return_value=None))
+        from titantrade.executor import execute_trades
+        execute_trades(_config_with_watchlist(fake_config, ["ANET"]))
+        return mocks
+
+    def test_gapped_through_raise_keeps_existing_stop(self, monkeypatch, tmp_state_dir, fake_config):
+        mocks = self._run(monkeypatch, tmp_state_dir, fake_config,
+                          live="189.82", new_stop=191.0, open_orders=self.EXISTING_STOP)
+        mocks["cancel_all_orders_for_ticker"].assert_not_called()
+        mocks["place_native_stop_loss"].assert_not_called()
+
+    def test_raise_inside_floor_keeps_existing_stop(self, monkeypatch, tmp_state_dir, fake_config):
+        # 1.0% below the live mark: above the 1.5% floor → refused.
+        mocks = self._run(monkeypatch, tmp_state_dir, fake_config,
+                          live="192.90", new_stop=191.0, open_orders=self.EXISTING_STOP)
+        mocks["cancel_all_orders_for_ticker"].assert_not_called()
+        mocks["place_native_stop_loss"].assert_not_called()
+
+    def test_healthy_raise_is_applied(self, monkeypatch, tmp_state_dir, fake_config):
+        mocks = self._run(monkeypatch, tmp_state_dir, fake_config,
+                          live="205.00", new_stop=191.0, open_orders=self.EXISTING_STOP)
+        mocks["cancel_all_orders_for_ticker"].assert_called_once()
+        mocks["place_native_stop_loss"].assert_called_once()
+        args = mocks["place_native_stop_loss"].call_args.args
+        assert args[0] == "ANET" and args[1] == 36.0 and args[2] == 191.0
+
+    def test_no_existing_stop_places_even_a_tight_one(self, monkeypatch, tmp_state_dir, fake_config):
+        # Unprotected is worse than tight: with no stop on the book the
+        # analyst's level is placed regardless of the floor.
+        mocks = self._run(monkeypatch, tmp_state_dir, fake_config,
+                          live="189.82", new_stop=191.0, open_orders=[])
+        mocks["place_native_stop_loss"].assert_called_once()
+        assert mocks["place_native_stop_loss"].call_args.args[2] == 191.0
+
+    def test_missing_live_price_fails_open(self, monkeypatch, tmp_state_dir, fake_config):
+        # No usable mark on the position → behave exactly as before ADR 058.
+        mocks = self._run(monkeypatch, tmp_state_dir, fake_config,
+                          live="", new_stop=191.0, open_orders=self.EXISTING_STOP)
+        mocks["cancel_all_orders_for_ticker"].assert_called_once()
+        mocks["place_native_stop_loss"].assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# ADR 058 fix 5 — cash is refreshed after each executed entry within a run
+# ---------------------------------------------------------------------------
+
+class TestEntryCashRefresh:
+    """Production 2026-09-21: ANET's bracket filled instantly, so it was no
+    longer an *open* order and ``open_buy_commitment`` could not see it; DXCM,
+    next in the same run, was sized against pre-fill cash and the 5% reserve
+    ended at 2.6%. Section 2 must re-read the account after an executed entry.
+    """
+
+    def test_second_entry_sees_post_fill_cash(self, monkeypatch, tmp_state_dir, fake_config):
+        def _thesis(t):
+            return {"ticker": t, "thesis": "BULLISH", "confidence": 0.7,
+                    "target_entry_price": 100.0, "stop_loss_price": 95.0,
+                    "take_profit_price": 110.0, "selected_for_trading": True,
+                    "review_action": "NEW", "reasoning": "r"}
+        write_state_file(tmp_state_dir, "weekly_thesis.json", {
+            "generated_at": "2026-09-20T20:08:00+00:00",
+            "next_review_at": "2026-09-27T20:00:00+00:00",
+            "theses": [_thesis("AAPL"), _thesis("MSFT")],
+        })
+        write_state_file(tmp_state_dir, "sentry_signals.json", {
+            "generated_at": "2026-09-21T14:15:00+00:00",
+            "signals": [{"ticker": "AAPL", "signal": "CONTINUE"},
+                        {"ticker": "MSFT", "signal": "CONTINUE"}],
+        })
+        write_state_file(tmp_state_dir, "data_bundle.json", {"stocks": {}})
+
+        mocks = _stub_e2e_mocks(monkeypatch, market_open=True,
+                                position={"symbol": "SPY", "qty": "1"}, open_orders=[])
+        monkeypatch.setattr("titantrade.executor.get_positions", MagicMock(return_value=[]))
+        monkeypatch.setattr("titantrade.executor.get_position", MagicMock(return_value=None))
+        monkeypatch.setattr("titantrade.executor.manage_core_position", MagicMock(return_value=None))
+        monkeypatch.setattr("titantrade.executor.record_stop_out_cooldowns", MagicMock(return_value=None))
+        accounts = [
+            {"portfolio_value": "112000", "cash": "10042", "buying_power": "300000"},
+            {"portfolio_value": "112000", "cash": "5590", "buying_power": "300000"},
+        ]
+        get_account = MagicMock(side_effect=accounts)
+        monkeypatch.setattr("titantrade.executor.get_account", get_account)
+        trade = {"id": "t1", "ticker": "AAPL", "action": "BUY", "shares": 44,
+                 "price": 100.0, "total_value": 4400.0, "trigger": "weekly_thesis",
+                 "timestamp": "2026-09-21T14:15:30+00:00"}
+        entry = MagicMock(side_effect=[trade, None])
+        monkeypatch.setattr("titantrade.executor._handle_bullish_entry", entry)
+
+        from titantrade.executor import execute_trades
+        execute_trades(_config_with_watchlist(fake_config, ["AAPL", "MSFT"]))
+
+        assert entry.call_count == 2
+        assert entry.call_args_list[0].kwargs["cash_balance"] == 10042.0
+        assert entry.call_args_list[1].kwargs["cash_balance"] == 5590.0
+        assert get_account.call_count == 2
+        assert mocks["is_market_open"].called
