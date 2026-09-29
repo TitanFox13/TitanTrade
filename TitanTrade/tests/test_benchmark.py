@@ -280,3 +280,85 @@ class TestNotifierIntegration:
         payload = mock_post.call_args.kwargs["json"]
         names = [f["name"] for f in payload["embeds"][0]["fields"]]
         assert "Benchmark (vs SPY)" in names
+
+
+# ---------------------------------------------------------------------------
+# Decision 059: the just-closed session comes from the 15Min history
+# ---------------------------------------------------------------------------
+
+def _ts_et(y: int, mo: int, d: int, h: int, mi: int) -> int:
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    return int(_dt.datetime(y, mo, d, h, mi, tzinfo=ZoneInfo("America/New_York")).timestamp())
+
+
+class TestAppendClosedSession:
+    """Alpaca stamps a session's 1D equity point at 20:00 ET, so at the 20:30
+    UTC daily summary the session that just closed has no 1D point and the
+    persisted benchmark ended one session early (Decision 058 fixed the SPY
+    half only). The 15Min history carries the 16:00 ET close bucket within
+    minutes; it is appended when it belongs to a newer session and sits at or
+    after the close."""
+
+    def test_appends_closed_session_newer_than_1d_series(self, fake_config):
+        series = [("2026-09-24", 112005.03), ("2026-09-25", 111697.39)]
+        intraday = {
+            "timestamp": [_ts_et(2026, 9, 28, 15, 45), _ts_et(2026, 9, 28, 16, 0)],
+            "equity": [111669.04, 111611.28],
+        }
+        with patch("titantrade.broker.get_portfolio_history", return_value=intraday) as gp:
+            out = bm._append_closed_session(fake_config, series)
+        assert out[-1] == ("2026-09-28", 111611.28)
+        assert len(out) == 3
+        assert gp.call_args.kwargs["timeframe"] == "15Min"
+
+    def test_mid_session_point_is_not_appended(self, fake_config):
+        series = [("2026-09-25", 111697.39)]
+        intraday = {"timestamp": [_ts_et(2026, 9, 28, 15, 45)], "equity": [111669.04]}
+        with patch("titantrade.broker.get_portfolio_history", return_value=intraday):
+            assert bm._append_closed_session(fake_config, series) == series
+
+    def test_session_already_in_1d_series_is_not_duplicated(self, fake_config):
+        series = [("2026-09-25", 111697.39), ("2026-09-28", 111597.83)]
+        intraday = {"timestamp": [_ts_et(2026, 9, 28, 16, 0)], "equity": [111611.28]}
+        with patch("titantrade.broker.get_portfolio_history", return_value=intraday):
+            assert bm._append_closed_session(fake_config, series) == series
+
+    def test_fetch_failure_or_empty_leaves_series(self, fake_config):
+        series = [("2026-09-25", 111697.39)]
+        with patch("titantrade.broker.get_portfolio_history", side_effect=RuntimeError("down")):
+            assert bm._append_closed_session(fake_config, series) == series
+        with patch("titantrade.broker.get_portfolio_history", return_value={"timestamp": [], "equity": []}):
+            assert bm._append_closed_session(fake_config, series) == series
+        assert bm._append_closed_session(fake_config, []) == []
+
+    def test_at_or_after_close_is_dst_safe(self):
+        assert bm._at_or_after_close(_ts_et(2026, 9, 28, 16, 0)) is True    # EDT
+        assert bm._at_or_after_close(_ts_et(2026, 9, 28, 15, 59)) is False
+        assert bm._at_or_after_close(_ts_et(2026, 1, 20, 16, 0)) is True    # EST
+        assert bm._at_or_after_close(_ts_et(2026, 1, 20, 15, 45)) is False
+
+    def test_compute_benchmark_window_ends_on_the_closed_session(self, fake_config, tmp_state_dir):
+        """End to end at 16:30 ET: 1D history ends yesterday, 15Min history has
+        today's close, SPY (SIP) has today's bar → window_end is today."""
+        import datetime as _dt
+        dates = ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"]
+        equity_vals = [100000.0, 101000.0, 100600.0, 101400.0]
+        daily = {"timestamp": [], "equity": []}
+        for d, e in zip(dates, equity_vals):
+            ts = int(_dt.datetime(int(d[:4]), int(d[5:7]), int(d[8:10]), 20, 0,
+                                  tzinfo=_dt.timezone.utc).timestamp())  # 16:00 EDT
+            daily["timestamp"].append(ts)
+            daily["equity"].append(e)
+        intraday = {"timestamp": [_ts_et(2026, 6, 5, 16, 0)], "equity": [102000.0]}
+
+        def _history(cfg, period="3M", timeframe="1D", **kw):
+            return intraday if timeframe == "15Min" else daily
+
+        spy_bars = [{"date": d, "close": c} for d, c in zip(
+            dates + ["2026-06-05"], [500.0, 510.0, 504.9, 512.5, 515.0])]
+        with patch("titantrade.broker.get_portfolio_history", side_effect=_history), \
+             patch("titantrade.market_data.get_ohlcv", return_value=spy_bars):
+            m = bm.compute_benchmark(fake_config, lookback_days=90)
+        assert m["window_end"] == "2026-06-05"
+        assert m["n_days"] == 4

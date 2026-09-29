@@ -464,23 +464,29 @@ def notify_core_rebalance(
 
 def notify_cooldown_override(
     ticker: str, hours_since_abort: float, current_price: float, stop_price: float,
+    exit_price: float | None = None,
 ) -> None:
     """The 72h ABORT cooldown was overridden because sentry CONTINUE + price
-    recovered above stop. Rare event, important to log on Discord so the
+    recovered above stop (and, when the record knows it, ≥1% above the exit
+    price — Decision 059). Rare event, important to log on Discord so the
     operator knows we're re-entering a recently-stopped ticker.
     """
+    recovery = f"${current_price:.2f} vs stop ${stop_price:.2f}"
+    if exit_price:
+        recovery += f", exit ${exit_price:.2f}"
     send_discord(
         title=f"Cooldown override — re-entering {ticker}",
         description=(
             f"This ticker ABORTed {hours_since_abort:.0f}h ago, but: sentry "
             f"says CONTINUE, thesis still BULLISH, and price has recovered "
-            f"to ${current_price:.2f} (>1% above stop ${stop_price:.2f}). "
+            f"to ${current_price:.2f} (>1% above stop ${stop_price:.2f}"
+            f"{f' and ≥1% above the ${exit_price:.2f} exit' if exit_price else ''}). "
             f"Re-entering — the original whipsaw lockout has been bypassed."
         ),
         color=COLOR_STRATEGY,
         fields=[
             {"name": "Ticker", "value": ticker, "inline": True},
             {"name": "Hours since ABORT", "value": f"{hours_since_abort:.0f}h", "inline": True},
-            {"name": "Recovery", "value": f"${current_price:.2f} vs stop ${stop_price:.2f}", "inline": True},
+            {"name": "Recovery", "value": recovery, "inline": True},
         ],
     )

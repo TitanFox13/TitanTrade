@@ -116,7 +116,10 @@ def _handle_abort(ticker: str, sentry: dict[str, Any], cfg: Config) -> dict[str,
     log_decision(log, "executor", ticker, "SELL (ABORT)", reasoning)
     # Suppress re-entry on this ticker until cooldown expires. Without this we
     # observed prod cycles of buy→abort→buy-higher→abort within a single week.
-    _record_abort_cooldown(ticker, reasoning)
+    # The mark we sold at anchors the override's recovery test (Decision 059).
+    _record_abort_cooldown(
+        ticker, reasoning, exit_price=float(position.get("current_price") or 0),
+    )
     return trade
 
 

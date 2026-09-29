@@ -134,6 +134,10 @@ executed entry, so an instantly-filled bracket (no longer an open order) cannot 
 Protective exits are symmetric (Decision 056): a broker-side stop-loss fill starts the
 same 72h re-entry cooldown an ABORT does (with the same sentry-confirmed override), and
 weekly-review ADJUST levels are never applied to a position opened after the review was
-generated — they were computed for a position that no longer exists.
+generated — they were computed for a position that no longer exists. The cooldown record
+carries the exit price, and the override only re-enters once the price is at least 1%
+above it (Decision 059) — measured against the thesis stop alone, "recovered" was true
+for nearly every exit and the system re-bought the same names at the same price a day
+later.
 
 See [TitanTrade/docs/risk_management.md](../TitanTrade/docs/risk_management.md) for details.

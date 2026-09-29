@@ -274,6 +274,57 @@ def _portfolio_equity_series(
     return out
 
 
+def _at_or_after_close(ts: int) -> bool:
+    """True when an Alpaca timestamp is at/after 16:00 US/Eastern (the regular
+    session close). False when the tz database is unavailable — the caller
+    then skips the intraday point rather than risk pairing a mid-session mark
+    with SPY's close."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        et = datetime.fromtimestamp(ts, ZoneInfo("America/New_York"))
+    except Exception:  # noqa: BLE001 — missing tzdata
+        return False
+    return (et.hour, et.minute) >= (16, 0)
+
+
+def _append_closed_session(cfg: Any, series: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """Extend the 1D equity series with the session that just closed (Decision 059).
+
+    Alpaca stamps a session's 1D equity point at 20:00 ET (= 00:00 UTC of the
+    next day), so at the 20:30 UTC daily summary the just-closed session has
+    no 1D point yet and the persisted benchmark always ended one session
+    early — Decision 058 fixed the SPY half (SIP bars) but not this half. The
+    ``15Min`` history does carry the 16:00 ET close bucket within minutes, so
+    when its last point belongs to a session newer than the 1D series' last
+    date *and* sits at/after the close, it is appended as that session's
+    close. Any failure or a mid-session last point leaves the series as is.
+    """
+    if not series:
+        return series
+    try:
+        from titantrade.broker import get_portfolio_history
+
+        ph = get_portfolio_history(cfg, period="1D", timeframe="15Min")
+        stamps = ph.get("timestamp", []) or []
+        equity = ph.get("equity", []) or []
+    except Exception as exc:  # noqa: BLE001 — never let this block the benchmark
+        log.warning(f"Intraday equity fetch failed — benchmark ends at the last 1D point: {exc}")
+        return series
+    last_ts: int | None = None
+    last_eq: float | None = None
+    for ts, eq in zip(stamps, equity):
+        if eq is None or eq <= 0:
+            continue
+        last_ts, last_eq = int(ts), float(eq)
+    if last_ts is None or last_eq is None:
+        return series
+    session = _session_date(last_ts)
+    if session <= series[-1][0] or not _at_or_after_close(last_ts):
+        return series
+    return series + [(session, last_eq)]
+
+
 def _spy_close_series(cfg: Any, days: int) -> list[tuple[str, float]]:
     """Daily (date, close) for SPY, oldest-first."""
     from titantrade.market_data import get_ohlcv
@@ -325,6 +376,7 @@ def compute_benchmark(
     spy_days = 400 if wide else lookback_days + 15
 
     equity = _portfolio_equity_series(cfg, period=period, since=since)
+    equity = _append_closed_session(cfg, equity)
     spy = _spy_close_series(cfg, days=spy_days)
     dates, p, m = _align(equity, spy)
 

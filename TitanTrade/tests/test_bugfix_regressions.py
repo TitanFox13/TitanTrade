@@ -847,3 +847,145 @@ class TestBenchmarkSpySipFeed:
         import inspect
         from titantrade.data_providers import fmp
         assert "feed" in inspect.signature(fmp.get_ohlcv).parameters
+
+
+# ---------------------------------------------------------------------------
+# ADR 059 fix 1: the cooldown override measures "recovered" against the EXIT
+# price, not only the thesis stop
+# ---------------------------------------------------------------------------
+
+class TestCooldownOverrideExitPrice:
+    """Measured against the thesis stop alone, "recovered" was satisfied by
+    nearly every exit (both a 3–5% abort and a stop-out leave the price above
+    the stop), so the 72h cooldown was effectively 24h and the system re-bought
+    the same names at the same price a day later. Of the 23 override-population
+    re-entries Jul 8 → Sep 28 2026, the 10 that came in < 1% above the exit all
+    lost (−$767); the 13 ≥ 1% above kept every winner (+$2,250). The cooldown
+    record now carries the exit price and the override requires the current
+    price ≥ exit × (1 + COOLDOWN_RECOVERY_PCT). Records without one (pre-059)
+    keep the thesis-stop test only.
+    """
+
+    def _thesis(self, **overrides):
+        base = {
+            "ticker": "JPM", "thesis": "BULLISH",
+            "selected_for_trading": True,
+            "stop_loss_price": 330.0,
+        }
+        base.update(overrides)
+        return base
+
+    def test_abort_record_stores_exit_price(self, tmp_state_dir):
+        from titantrade.cooldown import _record_abort_cooldown, cooldown_exit_price
+        _record_abort_cooldown("JPM", "sentry abort", exit_price=342.89)
+        assert cooldown_exit_price("JPM") == pytest.approx(342.89)
+        saved = json.loads((tmp_state_dir / "abort_cooldown.json").read_text())
+        assert saved["JPM"]["exit_price"] == pytest.approx(342.89)
+
+    def test_abort_record_without_price_stores_none(self, tmp_state_dir):
+        from titantrade.cooldown import _record_abort_cooldown, cooldown_exit_price
+        _record_abort_cooldown("JPM", "sentry abort")            # legacy call shape
+        _record_abort_cooldown("GE", "sentry abort", exit_price=0)  # unusable mark
+        assert cooldown_exit_price("JPM") is None
+        assert cooldown_exit_price("GE") is None
+        assert cooldown_exit_price("NOPE") is None
+
+    def test_stop_out_record_stores_exit_price(self, tmp_state_dir):
+        from datetime import datetime, timedelta, timezone
+        from titantrade.cooldown import _record_stop_out_cooldown, cooldown_exit_price
+        filled = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        assert _record_stop_out_cooldown("DASH", filled, "stop-loss exit", exit_price=187.35)
+        assert cooldown_exit_price("DASH") == pytest.approx(187.35)
+
+    def test_flat_rebuy_above_stop_is_refused(self):
+        from titantrade.cooldown import cooldown_override_allowed
+        # Sold at $342.89; price now $343.50 — above the stop ($330 × 1.01)
+        # but only 0.2% above where we exited. Under the old rule this was a
+        # "recovery"; it is the JPM Sep 15 → 16 round trip (−$84).
+        assert cooldown_override_allowed(
+            "JPM", self._thesis(), {"signal": "CONTINUE"},
+            hours_since_abort=28, current_price=343.50, exit_price=342.89,
+        ) is False
+
+    def test_recovered_one_pct_above_exit_is_allowed(self):
+        from titantrade.cooldown import cooldown_override_allowed, COOLDOWN_RECOVERY_PCT
+        assert COOLDOWN_RECOVERY_PCT == 1.0
+        assert cooldown_override_allowed(
+            "JPM", self._thesis(), {"signal": "CONTINUE"},
+            hours_since_abort=28, current_price=342.89 * 1.01, exit_price=342.89,
+        ) is True
+        assert cooldown_override_allowed(
+            "JPM", self._thesis(), {"signal": "CONTINUE"},
+            hours_since_abort=28, current_price=342.89 * 1.0099, exit_price=342.89,
+        ) is False
+
+    def test_without_exit_price_keeps_thesis_stop_test(self):
+        from titantrade.cooldown import cooldown_override_allowed
+        # Pre-059 record: no exit price → the old behaviour, unchanged.
+        assert cooldown_override_allowed(
+            "JPM", self._thesis(), {"signal": "CONTINUE"},
+            hours_since_abort=28, current_price=343.50, exit_price=None,
+        ) is True
+
+    def test_stop_test_still_applies_above_exit(self):
+        from titantrade.cooldown import cooldown_override_allowed
+        # 5% above the exit but still below stop × 1.01 → not recovered.
+        assert cooldown_override_allowed(
+            "JPM", self._thesis(stop_loss_price=340.0), {"signal": "CONTINUE"},
+            hours_since_abort=28, current_price=336.0, exit_price=320.0,
+        ) is False
+
+    @patch("titantrade.entries.fetch_with_retry")
+    def test_stop_out_scan_records_fill_price(self, mock_fetch, fake_config, tmp_state_dir):
+        from datetime import datetime, timedelta, timezone
+        from titantrade.entries import record_stop_out_cooldowns
+        from titantrade.cooldown import cooldown_exit_price
+        mock_fetch.return_value = _resp([{
+            "symbol": "DVN", "side": "sell", "type": "stop_limit", "status": "filled",
+            "filled_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+            "filled_avg_price": "43.42", "stop_price": "43.50",
+        }])
+        assert record_stop_out_cooldowns(fake_config) == 1
+        assert cooldown_exit_price("DVN") == pytest.approx(43.42)
+
+    @patch("titantrade.entries.place_bracket_order")
+    @patch("titantrade.daily_sentry._fetch_current_price", return_value=343.50)
+    def test_bullish_entry_blocks_flat_rebuy(
+        self, mock_price, mock_bracket, fake_config, tmp_state_dir,
+    ):
+        """End to end: 28h after a $342.89 exit, sentry CONTINUE, price $343.50
+        (above the stop, 0.2% above the exit) → the entry is still skipped."""
+        import datetime as dt
+        from titantrade.cooldown import _record_abort_cooldown
+        _record_abort_cooldown("JPM", "sentry abort", exit_price=342.89)
+        saved = json.loads((tmp_state_dir / "abort_cooldown.json").read_text())
+        saved["JPM"]["aborted_at"] = (
+            dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=28)
+        ).isoformat()
+        (tmp_state_dir / "abort_cooldown.json").write_text(json.dumps(saved))
+        thesis = self._thesis(
+            confidence=0.8, target_entry_price=345.0, take_profit_price=380.0,
+        )
+        result = _handle_bullish_entry(
+            ticker="JPM", thesis=thesis,
+            portfolio_value=100_000, cash_balance=50_000,
+            positions=[], data_bundle={"stocks": {}},
+            sentry={"signal": "CONTINUE"}, cfg=fake_config,
+        )
+        assert result is None
+        mock_bracket.assert_not_called()
+
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.executor.get_position")
+    @patch("titantrade.executor.close_position_at_market")
+    def test_abort_handler_records_exit_mark(
+        self, mock_close, mock_pos, mock_orders, fake_config, tmp_state_dir,
+    ):
+        from titantrade.cooldown import cooldown_exit_price
+        from titantrade.executor import _handle_abort
+        mock_pos.return_value = {"symbol": "DASH", "qty": "4", "current_price": "179.26"}
+        _handle_abort(
+            "DASH", {"signal": "ABORT", "price_concern": True, "reasoning": "-5.1%"},
+            fake_config,
+        )
+        assert cooldown_exit_price("DASH") == pytest.approx(179.26)

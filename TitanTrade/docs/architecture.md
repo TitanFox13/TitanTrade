@@ -139,6 +139,7 @@ All state lives in `state/` as JSON files. No database.
 | Min stop distance | Fixed | Stop < 1.5% below entry → entry/resubmit refused as noise-level (Decision 055) | pricing/entries |
 | Same-run ABORT guard | Sequencing | Current sentry ABORT → no entry/resubmit (exit is coming, Decision 055) | entries |
 | Stop-out cooldown | Sequencing | Broker-side stop fill → 72h re-entry cooldown, fill-time stamped (Decision 056) | entries/cooldown |
+| Exit-anchored override | Fixed | Cooldown override needs price ≥ 1% above the recorded exit price, not just above the thesis stop (Decision 059) | cooldown/entries |
 | Stale-ADJUST guard | Data | ADJUST levels skipped for positions opened after the review (Decision 056) | executor/trade_state |
 | ADJUST live-price floor | Fixed | Analyst raise at/above the live mark or < 1.5% below it → existing stop kept (Decision 058) | pricing/executor |
 | Cash reserve | Portfolio | 5% minimum cash (net of pending buys; account re-read after each executed entry, Decision 058) | risk_manager/executor |

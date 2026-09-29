@@ -126,7 +126,7 @@ All jobs run inside the always-on `api` container via APScheduler
 | `weekday_pricecheck_midday` | 12:00 Mon-Fri | pricecheck |
 | `weekday_pricecheck_afternoon` | 14:00 Mon-Fri | pricecheck |
 | `weekday_sentry_preclose` | 15:30 Mon-Fri | sentry + execute |
-| `daily_summary` | 16:30 Mon-Fri | Discord daily summary (+ benchmark refresh; SPY bars from SIP so the just-closed session is included, Decision 058) |
+| `daily_summary` | 16:30 Mon-Fri | Discord daily summary (+ benchmark refresh; SPY bars from SIP and the equity close from the 15Min history so the just-closed session is included, Decisions 058/059) |
 | `sunday_full` | 16:00 Sun | full pipeline (fetch → analyze → sentry → execute) |
 
 Manage via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`,

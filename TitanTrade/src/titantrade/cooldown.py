@@ -44,14 +44,35 @@ def _save_abort_cooldowns(data: dict[str, dict[str, Any]]) -> None:
         json.dump(data, f, indent=2)
 
 
-def _record_abort_cooldown(ticker: str, reason: str) -> None:
-    """Record an ABORT so re-entries are suppressed for REENTRY_COOLDOWN_HOURS."""
+def _record_abort_cooldown(
+    ticker: str, reason: str, exit_price: float | None = None,
+) -> None:
+    """Record an ABORT so re-entries are suppressed for REENTRY_COOLDOWN_HOURS.
+
+    ``exit_price`` (the mark we sold at) anchors the override's recovery test
+    (Decision 059); omitted/non-positive → the record carries none and the
+    override falls back to the thesis-stop test.
+    """
     data = _load_abort_cooldowns()
-    data[ticker] = {
+    record: dict[str, Any] = {
         "aborted_at": datetime.now(timezone.utc).isoformat(),
         "reason": reason[:200],  # cap to keep file small
     }
+    if exit_price and exit_price > 0:
+        record["exit_price"] = float(exit_price)
+    data[ticker] = record
     _save_abort_cooldowns(data)
+
+
+def cooldown_exit_price(ticker: str) -> float | None:
+    """The exit price stored with the ticker's active cooldown record, or None
+    (no record, or a pre-Decision-059 record without one). Read-only."""
+    entry = _load_abort_cooldowns().get(ticker) or {}
+    try:
+        price = float(entry.get("exit_price") or 0)
+    except (TypeError, ValueError):
+        return None
+    return price if price > 0 else None
 
 
 def _is_in_cooldown(ticker: str) -> tuple[bool, float]:
@@ -80,7 +101,9 @@ def _is_in_cooldown(ticker: str) -> tuple[bool, float]:
     return True, hours
 
 
-def _record_stop_out_cooldown(ticker: str, exited_at: str, reason: str) -> bool:
+def _record_stop_out_cooldown(
+    ticker: str, exited_at: str, reason: str, exit_price: float | None = None,
+) -> bool:
     """Record a broker-side stop-loss exit as a cooldown event (ADR 056).
 
     Unlike ``_record_abort_cooldown`` this stamps the cooldown clock with the
@@ -105,12 +128,15 @@ def _record_stop_out_cooldown(ticker: str, exited_at: str, reason: str) -> bool:
                 return False  # already covered by an equal-or-newer event
         except (ValueError, TypeError):
             pass  # damaged record — overwrite with the valid one
-    data[ticker] = {
+    record: dict[str, Any] = {
         # Normalize through fromisoformat→isoformat so _is_in_cooldown's
         # parser always accepts what we store (Alpaca stamps use 'Z').
         "aborted_at": exited_dt.isoformat(),
         "reason": reason[:200],
     }
+    if exit_price and exit_price > 0:
+        record["exit_price"] = float(exit_price)
+    data[ticker] = record
     _save_abort_cooldowns(data)
     return True
 
@@ -120,6 +146,16 @@ def _record_stop_out_cooldown(ticker: str, exited_at: str, reason: str) -> bool:
 # still allowing the recovery leg after a one-day shakeout.
 COOLDOWN_OVERRIDE_MIN_HOURS = 24
 
+# "Recovered" means the price is back at least this far ABOVE THE PRICE WE
+# EXITED AT (Decision 059). Measured against the thesis stop alone, the test
+# was satisfied by nearly every exit (a 3–5% abort or a stop-out both leave
+# the price above the stop), so the 72h cooldown was effectively 24h and the
+# system re-bought the same names at the same price a day later. Over the
+# 23 override-population re-entries Jul 8 → Sep 28 2026, the 10 that came in
+# less than 1% above the exit all lost (−$767 combined); the 13 that came in
+# ≥1% above kept every winner (+$2,250).
+COOLDOWN_RECOVERY_PCT = 1.0
+
 
 def cooldown_override_allowed(
     ticker: str,
@@ -127,6 +163,7 @@ def cooldown_override_allowed(
     sentry: dict[str, Any] | None,
     hours_since_abort: float,
     current_price: float | None,
+    exit_price: float | None = None,
 ) -> bool:
     """Decide whether the daily sentry confirms it's safe to re-enter a
     ticker that's still in the 72h ABORT cooldown.
@@ -137,11 +174,16 @@ def cooldown_override_allowed(
       - The latest sentry signal is CONTINUE (not ABORT)
       - The current price has recovered above the thesis stop (price action
         confirms the thesis hasn't been invalidated)
+      - When the cooldown record carries the exit price: the current price is
+        at least ``COOLDOWN_RECOVERY_PCT`` above it (Decision 059) — a re-buy
+        at the price we just sold at is the whipsaw the cooldown exists to
+        stop, not a recovery. Records without an exit price (pre-059) keep
+        the thesis-stop test only.
 
     Without this override, a single intraday whipsaw locks the ticker out
     for 72 hours — the GS case from production. With it, we re-enter on
-    confirmed recovery; without all four conditions we still respect the
-    full cooldown.
+    confirmed recovery; without all conditions we still respect the full
+    cooldown.
     """
     if hours_since_abort < COOLDOWN_OVERRIDE_MIN_HOURS:
         return False
@@ -155,4 +197,8 @@ def cooldown_override_allowed(
     # Price must be at least 1% above the stop to qualify as "recovered"
     if current_price < stop * 1.01:
         return False
+    # Decision 059: ...and at least COOLDOWN_RECOVERY_PCT above the exit.
+    if exit_price and exit_price > 0:
+        if current_price < exit_price * (1 + COOLDOWN_RECOVERY_PCT / 100):
+            return False
     return True

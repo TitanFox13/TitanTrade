@@ -1,5 +1,61 @@
 # Important Decisions Log
 
+## Decision 059: Exit-anchored cooldown override + closed-session benchmark equity; ATR-scaled ADJUST floor tested and rejected (September 29 checkup)
+**Date**: 2026-09-29
+**Decision**: two changes and one negative result, each decided on the paper account's own fills rather than on the churn "feel" that four checkups had reported:
+1. **Cooldown override measures recovery against the exit price.** The cooldown record (`state/abort_cooldown.json`) now stores `exit_price` — the mark an ABORT sold at, or the broker stop's fill price — and `cooldown_override_allowed` additionally requires the current price to be ≥ `COOLDOWN_RECOVERY_PCT` (1%) above it. The existing tests (≥ 24 h, thesis still BULLISH + selected, sentry CONTINUE, price ≥ 1% above the thesis stop) stay. Records without an exit price (written before this deploy) keep the stop-only test; they expire within 72 h. `cooldown.py`, `entries.py` (both override call sites + the stop-out scan), `executor.py` / `price_check.py` (abort handlers pass the mark), `notifier.py` (Discord line shows the exit).
+2. **Benchmark: the just-closed session's equity comes from the `15Min` history.** `benchmark._append_closed_session` appends the 16:00 ET bucket of `GET /v2/account/portfolio/history?period=1D&timeframe=15Min` when its session is newer than the 1D series' last date and the point sits at/after the close; any failure or a mid-session point leaves the series unchanged. `benchmark.py`.
+3. **Not shipped — ATR-scaled floor on analyst ADJUST raises** (the parked watch item from Decisions 057/058). Tested on every filled analyst ADJUST stop since May 12 and rejected; see Evidence 2.
+
+Item 1 is the first change to re-entry behaviour since the 2026-06-22 hold; the operator authorised it on 2026-09-29 after the checkup below. Sentry thresholds, trail width (3.0×ATR), sizing, pyramiding and the analyst are untouched.
+
+### September 29 checkup (2026-09-22 → 2026-09-28, 5 trading days)
+Ops: 0 ERROR/CRITICAL/tracebacks in 30 days, all 8 scheduler jobs `completed`, public API healthy (note: port 8000 is not published on the host and the api image has no curl/wget — check via the tunnel or `/app/.venv/bin/python`), both images the Sep 22 build, AI cost $6.26 for September (Claude $5.83 / Gemini $0.43), disk 61% (build cache 7.1 GB + 4 dangling volumes, still pending the operator). Equity $111,689; 8 overlay positions + SPY core (34%), every position GTC stop-covered, cash 5.7%.
+
+Decision 058 verified live: the ADJUST live-price floor fired twice on Sep 28 (Sunday's JPM stop $343 vs live $340.68 / $336.61 — kept $333.15; a third JPM whipsaw avoided); "Days held" real (CRWD 24 d, FCX 11 d, ANET 6 d); cash reserve 2.6% → 5.7%. **Fix 5 (SIP bars) did not close the benchmark lag**: `benchmark_metrics.json` computed Sep 28 20:30 UTC still ended Sep 25. Root cause: Alpaca stamps a session's 1D equity point at 20:00 ET = 00:00 UTC next day, so at 20:30 UTC the just-closed session has no 1D point; the SPY SIP bar was there. The `15Min` series had the 16:00 ET close ($111,611.28 vs the later 1D point $111,597.83 — after-hours drift, 0.01%). → item 2.
+
+Performance (`compute_benchmark(persist=False)`, windows end Sep 28; SPY = split-adjusted price return, which is the right comparison for a dividend-less paper account — a real account would owe SPY ≈ 0.25 pp/quarter more):
+
+| Window | Strategy | SPY | Beta | Alpha/yr | Sharpe (S / SPY) | Up / down capture | Max DD (S / SPY) |
+|---|---|---|---|---|---|---|---|
+| Clean since 2026-07-08 (57 td) | **+3.18%** | +2.71% | 0.64 | +6.5% | 1.22 / 1.09 | 0.70 / 0.61 | −4.64% / −3.38% |
+| Since 2026-08-01 (39 td) | +1.19% | +1.05% | 0.77 | +2.8% | 0.70 / 0.71 | 0.77 / 0.72 | −4.64% / −3.06% |
+| Since the Aug 12 peak (32 td) | −2.55% | **−0.89%** | 0.74 | −14.9% | −1.75 / −0.66 | 0.62 / 0.85 | −4.64% / −3.06% |
+| Since Decision 057 (Sep 2, 17 td) | **+1.15%** | +0.06% | 0.81 | +16.3% | 1.56 / 0.13 | 0.83 / 0.61 | −2.32% / −2.47% |
+| Since Decision 046 (May 12, 95 td) | **+10.30%** | +3.72% | 0.84 | +19.9% | 1.23 / 0.83 | 1.13 / 0.90 | −8.15% / −4.49% |
+| Since inception (Mar 30, 125 td) | +11.64% | **+21.15%** | 0.61 | +0.2% | 1.18 / 3.02 | 0.74 / 0.82 | −8.15% / −4.49% |
+
+Month by month (strategy / SPY): May +4.95 / +5.26, Jun +2.08 / −1.03, Jul −0.47 / +0.03, Aug +3.54 / +2.68, Sep (→ 28) −0.69 / +0.06. Reading: the past three months are a tie with SPY in a flat market; the inception gap is April (+2.1% vs +10.5%, the debugging period); the lag since the Aug 12 peak is churn — since Aug 13, 37 overlay exits netted +$660 realised (sentry aborts −$2,062 / broker stops +$1,752 / TP1 & market +$969) while **20 of the 37 were re-bought within 7 days at a higher price, a re-entry gap of $1,915 ≈ 1.7% of equity = the whole lag**; up-capture 0.62 / down-capture 0.85 in that window is the whipsaw signature. Operator decision the same day: keep the bot in paper, do not fund it, ship the data-backed churn fix, start a new clean window on the deploy date, write the go/stop rule (todo Phase 1.36).
+
+### Evidence 1 — the override rule (item 1)
+Every overlay exit since 2026-07-08 that was re-bought within 72 h (the population the override governs — before Decision 056 a stop-out had no cooldown, so early re-entries then were the same behaviour), with the re-entered shares' realised + open P&L (Alpaca fills, FIFO; n = 23, total +$1,483 of which CRWD Sep 3 alone is +$1,946):
+
+| Rule for "recovered" | Allowed | P&L of allowed | Blocked | P&L of blocked |
+|---|---|---|---|---|
+| Current: ≥ 1% above the thesis stop (≈ everything) | 23 | +$1,483 | 0 | — |
+| ≥ the exit price | 19 | +$1,595 | 4 | −$112 |
+| **≥ exit × 1.01 (shipped)** | **13** | **+$2,250** | **10** | **−$767** |
+| ≥ exit × 1.02 | 4 | +$198 | 19 | +$1,285 (blocks CRWD) |
+| ≤ the exit price (buy lower only) | 4 | −$112 | 19 | +$1,595 |
+
+The 1% rule blocks exactly the "nothing has changed" re-buys (URI +0.7%, HCA +0.3%, DVN +0.5%, CRWD −0.1%, ANET +0.2%, EQIX +0.1%, JPM +0.8%, …), every one a loser, and keeps every winner. Caveats stated plainly: n = 23, one trade dominates the allowed set, and a blocked re-entry could still have happened after the 72 h expiry at that day's price — the table assumes it does not. The threshold reuses the 1% the policy already used against the stop; only the anchor moves.
+
+### Evidence 2 — the ATR floor (item 3, rejected)
+All 35 filled analyst ADJUST stops since May 12 (origin matched to the thesis archive's `stop_loss_price` with `review_action = ADJUST`), ATR multiple measured from Friday's close and 14-day Wilder ATR at placement, outcome = what the position would have done instead over the next 5 / 10 trading days:
+
+| Alternative to the analyst's level | k = 1.0 | k = 1.5 | k = 2.0 |
+|---|---|---|---|
+| Keep the previous analyst level (10 td) | −$2,762 (14 fills) | −$2,495 (29) | −$2,742 (34) |
+| Clamp the raise to `close − k×ATR` (5 td / 10 td) | +$207 / −$211 | +$115 / −$1,814 | −$708 / −$3,586 |
+
+Placed levels (88 held-position ADJUSTs): < 1×ATR 27 placed, 70% hit within 5 td; 1–1.5× 44 placed, 36%; 1.5–2× 16 placed, 38%. The tight levels are hit often and the price is back 2% above the level within 10 days in 10 of 14 (< 1×) and 11 of 15 (1–1.5×) cases — but the stocks usually fell through the wider level first, so every wider alternative exits lower. Holding with no stop at all would have been +$2.1k at k = 1.5 — not a policy. The tight exit was mildly protective; the loss was the flat re-buy that followed (Evidence 1). Watch item closed as tested-and-rejected; the analyst's ADJUST levels keep applying under the Decision 058 live-price floor only.
+
+### Relationship to the strategy hold
+The hold's trigger (a real SPY drawdown) has still not fired (max SPY DD −3.4% in the clean window). Item 1 is nonetheless a deliberate re-entry-policy change, taken because the same mechanism appeared in four consecutive checkups with per-trade evidence, and the fix was tested on those trades before shipping. Everything else the hold froze stays frozen. The operator's go/stop rule for funding is recorded in todo Phase 1.36.
+
+### Tests, docs, deploy
+578 tests green (17 new: `TestCooldownOverrideExitPrice` in `test_bugfix_regressions.py` — record shapes, the flat-rebuy refusal, the 1% boundary, the pre-059 fallback, the stop-out scan's fill price, an end-to-end `_handle_bullish_entry` block and the abort handler's mark; `TestAppendClosedSession` in `test_benchmark.py` — append, mid-session skip, no-duplicate, failure paths, DST-safe close check and an end-to-end `window_end`). Touched files ruff-clean. Docs: features, risk_management (parameter table), both architectures, deployment, insights, CLAUDE.md, todo Phase 1.36. Deploy record in todo Phase 1.36.
+
 ## Decision 058: ADJUST live-price floor, in-run cash refresh, real days-held, Discord retry, SIP benchmark bars (September 22 sweep)
 **Date**: 2026-09-22
 **Decision**: five independent correctness fixes surfaced by the Sep 8 → Sep 21 sweep. None changes strategy selection, sizing curves, sentry sensitivity, trail width or cooldown policy — the 2026-06-22 hold stands.
@@ -59,8 +115,8 @@ The sweep initially flagged Gemini re-evaluating GE for four days after it was s
 26 new regression tests (`TestAdjustLivePriceFloor`, `TestReviewDaysHeld`, `TestBenchmarkSpySipFeed` in `test_bugfix_regressions.py`; `TestAdjustLivePriceFloorEndToEnd` — five `execute_trades` drives incl. gap-through, inside-floor, healthy raise, no-stop and missing-price — and `TestEntryCashRefresh` in `test_executor.py`; `TestSendDiscordRetry` in `test_notifier.py`). **562 tests green**; touched files ruff-clean (four pre-existing findings in the test modules untouched). Docs: features, risk_management, both architectures, agent_instructions, deployment, CLAUDE.md, todo Phase 1.35. Deployed 2026-09-22 (both images) — see todo Phase 1.35 for the deploy record.
 
 ### Watch items carried forward (todo Phase 1.35)
-1. ATR-scaled ADJUST floor (strategy) — parked; DASH 0.82×, FCX 1.23×, JPM 1.30× analyst stops live on Sep 21.
-2. Cooldown override still effectively 24–29 h — parked (Decision 057 item 2).
+1. ATR-scaled ADJUST floor (strategy) — parked; DASH 0.82×, FCX 1.23×, JPM 1.30× analyst stops live on Sep 21. → **Tested and rejected in Decision 059.**
+2. Cooldown override still effectively 24–29 h — parked (Decision 057 item 2). → **Fixed in Decision 059** (recovery measured against the exit price).
 3. titanserver disk 60%: `docker builder prune -a -f` (6.8 GB) + the 3 dangling PG 15 volumes (332 MB) pending the operator's go; never `docker image prune -a` here.
 4. `benchmark_metrics.json` 90-day window carries the CRWD split artifact until ~mid-October; read `--since 2026-07-08`.
 5. Untracked `data/historical_long/` on the server (2.5 MB, Jul 2 backtest download) — harmless; gitignore or delete.

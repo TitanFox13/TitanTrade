@@ -140,8 +140,11 @@ def run_price_check(cfg: Config) -> dict[str, Any]:
             _append_trade(trade)
             actions.append(trade)
             log_decision(log, "price_check", ticker, "SELL (PRICE CHECK)", reason)
-            # Lock out re-entry for the cooldown window
-            _record_abort_cooldown(ticker, f"price_check: {reason}")
+            # Lock out re-entry for the cooldown window; the exit mark anchors
+            # the override's recovery test (Decision 059).
+            _record_abort_cooldown(
+                ticker, f"price_check: {reason}", exit_price=current_price,
+            )
         except Exception as exc:
             log.error(f"Price check abort failed for {ticker}: {exc}")
 

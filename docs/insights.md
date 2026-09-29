@@ -135,3 +135,18 @@ order to slivers (production: 0.01 URI shares = $11). Dust fills like a real
 trade, pays fees like a real trade, churns like a real trade — but can't carry
 a stop (Alpaca rejects stops on sub-1-share orders). A $500 minimum-notional
 floor turns these into clean near-miss records instead (Decision 054).
+
+### The Tight Stops Weren't the Churn — the Flat Re-Buys Were (Decision 059)
+Four checkups in a row blamed the analyst's 0.8–1.3×ATR ADJUST stops for the
+sell-the-dip / buy-the-rebound cycle. Tested against 35 filled analyst stops,
+no wider alternative (keep the previous level, or clamp to `close − k×ATR`
+for k = 1–2) beat the analyst's level over 5- or 10-day horizons — the
+stocks usually kept falling through the wider level too, so the tight exit
+was mildly protective. The money was lost one step later: the cooldown
+override's "price recovered" test compared the price to the *thesis stop*,
+which any exit trivially clears, so the system re-bought the same name at the
+same price a day later. Of 23 such re-entries, the 10 that came in less than
+1% above the exit all lost; the 13 that came in ≥ 1% above kept every winner.
+Lesson: attribute churn to the *re-entry* rule before touching the *exit*
+rule, and test the proposed fix on the fills before shipping it — the
+"obvious" ATR floor would have cost money.

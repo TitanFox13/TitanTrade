@@ -34,7 +34,10 @@
   (conflicting headlines or market stress — Decision 057), >=5% always aborts.
   Reduces noise-driven churn in normal volatility.
 - 72-hour re-entry cooldown after every ABORT — prevents the "sell low,
-  buy higher" cycles previously observed in production
+  buy higher" cycles previously observed in production. The 24h+ sentry-
+  confirmed override needs the price ≥ 1% above the thesis stop AND ≥ 1%
+  above the price we exited at (Decision 059) — a re-buy at the exit price
+  is the whipsaw, not a recovery
 - High-impact-only macro blackout (FOMC, NFP, CPI, core PCE, GDP); 6h
   window instead of 24h; minor indicators no longer block trading
 - Pass 2 target trade count scales with market regime (6 in strong_bullish
@@ -124,7 +127,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - **Bracket resubmission**: expired day-only brackets are auto-resubmitted next morning with dynamically adjusted entry prices based on current market conditions (resubmits floor to whole shares — a sub-1-share size is skipped, never sent as a fractional bracket that Alpaca rejects with HTTP 422). Resubmission skips any ticker whose current sentry signal is ABORT — the executor is about to exit it, and the 72h cooldown only starts once that abort is handled, after resubmission runs (Decision 055, the LLY 18-second round-trip)
 - **Minimum stop-distance floor**: fresh entries and resubmissions are refused when the stop sits less than 1.5% below the entry (`pricing.stop_too_tight`, Decision 055) — a noise-level stop is a guaranteed immediate stop-out (production: URI entered with a 0.28% stop and was tagged out 27 minutes later). Typically a degenerate artifact of reusing an ADJUST-review thesis (stop tightened on a held position) for a new entry
 - **ADJUST live-price floor** (Decision 058): a weekly-review stop raise is measured against the position's live mark at the market-open run that applies it; a level at/above the price or less than 1.5% below it is not applied while an existing stop protects the position (`pricing.adjust_stop_too_tight`). Sunday's level meets Monday's gap — ANET 2026-09-14 was stopped the same second the raise was placed, then rallied 8%. With no stop on the book the level is still placed.
-- **Stop-out re-entry cooldown**: a broker-side protective-stop fill starts the same 72h cooldown an ABORT does (Decision 056) — stop fills execute on Alpaca's servers with nothing running, so nothing "handled" the exit and DVN was re-bought 42 minutes after its stop fired. The scan stamps the cooldown at the fill time (idempotent) and the sentry-confirmed override policy still allows early re-entry on recovery
+- **Stop-out re-entry cooldown**: a broker-side protective-stop fill starts the same 72h cooldown an ABORT does (Decision 056) — stop fills execute on Alpaca's servers with nothing running, so nothing "handled" the exit and DVN was re-bought 42 minutes after its stop fired. The scan stamps the cooldown at the fill time (idempotent) and records the fill price; the sentry-confirmed override still allows early re-entry, but only once the price is ≥ 1% above that exit (Decision 059 — the 10 re-entries that came in flat to the exit all lost, the 13 that came in ≥ 1% above kept every winner)
 - **Stale-ADJUST guard**: weekly-review ADJUST levels are skipped for a position opened *after* the review was generated (Decision 056) — they were computed for a position that no longer exists (DVN: the old position's $43.50 stop re-applied 0.34% below a fresh $43.65 re-entry). The entry-time stop is kept until the next review re-syncs
 - **Gap-down protection**: detects unfilled stop-limit orders after overnight gaps and immediately market-sells the unprotected position. The stale stop's cancel is polled to a terminal state *before* the market sell so the sell isn't rejected for still-held qty (Decision 035). Before selling, the live market quote is cross-checked (Decision 053), and gaps deeper than 30% below the stop are checked against the corporate-actions feed — a recent split announcement means the stop is stale, not the market, so the sale is skipped and alerted instead of liquidating at a split-artifact bottom (Decision 054, the CRWD 4:1 lesson)
 - **Never-bare guarantee** (Decision 035): after a partial sell (TP1), the sell is polled to `filled` before the breakeven stop is sized; `place_native_stop_loss` clamps to the broker-reported `available` qty if momentarily short. A position is never left without a stop after a partial sell or stop replace.
@@ -311,7 +314,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - **Correlation/R², annualized volatility, total + excess return, max drawdown** for both series
 - Source: **Alpaca portfolio-equity history** (true mark-to-market each day), aligned to SPY daily closes by trading date (in market time — Alpaca stamps EOD equity at 20:00 ET)
 - Surfaced via CLI (`python -m titantrade benchmark [days] [--since YYYY-MM-DD]`), API (`GET /api/benchmark`, `/api/benchmark/refresh`), and a line on the daily Discord summary
-- SPY history comes from Alpaca's consolidated SIP feed (ended ≥16 min in the past — free-plan recency rule) so the 20:30 UTC daily refresh includes the session that just closed; indicator bars stay on the configured feed (Decision 058)
+- SPY history comes from Alpaca's consolidated SIP feed (ended ≥16 min in the past — free-plan recency rule) so the 20:30 UTC daily refresh includes the session that just closed; indicator bars stay on the configured feed (Decision 058). The equity side of the same session comes from the `15Min` portfolio history's 16:00 ET bucket, appended when the 1D series (stamped 20:00 ET) does not have it yet (Decision 059)
 - A one-line plain-English verdict classifies the window (adding value / protection-not-selection / dominated by SPY)
 
 ## Test Suite (Zero Token Spend)

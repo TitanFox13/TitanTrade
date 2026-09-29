@@ -28,7 +28,7 @@ from titantrade.pricing import (
 )
 from titantrade.cooldown import (
     _is_in_cooldown, cooldown_override_allowed, REENTRY_COOLDOWN_HOURS,
-    _record_stop_out_cooldown,
+    _record_stop_out_cooldown, cooldown_exit_price,
 )
 from titantrade.risk_manager import pre_trade_check
 
@@ -211,12 +211,14 @@ def _handle_bullish_entry(
     # whipsaw ABORT locks us out of the recovery leg for 72 hours.
     in_cooldown, hours_since = _is_in_cooldown(ticker)
     if in_cooldown:
+        exit_price = cooldown_exit_price(ticker)
         if cooldown_override_allowed(
-            ticker, thesis, sentry, hours_since, current_price,
+            ticker, thesis, sentry, hours_since, current_price, exit_price=exit_price,
         ):
             log.warning(
                 f"Cooldown OVERRIDE for {ticker}: {hours_since:.1f}h since "
-                f"ABORT, sentry CONTINUE + price recovered above stop. "
+                f"ABORT, sentry CONTINUE + price recovered above stop"
+                f"{f' and ≥1% above the ${exit_price:.2f} exit' if exit_price else ''}. "
                 f"Allowing re-entry."
             )
             try:
@@ -225,6 +227,7 @@ def _handle_bullish_entry(
                     ticker=ticker, hours_since_abort=hours_since,
                     current_price=current_price or 0,
                     stop_price=float(thesis.get("stop_loss_price") or 0),
+                    exit_price=exit_price,
                 )
             except Exception as exc:  # noqa: BLE001
                 log.warning(f"Cooldown override notify failed for {ticker}: {exc}")
@@ -514,8 +517,13 @@ def record_stop_out_cooldowns(cfg: Config) -> int:
             continue
         ticker = o.get("symbol", "")
         price = o.get("filled_avg_price") or o.get("stop_price") or "?"
+        try:
+            exit_price: float | None = float(price)
+        except (TypeError, ValueError):
+            exit_price = None
         if _record_stop_out_cooldown(
             ticker, o["filled_at"], f"stop-loss exit @ ${price} (broker-side fill)",
+            exit_price=exit_price,
         ):
             log.info(
                 f"Stop-out cooldown recorded for {ticker}: protective stop "
@@ -677,15 +685,19 @@ def resubmit_expired_brackets(
                     current_price = _fetch_current_price(ticker, cfg)
                 except Exception:
                     current_price = None
+                exit_price = cooldown_exit_price(ticker)
                 override_ok = cooldown_override_allowed(
                     ticker, thesis, sentry_signal, hours_since, current_price,
+                    exit_price=exit_price,
                 )
                 _cooldown_override_seen[ticker] = override_ok
                 if override_ok:
                     log.warning(
                         f"Cooldown OVERRIDE for {ticker} (resubmit): "
                         f"{hours_since:.1f}h since ABORT, sentry CONTINUE + "
-                        f"price recovered. Allowing resubmit."
+                        f"price recovered"
+                        f"{f' ≥1% above the ${exit_price:.2f} exit' if exit_price else ''}. "
+                        f"Allowing resubmit."
                     )
                     try:
                         from titantrade.notifier import notify_cooldown_override
@@ -693,6 +705,7 @@ def resubmit_expired_brackets(
                             ticker=ticker, hours_since_abort=hours_since,
                             current_price=current_price or 0,
                             stop_price=float(thesis.get("stop_loss_price") or 0),
+                            exit_price=exit_price,
                         )
                     except Exception as exc:  # noqa: BLE001
                         log.warning(f"Cooldown override notify failed for {ticker}: {exc}")
