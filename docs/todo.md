@@ -17,7 +17,7 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [x] **LLM reassigned**: monthly universe-curation proposal + post-mortem (`curator.py`, `curate` job, `/api/universe-proposal`). No orders.
 - [x] **Backtester for the mechanical strategy** (`backtest/mechanical.py`, `backtest-mech`, `download-history --days N` with sector ETFs) using the same `signals.py` code as live; walk-forward helper and a coarse built-in grid.
 - [x] Schedule rewritten (`data/schedule.json`); `strategy: "mechanical"` in `data/watchlist.json`; 612 tests green.
-- [ ] **Deploy** (both images), verify the first market-open run: legacy positions orphan-closed, SPY rebalanced to the residual target, `state/strategy.json` written, `signals.json` served.
+- [x] **Deployed 2026-10-13 12:42 UTC** (commit `bdc558a`, both images, 7 jobs, health ok); first signals run 12:43 UTC: strategy started, insurance on, DASH signal, 8 legacy positions queued for the 14:15 UTC orphan close. **Verify after the 14:15 UTC run**: legacy positions sold, SPY at ≈75% of equity, DASH bracket placed/filled at ≈20%, `/api/signals` served.
 - [ ] **Flutter app follow-ups**: show `/api/signals` (insurance state, ranked candidates, slots) and `/api/universe-proposal`; the sentry and price-check panels now show static mechanical content.
 - [ ] **Go/stop rule (rewritten)**: fund ≥ $25k only when a quarter of paper behaves like the backtest AND return ≥ SPY − 2 pp/yr over the window AND max DD ≤ 0.7 × SPY's in any SPY drawdown ≥ 10%.
 

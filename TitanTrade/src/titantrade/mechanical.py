@@ -31,7 +31,7 @@ from titantrade.risk_manager import MIN_CASH_RESERVE_PCT
 from titantrade.signals import evaluate_dip, insurance_state, rank_dips
 from titantrade.trade_state import _load, _opening_buy, position_opened_at
 
-log = get_logger("titantrade.mechanical")
+log = get_logger("mechanical")
 
 STRATEGY_FILE = "strategy.json"
 MECHANICAL_CONFIDENCE = 0.80   # ≥ 0.80 → near-market entry (pricing._choose_entry_price)

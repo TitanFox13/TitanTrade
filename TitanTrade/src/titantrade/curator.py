@@ -15,7 +15,7 @@ from titantrade.config import STATE_DIR, Config
 from titantrade.logger import get_logger
 from titantrade.trade_state import _load
 
-log = get_logger("titantrade.curator")
+log = get_logger("curator")
 
 PROPOSAL_FILE = "universe_proposal.json"
 POST_MORTEM_FILE = "post_mortem.json"
