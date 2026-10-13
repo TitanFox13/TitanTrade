@@ -11,6 +11,8 @@ Mechanically: the "place a fresh stop" block (TP-leg recovery, off-hours deferra
 
 **Tests**: 9 new in `tests/test_stop_coverage.py` (entry-stop lookup skips pyramid adds and legacy records; level choice for re-opened vs older positions; the EQIX TP-leg scenario places $969.95 not $1000; the FCX ADJUST-re-opened scenario end-to-end through `execute_trades` places the entry-time stop and applies no ADJUST level; `ensure_stop_coverage` touches only bare overlay positions). 587 total, all green; touched files ruff-clean.
 
+**Deployed**: 2026-10-13 09:29 UTC, commit `452a6e1` — both images rebuilt and import-verified, API restarted, health ok, 8 jobs registered, smoke run of `ensure_stop_coverage` placed 0 stops (market closed, every position already covered).
+
 ### October 13 checkup (2026-09-29 → 2026-10-12, 9 trading days)
 Ops: 0 ERROR/CRITICAL/tracebacks in 3,029 log lines (14 d), 75 WARNINGs all expected (sentry noise/abort classifications, cooldown overrides, Decision 058 live-price floor ×3 on JPM keeping $333.15, FRED 502 ×5 absorbed by retry), 8 scheduler jobs `completed`, both images = Sep 29 12:20 build, git clean at `ef42847`. AI $3.03 Oct-to-date ($6.30 Sep). Equity $112,682; 8 overlay positions + SPY core 34.5%, all 8 GTC stop-covered at check time, cash 6.3%. Disk 62% (build cache 7.3 GB, 6 dangling PG 15 volumes 498 MB).
 
