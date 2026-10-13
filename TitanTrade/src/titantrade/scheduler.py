@@ -83,11 +83,12 @@ def _run_pricecheck() -> str:
 
 def _run_gapcheck() -> str:
     from .config import load_config
-    from .executor import check_gap_down_protection
+    from .executor import check_gap_down_protection, ensure_stop_coverage
 
     cfg = load_config()
     trades = check_gap_down_protection(cfg)
-    return f"{len(trades)} positions closed"
+    placed = ensure_stop_coverage(cfg)
+    return f"{len(trades)} positions closed, {placed} stops placed"
 
 
 def _run_resubmit() -> str:

@@ -20,7 +20,7 @@ uv run python -m titantrade analyze      # Weekly Claude analysis (2-pass)
 uv run python -m titantrade sentry       # Daily Gemini sentry (3-layer)
 uv run python -m titantrade execute      # Execute trades via Alpaca
 uv run python -m titantrade pricecheck   # Intraday price check (no LLM)
-uv run python -m titantrade gapcheck     # Gap-down stop-limit protection
+uv run python -m titantrade gapcheck     # Gap-down stop-limit protection + place missing stops
 uv run python -m titantrade resubmit     # Resubmit expired brackets
 uv run python -m titantrade benchmark [days] # Performance vs SPY: beta/alpha/Sharpe (--since YYYY-MM-DD)
 uv run python -m titantrade full             # Full pipeline (fetch → analyze → sentry → execute)
@@ -34,7 +34,7 @@ uv run python -m titantrade download-history [dir]  # Download OHLCV for backtes
 cd TitanTrade && uv run --extra test python -m pytest tests/ -v
 ```
 
-`pytest` lives in the `test` optional-dependency extra, so the `--extra test` flag is required (a bare `uv run` omits it → `No module named pytest`). All 578 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens. `ruff`/`vulture` are in the `dev` extra for lint/dead-code checks.
+`pytest` lives in the `test` optional-dependency extra, so the `--extra test` flag is required (a bare `uv run` omits it → `No module named pytest`). All 587 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens. `ruff`/`vulture` are in the `dev` extra for lint/dead-code checks.
 
 ### Flutter app (from titan_trade_app/)
 

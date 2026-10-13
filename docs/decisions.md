@@ -1,5 +1,48 @@
 # Important Decisions Log
 
+## Decision 060: Stop coverage after a bracket fill — one helper for every path, entry-time level, gapcheck companion (October 13 checkup)
+**Date**: 2026-10-13
+**Decision**: a bracket's exit legs are DAY orders on Alpaca (the API offers no GTC bracket — Decisions 021/028) and die at the 20:00 UTC close, so every filled bracket needs a GTC stop of its own placed by the next run. Two paths got this wrong in different ways, found in the October 13 log sweep:
+1. **The ADJUST "re-opened after the review" branch skipped every check.** The Decision 056 guard (`position_opened_after` → `continue`) correctly refused to apply Sunday's levels to a position re-entered mid-week, but it also skipped stop coverage, so the DAY legs expired and the position sat bare until the next market-open run. Production FCX: stopped Oct 1, re-bought Fri Oct 2 15:10, **no stop from Fri 20:00 to Mon Oct 5 14:15 UTC**; EQIX (Fri Oct 9 19:46 fill) none until Mon Oct 12 14:15. The 13:35 UTC gapcheck closes catastrophic gaps only. **Fix:** the branch now calls the coverage helper before `continue` — the entry-time level stays, but it is put on the book.
+2. **The held-bullish path placed the thesis stop instead of the bracket's.** After a fill Alpaca keeps the stop leg in `held` while the TP leg is live, and held orders are not returned by `GET /v2/orders?status=open` — so `_manage_held_bullish` saw "TP leg but no stop", cancelled the TP (OCO took the stop with it) and placed a fresh GTC stop at the *thesis* `stop_loss_price`. For a position re-entered with an adapted bracket that is the wrong level: EQIX Oct 2 19:30, **$969.95 → $1000**, tagged Oct 8 at $998.23 (−$119) and re-bought Oct 9 at $1023.87 (+$128 re-entry gap); URI Oct 5, $987.09 → $970. **Fix:** `_coverage_stop_price` — a position opened after the current review was generated is covered at the trade-log stop of its opening BUY (`trade_state.position_entry_stop`); otherwise, and when the log has no usable level, the thesis stop as before. Same rule the ADJUST path already applies to levels (Decision 056).
+3. **The gapcheck job also places missing stops.** `executor.ensure_stop_coverage` runs after `check_gap_down_protection` at 13:35 UTC (scheduler and CLI): any held whole-share overlay position with a thesis and no resting stop gets one via the same helper, so a bracket that filled after the pre-close run is covered five minutes into the session instead of at 14:15. Orphans are left to the execute run's orphan close; the core allocation carries no stop by design.
+
+Mechanically: the "place a fresh stop" block (TP-leg recovery, off-hours deferral, TP restore on half-failure) moved verbatim from `_manage_held_bullish` into `_ensure_protective_stop`; `_ensure_coverage` wraps it with the has-stop / fractional / level checks and is the single entry point for the three callers. Behaviour on every previously covered path is unchanged except the level choice in item 2. Plumbing, not strategy — the hold (Decision 051 addendum) is untouched.
+
+**Tests**: 9 new in `tests/test_stop_coverage.py` (entry-stop lookup skips pyramid adds and legacy records; level choice for re-opened vs older positions; the EQIX TP-leg scenario places $969.95 not $1000; the FCX ADJUST-re-opened scenario end-to-end through `execute_trades` places the entry-time stop and applies no ADJUST level; `ensure_stop_coverage` touches only bare overlay positions). 587 total, all green; touched files ruff-clean.
+
+### October 13 checkup (2026-09-29 → 2026-10-12, 9 trading days)
+Ops: 0 ERROR/CRITICAL/tracebacks in 3,029 log lines (14 d), 75 WARNINGs all expected (sentry noise/abort classifications, cooldown overrides, Decision 058 live-price floor ×3 on JPM keeping $333.15, FRED 502 ×5 absorbed by retry), 8 scheduler jobs `completed`, both images = Sep 29 12:20 build, git clean at `ef42847`. AI $3.03 Oct-to-date ($6.30 Sep). Equity $112,682; 8 overlay positions + SPY core 34.5%, all 8 GTC stop-covered at check time, cash 6.3%. Disk 62% (build cache 7.3 GB, 6 dangling PG 15 volumes 498 MB).
+
+Decision 059 verified live: `benchmark_metrics.json` computed Oct 12 20:30 UTC has `window_end = 2026-10-12` (item 2 ✓). Override lines read "≥1% above the $X exit" (item 1 ✓): 3 allowed (FCX Oct 2 +4.2% above the $68.91 exit, EQIX Oct 2 +3.0% above $998.13, EQIX Oct 9 +2.6% above $998.23), ≥5 evaluations refused (JPM ×2 at +0.0…+0.4% above $333.08, DXCM ×3 at +0.5…+0.6% above $83.91). Both refusals were right: JPM closed Oct 12 at $334.30 (+0.4%) and the Oct 4 review dropped it; DXCM re-dipped −5% on Oct 8 before +1.8%. DASH's legacy record (no `exit_price`) fired the old-wording override ×4 Sep 30 – Oct 2; every attempt was dust-blocked ($90–99 budget behind the pending DXCM bracket). Note for the next sweep: a refused override logs only "Skipping … in re-entry cooldown (Xh since ABORT)" — infer the refusal from hours ≥ 24 + sentry CONTINUE.
+
+Performance (`compute_benchmark(persist=False)`, windows end Oct 12; SPY = split-adjusted price return):
+
+| Window | Strategy | SPY | Beta | Sharpe (S / SPY) | Up / down capture | Max DD (S / SPY) |
+|---|---|---|---|---|---|---|
+| New clean window since Decision 059 (Sep 29, 9 td) | +1.05% | **+1.82%** | 1.54 | 2.38 / 7.12 | 1.23 / 2.48 | −1.27% / −0.66% |
+| Clean since 2026-07-08 (67 td) | +4.22% | +4.39% | 0.69 | 1.37 / 1.54 | 0.77 / 0.71 | −4.64% / −3.38% |
+| Since the Aug 12 peak (42 td) | −1.56% | **+0.73%** | 0.83 | −0.78 / 0.51 | 0.77 / 0.99 | −4.64% / −3.06% |
+| Since Decision 057 (Sep 2, 27 td) | **+2.17%** | +1.69% | 0.91 | 1.83 / 1.61 | 0.97 / 0.88 | −2.32% / −2.47% |
+| Since Decision 046 (May 12, 105 td) | **+11.41%** | +5.41% | 0.85 | 1.27 / 1.09 | 1.14 / 0.95 | −8.15% / −4.49% |
+| Since inception (Mar 30, 135 td) | +12.76% | **+23.12%** | 0.63 | 1.22 / 3.11 | 0.77 / 0.87 | −8.15% / −4.49% |
+
+Churn in the new window: 5 exits (JPM Sep 30, FCX Oct 1, EQIX Oct 1, DXCM Oct 6, EQIX Oct 8), all broker stops at analyst levels, all losers, realised −$629 (FIFO on Alpaca fills); 3 of 5 re-bought within 7 days at a higher price (FCX +4.2%, EQIX +3.0%, EQIX +2.6%), re-entry gap ≈ $562. Exits + gap ≈ $1.2k ≈ 1.05% of equity ≈ the whole lag vs SPY in the window. No SPY drawdown yet (max −0.66%), so the go/stop clock (todo Phase 1.36) keeps running. Watch: CRWD $258 and ANET $206.50 analyst stops sat 1.0–1.1% below the Oct 12 close.
+
+### Evidence — is it selection or execution? (operator question, 2026-10-13)
+Counterfactual built from `thesis_history.json` and SIP daily closes (split-adjusted): **EW picks** = equal-weight, daily-chained return of every `selected_for_trading` ticker in the review in force (Sunday's list applies from Monday's close, re-selected weekly); **passive book** = 34% SPY + 60% EW picks + 6% cash, i.e. the strategy's book structure with no stops, no sentry, no trail, no sizing; **static B&H** = equal-weight buy-and-hold of every name selected at least once in the window.
+
+| Window | Strategy | SPY | EW picks | Passive book | Static B&H |
+|---|---|---|---|---|---|
+| Clean since Jul 8 | +4.22% | +4.39% | +2.56% | +3.03% | +5.25% |
+| Since Aug 12 | −1.56% | +0.73% | −4.61% | −2.52% | −1.63% |
+| Since Sep 2 | +2.17% | +1.69% | +0.68% | +0.98% | +2.25% |
+| Since Sep 29 | +1.05% | +1.82% | +1.71% | +1.64% | +2.16% |
+
+Per-name buy-and-hold over the clean window (weeks selected): CRWD +37.6% (12), FCX +27.5% (12), ANET +16.5% (13), DXCM +16.0% (13), DVN +13.0% (11), HCA +11.7% (11), FANG +4.6% (3), DASH +2.6% (9), EQIX +1.6% (14), JPM +1.1% (12), WMT 0.0% (3), URI −1.4% (8), LLY −2.7% (10), GS −13.2% (7), GE −13.3% (9), DECK −17.6% (2).
+
+Reading: **over the three-month clean window the analyst's basket trailed SPY by 1.8 pp (selection), and the execution layer added 1.2–1.7 pp over passively holding those picks** — the stops cut GS/GE/DECK's −13…−18% short, the trail and pyramid rode CRWD and FCX — which brought the strategy back to ≈ SPY. **The lag since the Aug 12 peak is selection:** the basket lost 4.6% while SPY gained 0.7%; execution recovered about 1 pp of that, it did not cause it. Only the two-week window since Sep 29 shows execution as the net cost (picks ≈ SPY, five stop-outs −0.6 pp). One more selection signal: holding every selected name statically beat the weekly re-selected basket by 2.7 pp over the clean window, so the analyst's weekly rotation (dropping winners, adding GS/GE) is itself a drag. Caveats: equal weight vs the bot's risk-based sizing; price return on both sides; 9–67 trading days. Implication for the hold: the next lever, if any, is on the analyst's side (selection and rotation), not the risk machinery — and it needs the same fills-first test before anything ships.
+
 ## Decision 059: Exit-anchored cooldown override + closed-session benchmark equity; ATR-scaled ADJUST floor tested and rejected (September 29 checkup)
 **Date**: 2026-09-29
 **Decision**: two changes and one negative result, each decided on the paper account's own fills rather than on the churn "feel" that four checkups had reported:

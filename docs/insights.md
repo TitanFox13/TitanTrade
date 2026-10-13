@@ -150,3 +150,16 @@ same price a day later. Of 23 such re-entries, the 10 that came in less than
 Lesson: attribute churn to the *re-entry* rule before touching the *exit*
 rule, and test the proposed fix on the fills before shipping it — the
 "obvious" ATR floor would have cost money.
+
+### A Safety Invariant Needs One Owner (Decision 060)
+"Every whole-share overlay position has a GTC stop" was enforced by two code
+paths that disagreed, and a third (the re-opened-after-review guard) that
+`continue`d past the check entirely. Alpaca made it worse: a bracket's exit
+legs are DAY orders, and its stop leg sits in `held` while the TP leg is
+live, so `GET /v2/orders?status=open` shows the TP and not the stop. The
+held-bullish path therefore "recovered" a stop that was never missing — at
+the thesis level instead of the bracket's — while the ADJUST path left a
+re-entered position bare over a weekend. Lesson: an invariant that matters
+gets one function, called from every path that can break it, plus the
+earliest job of the day as a backstop. A guard that skips a block for one
+good reason must not skip the safety check hiding in the same block.

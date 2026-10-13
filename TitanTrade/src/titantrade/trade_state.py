@@ -63,17 +63,14 @@ def position_opened_after(ticker: str, generated_at: str | None) -> bool:
         return False
 
 
-def position_opened_at(ticker: str) -> str | None:
-    """ISO timestamp of the trade-log BUY that opened the ticker's current
-    position, or None when the log has no such record.
+def _opening_buy(ticker: str) -> dict[str, Any] | None:
+    """Trade-log record of the BUY that opened the ticker's current position.
 
     "Opened" means the most recent entry-type BUY (weekly_thesis /
     bracket_resubmission); pyramid ADDs enlarge an existing position and are
     skipped. The log records submissions, so a bracket that expired and was
     resubmitted resolves to the resubmission that filled — accurate to the
-    session, which is what "days held" needs (Decision 058: the weekly review
-    had been telling the analyst "Days held: 0" for every position because
-    broker positions carry no entry date and per-ticker theses no timestamp).
+    session.
     """
     doc = _load("trade_log.json")
     trades = doc.get("trades", []) if isinstance(doc, dict) else (doc or [])
@@ -82,9 +79,39 @@ def position_opened_at(ticker: str) -> str | None:
             continue
         if rec.get("trigger") == "pyramid":
             continue
-        ts = rec.get("timestamp")
-        return ts if isinstance(ts, str) and ts else None
+        return rec
     return None
+
+
+def position_opened_at(ticker: str) -> str | None:
+    """ISO timestamp of the trade-log BUY that opened the ticker's current
+    position, or None when the log has no such record (Decision 058: the
+    weekly review had been telling the analyst "Days held: 0" for every
+    position because broker positions carry no entry date and per-ticker
+    theses no timestamp).
+    """
+    rec = _opening_buy(ticker)
+    ts = rec.get("timestamp") if rec else None
+    return ts if isinstance(ts, str) and ts else None
+
+
+def position_entry_stop(ticker: str) -> float | None:
+    """Stop price the opening bracket carried — the trade-log
+    ``stop_loss_price`` of the BUY that opened the current position — or None
+    when the log has no usable level (legacy records).
+
+    Decision 060: this is the level to restore when a freshly filled
+    bracket's DAY legs are gone, not the weekly thesis stop, which was
+    computed for a position that may no longer exist.
+    """
+    rec = _opening_buy(ticker)
+    if not rec:
+        return None
+    try:
+        stop = float(rec.get("stop_loss_price") or 0)
+    except (TypeError, ValueError):
+        return None
+    return stop if stop > 0 else None
 
 
 # Cap the size of append-only state files. Older records get spilled to a

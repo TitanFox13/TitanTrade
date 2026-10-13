@@ -30,10 +30,10 @@ from titantrade.entries import (
 )
 from titantrade.positions import manage_trailing_stop, maybe_pyramid_position
 from titantrade.pricing import adjust_stop_too_tight
-from titantrade.core_allocation import manage_core_position
+from titantrade.core_allocation import _is_core_ticker, manage_core_position
 from titantrade.protection import check_gap_down_protection, close_orphaned_positions
 from titantrade.trade_state import (
-    _append_trade, _load, _trade_record, position_opened_after,
+    _append_trade, _load, _trade_record, position_entry_stop, position_opened_after,
 )
 from titantrade.alerts import _maybe_alert_stuck_in_cash, _maybe_alert_ticker_churn
 from titantrade.cooldown import _record_abort_cooldown
@@ -123,6 +123,231 @@ def _handle_abort(ticker: str, sentry: dict[str, Any], cfg: Config) -> dict[str,
     return trade
 
 
+def _stop_orders(open_orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Resting protective sell stops among ``open_orders``."""
+    return [
+        o for o in open_orders
+        if o.get("side") == "sell" and o.get("type") in ("stop", "stop_limit")
+    ]
+
+
+def _coverage_stop_price(
+    ticker: str, thesis: dict[str, Any], thesis_generated_at: str | None,
+) -> float | None:
+    """Stop to place when a held position has none on the book (Decision 060).
+
+    A position opened AFTER the current review was generated (a mid-week
+    re-entry, or Sunday's bracket filled on Monday) is protected at the level
+    its bracket carried — the trade-log stop — because the review's level
+    belongs to the position the analyst saw. Production EQIX 2026-10-02: the
+    adapted bracket's $969.95 stop was replaced hours later by the thesis
+    $1000 and tagged on Oct 8. Otherwise, and when the trade log has no usable
+    level, the thesis stop (the analyst's current view).
+    """
+    if position_opened_after(ticker, thesis_generated_at):
+        entry_stop = position_entry_stop(ticker)
+        if entry_stop:
+            return entry_stop
+    return thesis.get("stop_loss_price")
+
+
+def _ensure_protective_stop(
+    ticker: str,
+    position: dict[str, Any],
+    open_orders: list[dict[str, Any]],
+    stop_price: float,
+    cfg: Config,
+    *,
+    market_open: bool,
+) -> list[dict[str, Any]]:
+    """Place a GTC stop at ``stop_price`` for a whole-share position that has
+    no resting stop. Returns the (refreshed) open orders.
+
+    A bracket's exit legs are DAY orders on Alpaca (the API offers no GTC
+    bracket) and its stop leg is ``held`` — invisible to the open-orders
+    query — while the TP leg is live, so the first run after a fill sees
+    "TP leg but no stop" and the first run after the close sees nothing at
+    all. Either way the position needs a GTC stop of its own.
+    """
+    sell_orders = [o for o in open_orders if o.get("side") == "sell"]
+    tp_limit_orders = [o for o in sell_orders if o.get("type") == "limit"]
+    qty = float(position.get("qty", 0))
+    qty_available = float(position.get("qty_available", qty))
+    # The "place a fresh stop" path is fragile in three states
+    # we keep hitting in production:
+    #   1. Market closed: a cancel-and-replace sits in
+    #      pending_cancel for hours and 403s with code 40310000.
+    #   2. A TP limit leg from the original bracket is still
+    #      active and holding all the qty (qty_available=0)
+    #      while the stop leg sits in ``held`` and is not
+    #      returned by the open-orders query (Decision 060).
+    #   3. Both 1 and 2.
+    # The original code blindly tried to POST a stop and ate
+    # a 403 every time. Now we detect the state and either
+    # recover (market-open path) or defer cleanly (off-hours).
+    held_for_orders = float(position.get("held_for_orders", 0))
+
+    if qty_available <= 0 and tp_limit_orders:
+        # TP leg is holding all the qty. We need to cancel it
+        # before we can place a stop. Off-hours cancels won't
+        # settle, so defer. During market hours, cancel the TP
+        # and place a fresh stop (we lose the OCO link to TP,
+        # but the stop is the safety-critical leg — the next
+        # weekly ADJUST will reinstate a TP if appropriate).
+        if not market_open:
+            log.warning(
+                f"{ticker} has no stop; qty held by TP leg(s) — "
+                f"deferring stop placement to next market-open run"
+            )
+        else:
+            log.warning(
+                f"{ticker} has no stop; TP leg(s) hold all qty — "
+                f"cancelling TP and placing fresh stop"
+            )
+            # Capture TP details up front so we can restore on
+            # half-failure (cancel succeeded, place failed).
+            # Without this, a failed place would leave the
+            # position with NO exit orders at all (no stop,
+            # no TP). The cost of restore is small — we just
+            # re-post the same limit sell.
+            tp_snapshots = [
+                {
+                    "qty": float(tp.get("qty", 0)),
+                    "limit_price": float(tp.get("limit_price", 0)),
+                }
+                for tp in tp_limit_orders
+                if float(tp.get("limit_price", 0)) > 0
+                and float(tp.get("qty", 0)) > 0
+            ]
+            cancel_ok = True
+            for tp in tp_limit_orders:
+                try:
+                    cancel_order(tp["id"], cfg)
+                except Exception as cexc:
+                    log.error(
+                        f"Failed to cancel TP {tp.get('id')} for "
+                        f"{ticker}: {cexc}"
+                    )
+                    cancel_ok = False
+            if cancel_ok:
+                try:
+                    place_native_stop_loss(ticker, qty, stop_price, cfg)
+                    open_orders = get_open_orders(ticker, cfg)
+                except Exception as exc:
+                    log.error(
+                        f"Failed to place stop for {ticker} after "
+                        f"TP cancel: {exc}"
+                    )
+                    for snap in tp_snapshots:
+                        try:
+                            place_limit_sell(
+                                ticker,
+                                snap["qty"],
+                                snap["limit_price"],
+                                cfg,
+                                time_in_force="gtc",
+                            )
+                            log.warning(
+                                f"{ticker}: restored TP "
+                                f"{snap['qty']}@${snap['limit_price']:.2f} "
+                                f"after failed stop placement"
+                            )
+                        except Exception as rexc:
+                            log.error(
+                                f"CRITICAL: {ticker} has neither "
+                                f"stop nor TP — TP restore at "
+                                f"${snap['limit_price']:.2f} also "
+                                f"failed: {rexc}"
+                            )
+    elif qty_available <= 0:
+        # Qty is held but not by a recognizable TP leg —
+        # something unexpected. Don't blindly POST; surface
+        # the discrepancy.
+        log.error(
+            f"{ticker} has no stop and qty_available=0 "
+            f"(held_for_orders={held_for_orders}) but no TP "
+            f"leg detected — manual review needed"
+        )
+    elif not market_open:
+        log.warning(
+            f"{ticker} has no stop, market closed — deferring "
+            f"stop placement to next market-open run"
+        )
+    else:
+        log.warning(
+            f"No stop order found for {ticker} - placing native stop now"
+        )
+        try:
+            place_native_stop_loss(
+                ticker, qty_available, stop_price, cfg,
+            )
+            open_orders = get_open_orders(ticker, cfg)
+        except Exception as exc:
+            log.error(f"Failed to place stop for {ticker}: {exc}")
+    return open_orders
+
+
+def _ensure_coverage(
+    ticker: str,
+    thesis: dict[str, Any],
+    thesis_generated_at: str | None,
+    cfg: Config,
+    *,
+    market_open: bool,
+    position: dict[str, Any],
+    open_orders: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Make sure a held whole-share position carries a resting stop. No-op when
+    it already does, when it is fractional-only (the sentry protects dust), or
+    when no level is known. Returns the open orders, refreshed after a
+    placement."""
+    if open_orders is None:
+        open_orders = get_open_orders(ticker, cfg)
+    if _stop_orders(open_orders) or _is_fractional(float(position.get("qty", 0))):
+        return open_orders
+    stop_price = _coverage_stop_price(ticker, thesis, thesis_generated_at)
+    if not stop_price:
+        return open_orders
+    return _ensure_protective_stop(
+        ticker, position, open_orders, float(stop_price), cfg,
+        market_open=market_open,
+    )
+
+
+def ensure_stop_coverage(cfg: Config) -> int:
+    """Gap-check companion (Decision 060): put a GTC stop on every held
+    whole-share overlay position that has none on the book.
+
+    A bracket that fills after the pre-close run leaves DAY legs that expire
+    at the close, so without this the position sits bare from the open until
+    the 14:15 UTC execute run (production FCX Oct 5, EQIX Oct 12). Orphans
+    (no thesis) are closed by the next execute run; the core allocation
+    carries no stop by design. Returns the number of stops placed.
+    """
+    thesis_doc = _load("weekly_thesis.json")
+    theses = {t.get("ticker"): t for t in thesis_doc.get("theses", []) or []}
+    generated_at = thesis_doc.get("generated_at")
+    market_open = is_market_open(cfg)
+    placed = 0
+    for position in get_positions(cfg):
+        ticker = position.get("symbol", "")
+        thesis = theses.get(ticker)
+        if not thesis or _is_core_ticker(ticker, cfg):
+            continue
+        before = get_open_orders(ticker, cfg)
+        if _stop_orders(before) or _is_fractional(float(position.get("qty", 0))):
+            continue
+        after = _ensure_coverage(
+            ticker, thesis, generated_at, cfg,
+            market_open=market_open, position=position, open_orders=before,
+        )
+        if _stop_orders(after):
+            placed += 1
+    if placed:
+        log.warning(f"Stop coverage: placed {placed} missing stop(s) before the execute run")
+    return placed
+
+
 def _manage_held_bullish(
     ticker: str,
     thesis: dict[str, Any],
@@ -132,6 +357,7 @@ def _manage_held_bullish(
     data_bundle: dict[str, Any],
     sentry: dict[str, Any] | None,
     portfolio_value: float,
+    thesis_generated_at: str | None = None,
 ) -> list[dict[str, Any]]:
     """Held BULLISH position: ensure a protective stop, ratchet the trailing
     stop, and consider pyramiding. Returns any trades produced (pyramid adds).
@@ -142,136 +368,17 @@ def _manage_held_bullish(
         return trades
 
     open_orders = get_open_orders(ticker, cfg)
-    sell_orders = [o for o in open_orders if o.get("side") == "sell"]
-    stop_orders = [
-        o for o in sell_orders
-        if o.get("type") in ("stop", "stop_limit")
-    ]
-    tp_limit_orders = [
-        o for o in sell_orders if o.get("type") == "limit"
-    ]
-    has_stop = bool(stop_orders)
-
     qty = float(position.get("qty", 0))
-    qty_available = float(position.get("qty_available", qty))
     fractional = _is_fractional(qty)
 
-    if not has_stop and not fractional:
-        stop_price = thesis.get("stop_loss_price")
-        if stop_price:
-            # The "place a fresh stop" path is fragile in three states
-            # we keep hitting in production:
-            #   1. Market closed: a cancel-and-replace sits in
-            #      pending_cancel for hours and 403s with code 40310000.
-            #   2. A TP limit leg from the original bracket is still
-            #      active and holding all the qty (qty_available=0)
-            #      because the stop_loss leg auto-expired end-of-day
-            #      (bracket legs inherit TIF=day) but the TP didn't.
-            #   3. Both 1 and 2.
-            # The original code blindly tried to POST a stop and ate
-            # a 403 every time. Now we detect the state and either
-            # recover (market-open path) or defer cleanly (off-hours).
-            held_for_orders = float(position.get("held_for_orders", 0))
-
-            if qty_available <= 0 and tp_limit_orders:
-                # TP leg is holding all the qty. We need to cancel it
-                # before we can place a stop. Off-hours cancels won't
-                # settle, so defer. During market hours, cancel the TP
-                # and place a fresh stop (we lose the OCO link to TP,
-                # but the stop is the safety-critical leg — the next
-                # weekly ADJUST will reinstate a TP if appropriate).
-                if not market_open:
-                    log.warning(
-                        f"{ticker} has no stop; qty held by TP leg(s) — "
-                        f"deferring stop placement to next market-open run"
-                    )
-                else:
-                    log.warning(
-                        f"{ticker} has no stop; TP leg(s) hold all qty — "
-                        f"cancelling TP and placing fresh stop"
-                    )
-                    # Capture TP details up front so we can restore on
-                    # half-failure (cancel succeeded, place failed).
-                    # Without this, a failed place would leave the
-                    # position with NO exit orders at all (no stop,
-                    # no TP). The cost of restore is small — we just
-                    # re-post the same limit sell.
-                    tp_snapshots = [
-                        {
-                            "qty": float(tp.get("qty", 0)),
-                            "limit_price": float(tp.get("limit_price", 0)),
-                        }
-                        for tp in tp_limit_orders
-                        if float(tp.get("limit_price", 0)) > 0
-                        and float(tp.get("qty", 0)) > 0
-                    ]
-                    cancel_ok = True
-                    for tp in tp_limit_orders:
-                        try:
-                            cancel_order(tp["id"], cfg)
-                        except Exception as cexc:
-                            log.error(
-                                f"Failed to cancel TP {tp.get('id')} for "
-                                f"{ticker}: {cexc}"
-                            )
-                            cancel_ok = False
-                    if cancel_ok:
-                        try:
-                            place_native_stop_loss(ticker, qty, stop_price, cfg)
-                            open_orders = get_open_orders(ticker, cfg)
-                        except Exception as exc:
-                            log.error(
-                                f"Failed to place stop for {ticker} after "
-                                f"TP cancel: {exc}"
-                            )
-                            for snap in tp_snapshots:
-                                try:
-                                    place_limit_sell(
-                                        ticker,
-                                        snap["qty"],
-                                        snap["limit_price"],
-                                        cfg,
-                                        time_in_force="gtc",
-                                    )
-                                    log.warning(
-                                        f"{ticker}: restored TP "
-                                        f"{snap['qty']}@${snap['limit_price']:.2f} "
-                                        f"after failed stop placement"
-                                    )
-                                except Exception as rexc:
-                                    log.error(
-                                        f"CRITICAL: {ticker} has neither "
-                                        f"stop nor TP — TP restore at "
-                                        f"${snap['limit_price']:.2f} also "
-                                        f"failed: {rexc}"
-                                    )
-            elif qty_available <= 0:
-                # Qty is held but not by a recognizable TP leg —
-                # something unexpected. Don't blindly POST; surface
-                # the discrepancy.
-                log.error(
-                    f"{ticker} has no stop and qty_available=0 "
-                    f"(held_for_orders={held_for_orders}) but no TP "
-                    f"leg detected — manual review needed"
-                )
-            elif not market_open:
-                log.warning(
-                    f"{ticker} has no stop, market closed — deferring "
-                    f"stop placement to next market-open run"
-                )
-            else:
-                log.warning(
-                    f"No stop order found for {ticker} - placing native stop now"
-                )
-                try:
-                    place_native_stop_loss(
-                        ticker, qty_available, stop_price, cfg,
-                    )
-                    open_orders = get_open_orders(ticker, cfg)
-                except Exception as exc:
-                    log.error(f"Failed to place stop for {ticker}: {exc}")
-    elif not has_stop and fractional:
+    if fractional and not _stop_orders(open_orders):
         log.info(f"Fractional position {ticker} ({qty} shares) — no broker stop (sentry protects)")
+    # Decision 060: a bare whole-share position gets its stop back here — at
+    # the entry-time level when the position is newer than the review.
+    open_orders = _ensure_coverage(
+        ticker, thesis, thesis_generated_at, cfg,
+        market_open=market_open, position=position, open_orders=open_orders,
+    )
 
     # Trailing stop: ratchet the stop up as the position gains
     # (whole shares only). Skipped off-hours for the same reason as
@@ -674,6 +781,15 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                         f"weekly review was generated — its levels don't apply "
                         f"to this position. Keeping the entry-time stop."
                     )
+                    # Decision 060: still make sure that level is ON the book.
+                    # The re-opened position's bracket legs are DAY orders and
+                    # die at the close — production FCX sat without a stop
+                    # from Fri Oct 2 20:00 to Mon Oct 5 14:15 UTC because
+                    # this branch skipped every check.
+                    _ensure_coverage(
+                        ticker, thesis, thesis_doc.get("generated_at"), cfg,
+                        market_open=market_open, position=position,
+                    )
                     continue
                 qty = float(position.get("qty", 0))
                 new_stop = thesis.get("stop_loss_price")
@@ -795,6 +911,7 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                 ticker, thesis, cfg, market_open=market_open,
                 data_bundle=data_bundle, sentry=sentry,
                 portfolio_value=portfolio_value,
+                thesis_generated_at=thesis_doc.get("generated_at"),
             ))
     # Clean up trailing state for tickers no longer held
     try:

@@ -101,13 +101,14 @@ def main() -> None:
 
     if command == "gapcheck":
         from titantrade.config import load_config
-        from titantrade.executor import check_gap_down_protection
+        from titantrade.executor import check_gap_down_protection, ensure_stop_coverage
 
         cfg = load_config()
         trades = check_gap_down_protection(cfg)
         print(f"Gap-down protection: {len(trades)} positions closed")
         for t in trades:
             print(f"  SELL {t.get('shares', '?'):>5} {t['ticker']:<6} @ ${t.get('price', 0):.2f}")
+        print(f"Stop coverage: {ensure_stop_coverage(cfg)} missing stop(s) placed")
         return
 
     if command == "resubmit":
