@@ -2,90 +2,33 @@
 
 ## Local Development
 
-### Prerequisites
-- Python 3.12+
-- uv (package manager)
-- API keys for: Alpaca, Anthropic (Claude), Google (Gemini), FRED (free), Finnhub (free)
+**Prerequisites**: Python 3.12+, `uv`, API keys for Alpaca (paper), Anthropic (Claude), and optionally FRED and Finnhub (free).
 
-### Setup
-
-1. Clone the repository:
 ```bash
-git clone https://github.com/your-username/TitanTrade.git
 cd TitanTrade
-```
-
-2. Install dependencies:
-```bash
 uv sync
+cp .env.example .env            # fill in the keys
+uv run python -m titantrade fetch
+uv run python -m titantrade signals
+uv run python -m titantrade execute   # paper mode by default
+uv run --extra test python -m pytest tests/ -q
 ```
-
-3. Create environment file:
-```bash
-cp .env.example .env
-# Edit .env with your API keys
-```
-
-4. Run modules individually:
-```bash
-# Fetch data
-uv run python -m titantrade.data_fetcher
-
-# Run weekly analysis
-uv run python -m titantrade.weekly_analyst
-
-# Run daily sentry
-uv run python -m titantrade.daily_sentry
-
-# Execute trades (paper mode)
-uv run python -m titantrade.executor
-```
-
----
 
 ## Server Deployment (Docker)
 
-### Prerequisites
-- Docker and Docker Compose installed on your server
-- API keys for all services (see Environment Variables below)
-- Cloudflare tunnel token (see `CLOUDFLARE_TUNNEL_TOKEN` in Environment Variables)
+Production runs on `titanserver` in `/home/TitanTrade/TitanTrade` (repo `TitanFox13/TitanTrade` on GitHub).
 
-### Setup
+**Prerequisites**: Docker + Compose, `.env` with the keys below and `CLOUDFLARE_TUNNEL_TOKEN`.
 
-1. Clone and navigate to the project:
 ```bash
-cd /path/to/TitanTrade
-```
-
-2. Create environment file:
-```bash
-cp .env.example .env
-# Edit .env with your API keys and CLOUDFLARE_TUNNEL_TOKEN
-```
-
-3. Ensure state files exist:
-```bash
-# state/portfolio.json and state/trade_log.json should already be present
-ls state/
-```
-
-4. Build the container:
-```bash
+cd /home/TitanTrade/TitanTrade
+cp .env.example .env            # first time only
 docker compose build
-```
-
-5. Start the always-on services (API + tunnel):
-```bash
 docker compose up -d api cloudflared
+curl https://trade.praguefun.cz/api/health     # {"status": "ok"}
 ```
 
-6. Verify the API is reachable:
-```bash
-curl https://trade.praguefun.cz/api/health
-# Expected: {"status": "ok"}
-```
-
-### Updating (redeploy after code changes)
+### Updating (every code change)
 
 ```bash
 git pull
@@ -93,108 +36,57 @@ docker compose build api titantrade   # BOTH images
 docker compose up -d api
 ```
 
-The `api` and `titantrade` images drift independently: `api` runs the always-on
-server + built-in scheduler, `titantrade` runs one-off CLI commands. A deploy
-that only rebuilds `api` leaves `docker compose run titantrade ...` silently on
-stale code — this happened in production, where the CLI image ran a month-old
-build (predating the `benchmark` command) until the Decision 054 checkup
-caught it. Rebuild both, every time.
-
-### Running CLI Commands
-
-Cron jobs use the `titantrade` service which runs one-off commands:
+The `api` and `titantrade` images drift independently: `api` runs the server + scheduler, `titantrade` runs one-off CLI commands. Rebuilding only `api` leaves `docker compose run titantrade …` on stale code (this happened in production). Verify the CLI image through its entrypoint — a bare `/app/.venv/bin/python` inside it cannot import the package:
 
 ```bash
-docker compose run --rm titantrade fetch      # Fetch data bundle
-docker compose run --rm titantrade analyze    # Run weekly Claude analysis
-docker compose run --rm titantrade sentry     # Run daily sentry check
-docker compose run --rm titantrade execute    # Execute trades
-docker compose run --rm titantrade full       # Full pipeline: fetch -> signals -> execute (Decision 061)
+docker run --rm --env-file .env --entrypoint uv titantrade-titantrade run python -c "import titantrade.executor"
 ```
 
-### Scheduling (built-in APScheduler — no host cron needed)
+### Running CLI commands
 
-All jobs run inside the always-on `api` container via APScheduler
-(Decision 028), defined in `data/schedule.json` and interpreted in
-**America/New_York** so wall-clock times track US DST (Decision 039):
+```bash
+docker compose run --rm titantrade fetch
+docker compose run --rm titantrade signals
+docker compose run --rm titantrade execute
+docker compose run --rm titantrade full
+docker compose run --rm titantrade benchmark 30
+```
+
+Or trigger a scheduler job inside the running API container:
+
+```bash
+docker exec titantrade-api-1 /app/.venv/bin/python -c "import urllib.request; print(urllib.request.urlopen(urllib.request.Request('http://localhost:8000/api/scheduler/weekday_execute_morning/trigger', method='POST')).read())"
+```
+
+### Scheduling (built-in APScheduler)
+
+All jobs run inside the `api` container (Decision 028), from `data/schedule.json`, interpreted in **America/New_York** (Decision 039):
 
 | Job | Time (ET) | Command |
 |-----|-----------|---------|
-| `weekday_fetch` | 09:00 Mon-Fri | fetch (refresh data bundle incl. sector breadth) |
-| `weekday_gapcheck` | 09:35 Mon-Fri | gapcheck + stop coverage (Decision 060) |
-| `weekday_execute_morning` | 10:15 Mon-Fri | execute (= mechanical signals → execute, Decision 061) |
-| `weekday_execute_preclose` | 15:30 Mon-Fri | execute (= mechanical signals → execute) |
-| `daily_summary` | 16:30 Mon-Fri | Discord daily summary (+ benchmark refresh; SPY bars from SIP and the equity close from the 15Min history so the just-closed session is included, Decisions 058/059) |
-| `sunday_full` | 16:00 Sun | full pipeline (fetch → signals → execute) |
-| `monthly_curate` | 15:00 first Sunday | curate (LLM universe proposal + post-mortem; no orders) |
+| `weekday_fetch` | 09:00 Mon–Fri | fetch |
+| `weekday_gapcheck` | 09:35 Mon–Fri | gapcheck + stop coverage (060) |
+| `weekday_execute_morning` | 10:15 Mon–Fri | signals + execute |
+| `weekday_execute_preclose` | 15:30 Mon–Fri | signals + execute |
+| `daily_summary` | 16:30 Mon–Fri | Discord summary + benchmark refresh (058/059) |
+| `sunday_full` | 16:00 Sun | fetch → signals → execute |
+| `monthly_curate` | 15:00 first Sunday | Claude universe proposal + post-mortem (no orders) |
 
-Manage via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`,
-`PUT /api/scheduler/{id}/enabled`, or the Flutter Scheduler screen.
-Host-level cron (`docker compose run --rm titantrade <cmd>` lines) remains a
-documented fallback but is not used in production.
+Manage via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/scheduler/{id}/enabled`.
 
-### Docker Services
+### Docker services
 
-| Service | Role | Always-on? |
+| Service | Role | Always on |
 |---------|------|-----------|
-| `api` | FastAPI HTTP server — serves state files to Flutter app | Yes (`restart: unless-stopped`) |
-| `cloudflared` | Cloudflare tunnel — exposes `api:8000` at `trade.praguefun.cz` | Yes (`restart: unless-stopped`) |
-| `titantrade` | CLI runner — used for cron jobs | No (one-off) |
+| `api` | FastAPI + APScheduler | yes (`restart: unless-stopped`) |
+| `cloudflared` | Tunnel exposing `api:8000` at `trade.praguefun.cz` | yes |
+| `titantrade` | CLI runner | no (one-off) |
 
-- **Volumes**: `./state` and `./logs` bind-mounted so API and CLI share the same files
-- **Config**: `data/watchlist.json` is baked into the image (rebuild after changes)
+Volumes: `./state` and `./logs` on both; `./data` on `api` (watchlist edits through the API persist on the host). The `titantrade` image copies `data/` at build time — rebuild after watchlist or schedule changes. `legacy/` and `scripts/` are not copied.
 
-### Rebuilding After Changes
-
-```bash
-# After code or watchlist changes
-docker compose build
-docker compose up -d api  # Restart API with new image
-
-# After .env changes — no rebuild needed
-docker compose up -d api cloudflared
-```
-
----
-
-## GitHub Actions Deployment (Alternative)
-
-### Repository Secrets
-
-Add these secrets in GitHub Settings > Secrets and variables > Actions:
-
-| Secret Name | Description |
-|-------------|-------------|
-| `ALPACA_KEY` | Alpaca API Key ID |
-| `ALPACA_SECRET` | Alpaca API Secret Key |
-| `FRED_KEY` | FRED API key (free — VIX/treasury/econ calendar) |
-| `FINNHUB_KEY` | Finnhub API key (free — earnings/analyst/sector) |
-| `SEC_USER_AGENT` | User-Agent string for SEC EDGAR (with contact email) |
-| `CLAUDE_KEY` | Anthropic Claude API Key |
-| `GEMINI_KEY` | Google Gemini API Key |
-
-### Workflow Files
-
-#### Weekly Analyst (`.github/workflows/weekly_run.yml`)
-- **Schedule**: Sundays at 20:00 UTC
-- **Steps**: Fetch data -> Run Claude analysis -> Save thesis -> Commit state
-
-#### Daily Sentry (`.github/workflows/daily_run.yml`)
-- **Schedule**: Weekdays at 14:00 UTC (09:00 EST) and 20:30 UTC (15:30 EST)
-- **Steps**: Fetch news -> Compare vs thesis -> Execute if needed -> Commit state
-
-### State Persistence via Git
-
-After each run, GitHub Actions commits updated state files back to the repo:
-```yaml
-- name: Commit state changes
-  run: |
-    git config user.name "TitanTrade Bot"
-    git config user.email "bot@titantrade.dev"
-    git add state/
-    git commit -m "Update state: $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
-    git push
-```
+### Housekeeping on titanserver
+- Never `docker image prune -a` (it removes the base images the compose build relies on); `docker builder prune` and removing dangling images are fine.
+- Six dangling PostgreSQL volumes and the build cache were pending cleanup at the October 2026 checkup; they belong to retired services and need the operator's go.
 
 ---
 
@@ -202,39 +94,23 @@ After each run, GitHub Actions commits updated state files back to the repo:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ALPACA_PAPER_KEY` / `ALPACA_PAPER_SECRET` | Yes | Alpaca paper credentials (`ALPACA_KEY`/`ALPACA_SECRET` accepted as legacy fallback) |
-| `ALPACA_LIVE_KEY` / `ALPACA_LIVE_SECRET` | No | Alpaca live credentials (required only to enable live mode) |
-| `CLAUDE_KEY` | Yes | Anthropic Claude API Key |
-| `CLAUDE_MODEL` | No | Model override (default: `claude-opus-4-8`) |
-| `GEMINI_KEY` | Yes | Google Gemini API Key |
-| `GEMINI_MODEL` | No | Model override (default: `gemini-3.1-flash-lite`) |
-| `FRED_KEY` | Recommended | FRED key (free) — VIX/treasury/econ calendar; gates fail open without it |
-| `FINNHUB_KEY` | Recommended | Finnhub key (free) — earnings/analyst/sector; gates fail open without it |
-| `SEC_USER_AGENT` | No | User-Agent for SEC EDGAR (e.g. `TitanTrade/1.0 (you@example.com)`) |
-| `DISCORD_WEBHOOK_URL` | No | Discord notifications (job alerts + daily summary); no-op if unset |
-| `DATA_PROVIDER` | No | `native` (default: Alpaca+FRED+Finnhub) or `fmp` (legacy, needs `FMP_KEY`) |
-| `FMP_KEY` | No | Only used when `DATA_PROVIDER=fmp` |
-| `CLOUDFLARE_TUNNEL_TOKEN` | Docker only | Cloudflare tunnel for trade.praguefun.cz |
-| `TRADING_MODE` | No | Override watchlist setting (paper/live) |
-| `LOG_LEVEL` | No | Logging level (default: INFO) |
+| `ALPACA_PAPER_KEY` / `ALPACA_PAPER_SECRET` | Yes | Paper credentials (`ALPACA_KEY` / `ALPACA_SECRET` accepted as a legacy fallback) |
+| `ALPACA_LIVE_KEY` / `ALPACA_LIVE_SECRET` | No | Live credentials — required only to enable live mode |
+| `ALPACA_BASE_URL` | No | Override the trading endpoint (defaults by mode) |
+| `CLAUDE_KEY` | Yes | Anthropic key (curator) |
+| `CLAUDE_MODEL` | No | Default `claude-opus-4-8` |
+| `FRED_KEY` | Recommended | Macro calendar; the macro gate fails open without it |
+| `FINNHUB_KEY` | Recommended | Earnings + sectors; the earnings gate fails open without it |
+| `DISCORD_WEBHOOK_URL` | No | Job alerts + daily summary; no-op if unset |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Docker | Tunnel for trade.praguefun.cz |
+| `TRADING_MODE` | No | Overrides `settings.trading_mode` (paper / live) |
+| `LOG_LEVEL` | No | Default INFO |
 
 ---
 
 ## Monitoring
 
-### Log Files
-- `logs/analyst_YYYY-MM-DD.json` - Weekly analyst decisions
-- `logs/sentry_YYYY-MM-DD.json` - Daily sentry signals
-- `logs/executor_YYYY-MM-DD.json` - Trade execution logs
-- `logs/errors_YYYY-MM-DD.json` - Error and retry logs
-
-### Health Checks
-- Check GitHub Actions run history for failures
-- Monitor `state/portfolio.json` for unexpected changes
-- Review `state/trade_log.json` for trade patterns
-
-### Alerts (Discord, live)
-- Per-job completion/failure embeds + daily portfolio summary at 16:30 ET
-- Webhook posts retry transient failures (network error, 429, 5xx) twice with 1 s / 2 s backoff (Decision 058)
-- Observability alerts: sentry degraded (>30% fallback), stuck-in-cash (≥70% for 3+ days), ticker churn (2+ round-trips/7d), split-suspected gap, suspect broker data, cooldown overrides
-- Configure via the single optional `DISCORD_WEBHOOK_URL` env var
+- **Logs**: `logs/` (bind-mounted); `docker compose logs api` for the scheduler. Grep `ERROR|CRITICAL|Traceback` at each checkup; expected WARNINGs are documented in the checkup notes of `docs/decisions.md`.
+- **Discord**: per-job completion / failure embeds; the 16:30 ET daily summary (equity, positions, the plan, benchmark line); observability alerts (stuck in cash, churn, suspect data, split-suspect gap, cooldown override, core rebalance).
+- **API**: `/api/health`, `/api/scheduler` (last result per job), `/api/plan`, `/api/benchmark`.
+- **Checkup routine** (every 1–2 weeks): log sweep → scheduler job results → open positions all stop-covered → `compute_benchmark` over the clean window vs SPY → record in `docs/decisions.md` and `docs/todo.md`.

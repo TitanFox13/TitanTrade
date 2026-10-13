@@ -1,110 +1,32 @@
-# Agent Instructions
+# Agent Instructions — the Curator
 
-## Overview
-
-TitanTrade uses two AI agents in a layered architecture. They have distinct roles,
-models, and cadences — chosen to match the complexity and latency requirements of each task.
+Since Decision 061 the LLM is out of the trading loop. One Claude job remains, and it cannot touch an order.
 
 | Agent | Model | Cadence | Task |
 |-------|-------|---------|------|
-| The Analyst | Claude Opus 4.8 (adaptive thinking) | Weekly (Sunday 16:00 ET) | Deep two-pass portfolio analysis |
-| The Sentry | Gemini Flash Lite (3.1) | Daily (10:15 + 15:30 ET) | Fast binary conflict detection |
+| The Curator | Claude Opus 4.8 (`CLAUDE_MODEL`, adaptive thinking) | First Sunday of the month, 15:00 ET (`monthly_curate`) | Universe-curation proposal + plain-language post-mortem |
 
-The Analyst sets the thesis. The Sentry watches it. They never talk to each other — their
-outputs are chained via state files (`weekly_thesis.json` → `sentry_signals.json`).
-
-For detailed prompt engineering, input schemas, and output schemas, see:
-- [TitanTrade/docs/agent_instructions.md](../TitanTrade/docs/agent_instructions.md)
+Why this split: the October 2026 audit (Decision 060, Evidence 2–3) found that the analyst's selection, direction and confidence outputs carried no signal at the horizon the system trades, while the operator's universe and the mechanical layer produced the return. Universe curation is the one place where the LLM's breadth of knowledge is still worth a monthly call.
 
 ---
 
-## The Analyst (Claude)
+## Universe proposal (`curator.run_universe_review`)
 
-### What it does
+**Input** (`build_universe_prompt`): the current watchlist with a brief per name — sector, dip state from the data bundle (close vs lookback high and trend SMA), ATR, 90-day trade statistics from the trade log (entries, exits, wins), and, on the scheduled run, recent headlines and the analyst-recommendation mix fetched at prompt time (`enrich=True`).
 
-Two-pass weekly pipeline running every Sunday before Monday market open:
+**Prompt constraints**: at most 2 removals and 2 additions, each with a one-line reason; liquid US large caps only; JSON only — `{"remove": [{"ticker", "reason"}], "add": [{"ticker", "sector", "reason"}], "notes"}`.
 
-- **Pass 1**: Analyzes each stock individually with full data (OHLCV, indicators, news,
-  SEC filings, market context, earnings calendar, performance history). Produces a per-stock
-  thesis with entry/stop/take-profit levels and a thesis breach condition.
+**Output**: `state/universe_proposal.json` (`generated_at`, `watchlist`, `proposal`, `raw`, `status: "advisory — apply through the watchlist editor"`), a Discord embed, and `GET /api/universe-proposal`. The operator applies accepted changes with `PUT /api/watchlist`; nothing is applied automatically.
 
-- **Pass 2**: Sees all watchlist theses simultaneously. Applies portfolio-level thinking —
-  sector diversification, correlation, market regime — and selects the top 3-5 trades.
+## Post-mortem (`curator.run_post_mortem`)
 
-### Why two passes?
+**Input** (`build_post_mortem_prompt`): the last 90 days of trade records (ticker, action, trigger, price, timestamp, reasoning).
 
-Pass 1 in isolation prevents anchoring bias (AAPL's strong thesis doesn't inflate MSFT's).
-Pass 2 adds portfolio-level reasoning that per-stock analysis structurally cannot provide.
-Separating concerns produces better output than a single mega-prompt.
+**Output**: `state/post_mortem.json` (`generated_at`, `review: {summary, observations}`, `raw`), `GET /api/post-mortem`.
 
-### Core constraints
+## Plumbing
 
-- In bearish/crisis regimes: select 0-2 trades only
-- Max 2 picks from the same sector
-- Minimum 2:1 reward-to-risk on every pick
-- Confidence must be calibrated against past performance
-- Only use >0.85 confidence with exceptional conviction
-
----
-
-## The Sentry (Gemini Flash)
-
-### What it does
-
-Three-layer conflict detection running twice daily on active positions:
-
-- **Layer 1 — Market-wide** (no AI): SPY drop >2% flags all positions as "market stress"
-- **Layer 2 — Price-based** (no AI): graduated — a >=5% adverse move is a hard ABORT regardless of news; a 3–5% move ABORTs only when Layer 3 corroborates it (conflicting headlines or market stress), otherwise it is logged as noise and the broker-side stop stays the protection (Decisions 045, 057)
-- **Layer 3 — News-based** (Gemini Flash): Compare today's headlines vs the thesis breach condition
-
-Layer 2's >=5% tier is a hard programmatic override — even if Gemini says CONTINUE, a catastrophic
-move forces ABORT. Price doesn't lie. The 3–5% tier is deliberately softer: single-stock moves of
-that size happen constantly in normal volatility, and aborting on them was measured as the dominant
-churn cost (Decisions 045, 057). Gemini's `price_concern` flag does not count as corroboration — the
-prompt shows it the price alert, so the flag would confirm the move with itself.
-
-### Why three layers?
-
-News is lagging: a stock drops 5% before the headline appears. Price catches what news misses
-(insider selling, block trades). The market-wide layer catches correlated risk that per-stock
-analysis misses. Each layer is independent — if one fails, others still protect.
-
----
-
-## Decision Matrix
-
-| Weekly Thesis | Selected by Pass 2? | Sentry Signal | Action |
-|--------------|---------------------|---------------|--------|
-| BULLISH | Yes | CONTINUE | Buy bracket order (if all 9 risk gates pass) |
-| BULLISH | Yes | ABORT | Sell at market + cancel all orders |
-| BULLISH | No | * | No action (filtered out) |
-| BEARISH (holding) | * | * | Sell at market (thesis flipped) |
-| BEARISH (not holding) | * | * | No action |
-| NEUTRAL | * | * | No action |
-
----
-
-## Risk Gates (ALL must pass before any BUY)
-
-These are programmatic — the AI cannot override them.
-
-1. Confidence >= 0.55 (floor; conviction scales sizing 0.40x-2.50x, not selection)
-2. Not within 2 days of earnings
-3. Portfolio drawdown < 8% from peak (values ±50% off peak are treated as broker data glitches — block + alert, Decision 054)
-4. Cash reserve >= 5% after trade, net of pending buy commitments (cash re-read from the broker after each executed entry in the run, Decision 058)
-5. Position size valid (ATR-adjusted, max 25%, and >= $500 notional — dust blocked, Decision 054)
-6. Sector exposure < 50% after trade
-7. No high-impact macro event (FOMC/NFP/CPI/core PCE/GDP) within 6 hours
-8. Average correlation with held positions < 75%
-9. Total overlay (AI picks) <= 70% of portfolio
-
----
-
-## Logging
-
-Every AI decision logs:
-- Timestamp (ISO 8601), agent name, ticker, decision, full reasoning, confidence score
-- Additional signals: price move %, SPY change %, conflicting headlines
-
-Every blocked trade logs:
-- Which gate(s) blocked it, the blocking reason, the thesis that was blocked
+- `_call_claude(system, user, cfg, cost_label)` is the only Claude client; every call is logged to `state/costs.json` with `run_type: "curator"`.
+- `_extract_json` tolerates prose around the JSON object and markdown fences.
+- A failed call fails the job (Discord failure embed) and leaves the previous proposal in place; the trading loop does not depend on it.
+- Tests mock `titantrade.curator._call_claude`; no real tokens are spent.

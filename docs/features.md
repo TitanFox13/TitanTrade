@@ -1,359 +1,127 @@
 # TitanTrade Features
 
-## Strategy — mechanical (Decision 061)
+## Strategy (Decisions 061–063)
 
-Since 2026-10-13 every trading decision is a rule on prices; the LLMs are out of the loop.
+Every trading decision is a rule on prices; parameters are the Decision 062 plateau, read from `data/watchlist.json` → `settings.mechanical` at every run.
 
-- **Entry** (parameters per Decision 062): a watchlist name closes ≥ 8% below its 90-day high while above its 150-day SMA. Candidates ranked deepest dip first fill the free slots (3 × 25% of equity, flat sizing; the 70% overlay cap trims the third). The entry is a near-market two-tranche bracket through the unchanged nine gates, with a −12% stop and a +20% target.
-- **Exits**: the GTC stop-limit (−12%), the +20% target and the 60-trading-day holding limit, the latter two evaluated at every executor run. Nothing else sells a position.
-- **Core**: SPY is the residual — exposure scale × 95% − overlay — so the account is fully invested unless slots are in use.
-- **Insurance**: two-signal confirmation; exposure halves only while SPY is below its 200-day SMA *and* fewer than half of the 11 sector ETFs are above theirs. New entries pause while risk-off; held positions keep their exits.
-- **Signals snapshot**: `state/signals.json` / `GET /api/signals` — insurance state, ranked candidates, slots, legacy positions awaiting close.
-- **Backtester**: `backtest-mech` runs the same rule code on daily closes with next-close fills, costs and walk-forward; the parameter search is the operator's next phase.
-- **The LLM's jobs now**: a monthly universe-curation proposal and a post-mortem (`curate`), both advisory.
-
-## AI Features (legacy — `strategy: "llm"`, unscheduled since Decision 061)
-
-### Two-Pass Weekly Analysis (Claude Opus 4.8, adaptive thinking)
-- Runs on `claude-opus-4-8` with adaptive thinking — the most capable model on the strategy's alpha source (Decision 050; replaced the retired `claude-sonnet-4-20250514`)
-- **Pass 1**: Deep per-stock analysis with fundamentals, technicals, news, and filings
-- **Pass 2**: Portfolio-aware ranking that selects top 3-5 diversified trades
-- Market context (SPY, VIX, sector rotation) injected into every analysis
-- Performance feedback loop: Claude sees its last 4 weeks of results
-- Confidence calibration: tracks if 0.80 confidence actually wins 80%
-
-### Three-Layer Daily Sentry (Gemini Flash)
-- **Layer 1 - Market-wide**: SPY drop >2% flags ALL positions
-- **Layer 2 - Price-based**: graduated severity — >=5% adverse always ABORTs; 3-5% ABORTs only when Gemini corroborates with conflicting headlines or market stress — its `price_concern` flag doesn't count, it merely echoes the price alert (Decisions 045, 057)
-- **Layer 3 - News-based**: Gemini Flash checks headlines vs thesis breach conditions
-- Decision asymmetry (Decision 034): false ABORTs cost money, false CONTINUEs are caught by the broker-side stop — news-only ABORTs without price confirmation are downgraded
-- Truncated JSON repair: salvages Gemini responses that hit token limits mid-output
-- SPY change computed from price/previousClose fallback when API field missing
-- Regime-aware reviews: inverse ETF positions get explicit warnings in non-bearish regimes
-- Hardened retry policy: 5 attempts, jitter, 429 + `Retry-After` support, 60s timeout for AI endpoints
-- Free SEC EDGAR for 8-K/10-Q/10-K/Form 4 filings (replaces paid SEC-API.io)
-- `HTTPError` exception preserves broker response bodies (e.g. Alpaca error codes) for diagnostics
-- Stop-loss placement is idempotent and survives Alpaca cancel races by
-  polling the specific blocking order's `status` (from `related_orders`)
-  until terminal — deterministic, replaces the lossy `qty_available` poll
-- Market-hours-aware execution: ADJUST, orphan-close, and trailing-stop
-  adjustments defer to the next market-open run rather than getting stuck
-  in `pending_cancel` for hours
-- Bracket math sanity check refuses invalid (stop >= entry) brackets before
-  the broker rejects them — happens when ADJUSTed thesis is reused for a
-  new entry
-- Graduated price-ABORT severity: 3-5% needs Gemini news confirmation
-  (conflicting headlines or market stress — Decision 057), >=5% always aborts.
-  Reduces noise-driven churn in normal volatility.
-- 72-hour re-entry cooldown after every ABORT — prevents the "sell low,
-  buy higher" cycles previously observed in production. The 24h+ sentry-
-  confirmed override needs the price ≥ 1% above the thesis stop AND ≥ 1%
-  above the price we exited at (Decision 059) — a re-buy at the exit price
-  is the whipsaw, not a recovery
-- High-impact-only macro blackout (FOMC, NFP, CPI, core PCE, GDP); 6h
-  window instead of 24h; minor indicators no longer block trading
-- Pass 2 target trade count scales with market regime (6 in strong_bullish
-  down to 1 in crisis); the confidence-scaled sizing now correctly uses
-  Pass-2's `adjusted_confidence`
-- Bracket resubmission gives up after 20 chasing attempts on the same
-  ticker (raised from 5 once trend-aware entries replaced dip-buys);
-  resumes only after the next weekly thesis refresh
-- Sentry price-move check references the actual broker
-  `avg_entry_price` for held positions, not the stale thesis target
-- Narrower 2-day earnings blackout (was 5 days)
-- Append-only state files auto-archive to `state/archive/` when they grow
-  past 500 trades / 200 near-misses
-- Discord alerts for "stuck in cash >70% for 3+ days" and
-  "ticker round-tripped 2+ times in 7 days"
-- Sentry skips tickers that aren't selected for trading — no API calls for closed positions
-- Sentry records fallback ratio and fires a Discord alert when Gemini coverage degrades (>30% of checks fall back)
-- Flutter dashboard shows sentry health badge (green healthy / orange degraded) from the same signal
-- ADJUST flow restores the previous stop on failure so held positions are never unprotected
-- Gemini structured output (`responseMimeType: application/json` + schema) + thinking disabled — valid JSON guaranteed, ~10× fewer tokens per sentry check
-- Backtest (`python -m titantrade backtest`) mirrors the live strategy by default (near-market entries, ATR trailing, TP1, pyramiding, SPY core); `--legacy` runs the old dip-buy path. Validates risk/execution mechanics on synthetic technical theses (no LLM calls), not the AI alpha
-- Backtest A/B runner (`python -m titantrade backtest-ab`) to empirically validate confidence-scaling against the flat baseline (legacy strategy)
-
-### Performance Feedback Loop
-- Win/loss rate tracking per ticker and overall
-- Confidence calibration buckets (does 0.80 confidence = 80% win rate?)
-- Exit trigger analysis (which exit type performs best?)
-- 52-week thesis archive for long-term pattern detection
-
-## Technical Analysis
-
-### Pre-Computed Indicators
-All indicators computed from 250-day OHLCV history before sending to Claude:
-
-| Indicator | Parameters | Purpose |
-|-----------|-----------|---------|
-| RSI | 14-period | Overbought/oversold detection |
-| MACD | 12/26/9 | Momentum direction and crossovers |
-| Bollinger Bands | 20-period, 2 std | Squeeze/breakout detection |
-| ATR | 14-period | Volatility measurement + position sizing |
-| SMA | 20, 50, 200 | Trend direction and support/resistance |
-| Price vs SMA | All periods | Above/below key levels |
-| Golden/Death Cross | 50 vs 200 SMA | Long-term trend change |
-| Volume Trend | 5d vs 20d avg | Volume confirmation of moves |
-| Relative Strength | 5d, 20d, 60d vs SPY | Outperformance/underperformance vs market |
-| Pairwise Correlation | 60-day rolling | Cross-stock correlation for portfolio risk |
-
-### Market Context
-- SPY/QQQ trend (1d, 5d, 20d returns + full indicator suite)
-- VIX level and classification (low/normal/elevated/high/extreme_fear)
-- 10Y and 2Y Treasury yields
-- Sector rotation (11 SPDR sector ETFs, ranked by 5-day performance)
-- Market regime classification: strong_bullish, bullish, neutral, bearish, strong_bearish, crisis
-- Economic calendar: FOMC, CPI, jobs, GDP, PPI events for the next 7 days
-
-### Enhanced Data per Stock
-- Analyst recommendation mix — strong-buy/buy/hold/sell/strong-sell (Finnhub)
-- Insider trading: Form 4 filings from the last 30 days (SEC EDGAR)
-- Relative strength vs SPY over 5d, 20d, 60d periods
-- Pairwise correlation matrix with other watchlist stocks
-
-### AI Strategy Enhancements
-- **Mean reversion detection**: RSI < 30 + price near 200-SMA = bounce setup
-- **Sentiment divergence**: Bullish news + falling price = distribution warning
-- **Earnings run-up**: 10-15 days before earnings with no negative thesis = drift opportunity
-- **Analyst momentum**: Cluster upgrades/downgrades as directional catalysts
-- **Insider signal**: Cluster insider buying as a strong bullish signal
+- **Entry**: a watchlist name closes ≥ 8% below its 90-day high while above its 150-day SMA. Candidates ranked deepest dip first fill the free slots (3 × 25% of equity, flat sizing; the 70% overlay cap trims the third). One bracket order at the live price + 0.3% with a −12% stop and a +20% target, through the eight gates. Whole shares only — a slot below one share is skipped.
+- **Exits**: the GTC stop-limit (−12%), the +20% target and the 60-trading-day holding limit; the latter two are evaluated against the broker position at every executor run. Nothing else sells a position.
+- **Core**: SPY is the residual — exposure scale × 95% − overlay − this run's planned slots — rebalanced within a 5% band. The core sells before entries need the cash and buys back after exits.
+- **Insurance**: two-signal confirmation; exposure halves only while SPY is below its 200-day SMA *and* fewer than half of the 11 sector ETFs are above theirs. New entries pause while risk-off; held positions keep their exits. Unknown inputs fail open.
+- **The plan** (`state/plan.json`, `GET /api/plan`): NEW / HOLD items with entry, stop and target, the watch list with the reason each signal was not taken, ranked candidates, insurance and breadth, free slots, pending buys, legacy positions queued for the orphan close.
+- **Legacy transition**: `state/strategy.json` records the strategy start; a position whose opening BUY predates it gets no item and is sold by the orphan close.
 
 ## Risk Management
 
-### Nine Entry Gates (ALL must pass)
-1. **Confidence threshold**: AI confidence >= 0.55 floor; above it, confidence drives sizing (0.40x at 0.55 → 2.50x at 0.95+), not selection
-2. **Earnings blackout**: No entry within 2 days of earnings
-3. **Drawdown circuit breaker**: Halts at 8% portfolio drawdown from peak. A reported value ±50% off the peak is treated as broker data corruption (Decision 054): entries pause with a "suspect broker data" reason + Discord alert, and the glitch is never written into the peak file
-4. **Cash reserve**: Maintains 5% minimum cash, net of cash already committed to pending buy orders (Decision 035). Cash is re-read from the broker after every executed entry in a run, so an instantly-filled bracket (no longer an *open* order) cannot be double-spent by the next ticker (Decision 058)
-5. **Volatility-adjusted sizing**: ATR-based, targeting 2.5% risk per 1-ATR move, scaled by confidence and VIX, capped at 25% per name. Orders below a $500 minimum notional are blocked as dust (Decision 054) — they can't carry stops and only add churn
-6. **Sector exposure limit**: Max 50% of portfolio in any single sector
-7. **Macro event blackout**: No entry within 6h of a high-impact event (FOMC, NFP, CPI, core PCE, GDP)
-8. **Correlation limit**: Blocked when average 60-day correlation with held positions exceeds 75%
-9. **Total overlay cap**: Combined AI-pick positions ≤ 70% of portfolio (protects the ~30% SPY core)
+### Eight Entry Gates (ALL must pass)
+1. **Earnings blackout**: no entry within 2 days of earnings (Finnhub calendar)
+2. **Drawdown circuit breaker**: halt at 8% below the portfolio peak. A value ±50% off the peak is treated as broker data corruption (Decision 054): entries pause, Discord alert, the peak file is never written
+3. **Cash reserve**: 5% minimum, net of cash committed to pending buy orders (035); the account is re-read after every executed entry in a run (058)
+4. **Overlay cap**: overlay positions ≤ 70% of equity (protects the SPY core)
+5. **Position size**: the slot (25% of equity), reduced to the cash and overlay headroom; anything below $500 notional is blocked as dust (054)
+6. **Sector exposure**: ≤ 50% of equity in one sector after the trade
+7. **Macro blackout**: no entry within 6 h of FOMC / NFP / CPI / core PCE / GDP (046)
+8. **Correlation**: blocked when the average 60-day correlation with held positions exceeds 75%
 
-### Broker-Native Stop-Losses
-- Bracket orders: entry + stop + take-profit submitted atomically to Alpaca
-- Stop-limit orders with 1% buffer to prevent catastrophic slippage
-- Stops live on Alpaca's servers, fire 24/7 even if bot is offline
-- Orphan detection: every run checks held positions have a stop order
-- **Bracket resubmission**: expired day-only brackets are auto-resubmitted next morning with dynamically adjusted entry prices based on current market conditions (resubmits floor to whole shares — a sub-1-share size is skipped, never sent as a fractional bracket that Alpaca rejects with HTTP 422). Resubmission skips any ticker whose current sentry signal is ABORT — the executor is about to exit it, and the 72h cooldown only starts once that abort is handled, after resubmission runs (Decision 055, the LLY 18-second round-trip)
-- **Minimum stop-distance floor**: fresh entries and resubmissions are refused when the stop sits less than 1.5% below the entry (`pricing.stop_too_tight`, Decision 055) — a noise-level stop is a guaranteed immediate stop-out (production: URI entered with a 0.28% stop and was tagged out 27 minutes later). Typically a degenerate artifact of reusing an ADJUST-review thesis (stop tightened on a held position) for a new entry
-- **ADJUST live-price floor** (Decision 058): a weekly-review stop raise is measured against the position's live mark at the market-open run that applies it; a level at/above the price or less than 1.5% below it is not applied while an existing stop protects the position (`pricing.adjust_stop_too_tight`). Sunday's level meets Monday's gap — ANET 2026-09-14 was stopped the same second the raise was placed, then rallied 8%. With no stop on the book the level is still placed.
-- **Stop coverage after a bracket fill** (Decision 060): a bracket's exit legs are DAY orders and its stop leg sits in `held` (invisible to the open-orders query) while the TP leg is live, so every filled bracket gets a GTC stop of its own from the next run. One helper (`_ensure_coverage`) serves the held-bullish path, the ADJUST "re-opened after the review" branch (which previously skipped the check — FCX sat bare over the Oct 2–5 weekend) and the 13:35 UTC gapcheck job (`ensure_stop_coverage`). A position opened after the current review is covered at its bracket's entry-time stop from the trade log, not the thesis level (EQIX Oct 2: $969.95 was replaced by $1000 and tagged Oct 8); older positions use the thesis stop.
-- **Stop-out re-entry cooldown**: a broker-side protective-stop fill starts the same 72h cooldown an ABORT does (Decision 056) — stop fills execute on Alpaca's servers with nothing running, so nothing "handled" the exit and DVN was re-bought 42 minutes after its stop fired. The scan stamps the cooldown at the fill time (idempotent) and records the fill price; the sentry-confirmed override still allows early re-entry, but only once the price is ≥ 1% above that exit (Decision 059 — the 10 re-entries that came in flat to the exit all lost, the 13 that came in ≥ 1% above kept every winner)
-- **Stale-ADJUST guard**: weekly-review ADJUST levels are skipped for a position opened *after* the review was generated (Decision 056) — they were computed for a position that no longer exists (DVN: the old position's $43.50 stop re-applied 0.34% below a fresh $43.65 re-entry). The entry-time stop is kept until the next review re-syncs
-- **Gap-down protection**: detects unfilled stop-limit orders after overnight gaps and immediately market-sells the unprotected position. The stale stop's cancel is polled to a terminal state *before* the market sell so the sell isn't rejected for still-held qty (Decision 035). Before selling, the live market quote is cross-checked (Decision 053), and gaps deeper than 30% below the stop are checked against the corporate-actions feed — a recent split announcement means the stop is stale, not the market, so the sale is skipped and alerted instead of liquidating at a split-artifact bottom (Decision 054, the CRWD 4:1 lesson)
-- **Never-bare guarantee** (Decision 035): after a partial sell (TP1), the sell is polled to `filled` before the breakeven stop is sized; `place_native_stop_loss` clamps to the broker-reported `available` qty if momentarily short. A position is never left without a stop after a partial sell or stop replace.
+A blocked entry that failed ≤ 2 gates is recorded in `state/near_misses.json` with the gate results and a market snapshot.
 
-### Trailing Stops (legacy — not used by the mechanical strategy)
-- Activates once a position gains 5%+ from entry price
-- Trails 3.0× ATR below the high-water mark (ratchets up only, never down); falls back to a 5% trail when ATR is unavailable. Widened from 2.5× (Decision 048): a full-cycle backtest incl. the 2022 −25% bear showed wider trailing captures more upside in rallies with no added downside (the trailing isn't the binding exit in a bear)
-- Never trails below entry price (locks in at least breakeven)
-- Never trails below the original thesis stop (doesn't widen risk)
-- Cancels the existing stop and replaces with a higher one each execution cycle
+### Broker-Side Protection
+- **Bracket entries** (entry limit + stop-limit + take-profit, atomic); the stop-limit carries a 1% buffer against slippage
+- **GTC stop on fill**: bracket legs are DAY orders and the stop leg sits in `held` while the TP leg is live, so after a fill the TP leg is cancelled and a GTC stop placed at the bracket's level (060)
+- **Stop coverage** (`_ensure_coverage`, 060): one helper puts a GTC stop on any bare whole-share plan position from every path — HOLD management at each execute run and the 09:35 ET gapcheck job (`ensure_stop_coverage`); the level is the plan item's stop (the opening bracket's stop from the trade log)
+- **Minimum stop distance** (055): an entry or resubmission whose stop sits < 1.5% below the entry is refused
+- **Settled close** (063): every exit — target, holding limit, orphan close — cancels each resting order, polls the cancel to a terminal state, re-reads the position, sells at market, and restores the stop if the sell fails. Introduced after three of seven legacy orphan closes were rejected with Alpaca 40310000 on 2026-10-13 and left positions bare
+- **Gap-down protection** (gapcheck, 035/053/054): an unfilled stop-limit after an overnight gap → cancel, settle, market-sell; the live quote is cross-checked first, and a gap > 30% below the stop is checked against the corporate-actions feed so a split is never sold as a crash
+- **Stop-out cooldown** (056/059): a broker stop fill starts a 72 h re-entry cooldown stamped at the fill time with the fill price; re-entry before 72 h needs ≥ 24 h *and* a price ≥ 1% above that exit (`cooldown_override_allowed`) — the flat re-buy was the churn
+- **Orphan close**: any non-core position without a plan item is sold at the first market-open run
+- **Expired-bracket resubmission**: at most once per ticker per run, up to 20 attempts, through `handle_entry` again (fresh price, levels and gates); skipped while the ticker is held or has a pending order
+- **Never bare**: every failure path that cancels a stop restores one
 
-### Pyramiding Into Winners (legacy — not used by the mechanical strategy)
-- Adds to a position once per ticker when it's working (+5% gain with the trailing stop active, so combined downside is bounded)
-- Adds 50% of the original notional, capped at the per-ticker concentration limit (30% of portfolio)
-- **Cancel → market-buy → re-stop** (Decision 037): a live probe proved Alpaca rejects *both* market and limit buys against a resting protective stop, so the add drops the stop, market-buys (fastest fill = shortest unprotected window), then re-places a stop covering the full enlarged position. Every failure path restores a stop (never silently bare). This is an explicit, bounded exception to the "never bare" model, accepted to enable the feature.
-
-### Portfolio-Level Protection
-- Peak portfolio tracking for drawdown calculation
-- Sector concentration monitoring
-- Cash reserve enforcement before any new entry — **nets out cash already committed to pending buy orders** so simultaneous entries can't collectively breach the reserve into margin (Decision 035) — and re-checks the broker's cash after each executed entry within a run (Decision 058)
-- Weekly position reviews: CONTINUE, ADJUST (update levels), or CLOSE (explicit exit) — the review prompt carries the real days-held from the trade log (Decision 058; it had read 0 for every position)
-- Pass 2 selection filter (only top 3-5 new trades execute)
-
-### Bear Market Hedging (legacy — not used by the mechanical strategy)
-- In bearish/crisis regimes, inverse ETFs (SH, PSQ, SDS) are added to the analysis
-- Claude can recommend buying inverse ETFs to profit from market declines
-- These are regular long positions — no margin or shorting mechanics required
-- Hedges use short_term or medium_term horizons (not long-term holds)
-
-### Slippage-Aware Execution
-- **Entry**: Two-tranche limit orders (already slippage-minimized)
-- **News-based ABORT exits**: Limit sell at 0.2% below current (reduces slippage vs market sell)
-- **Price-based ABORT exits**: Market sell (urgent, price already moving)
-- **Backtesting**: Configurable slippage model (default 0.15% per fill) for realistic results
-
-### Intraday Price Checks (legacy — not used by the mechanical strategy)
-- Lightweight price-only checks between the 9 AM and 3:30 PM sentry runs
-- Zero LLM cost — only checks SPY drops and per-stock adverse moves
-- Same 3% adverse / 2% SPY thresholds as the sentry's Layer 1 and 2
-- Fills the 6.5-hour gap during peak trading hours
+### Portfolio-Level
+- Peak tracking for the drawdown breaker (`state/peak_portfolio.json`)
+- Sector and correlation concentration gates; cash reserve net of pending commitments
+- Two-signal insurance scales the core target and pauses entries
+- Flat sizing: no ATR, confidence or VIX scaling (Decision 061 — measured as noise)
 
 ## Execution
 
-### Order Types
-| Scenario | Order Type | Details |
-|----------|-----------|---------|
-| Entry (whole shares) | Bracket (limit buy + stop + TP) | Atomic submission to Alpaca |
-| Entry (fractional) | Day limit buy | No bracket support for fractional; sentry provides safety net |
-| Stop-loss | Native stop-limit (GTC) | Broker-side, 1% slippage buffer (whole shares only) |
-| Take-profit | Native limit sell | Part of bracket or standalone |
-| ABORT exit | Market sell | Immediate, after cancelling all orders |
-| Bearish flip | Market sell | Exit position when thesis reverses |
+| Scenario | Order | Details |
+|----------|-------|---------|
+| Entry | Bracket (limit buy + stop-limit + limit sell), DAY | Limit at live × 1.003; stop −12%, target +20% from the entry |
+| Stop after fill | Stop-limit, GTC | Replaces the bracket's stop leg; clamps to the broker-reported available qty on a race |
+| Target / holding-limit / orphan exit | Market sell | After cancel-settle of the resting stop; stop restored on failure |
+| Gap-down exit | Market sell | After cancel-settle; quote + corporate-actions cross-check |
+| Core rebalance | Market buy / sell | Toward the residual target, keeping the cash reserve; capped at held qty |
 
-### Fractional Shares
-- Supported for accounts too small for whole shares (e.g., $500 starting balance)
-- Position sizing snaps to whole shares when >= 1, keeps fractional (2 decimals) when < 1
-- Fractional entries use day-limit buys (bracket orders don't support fractional on Alpaca)
-- Fractional positions rely on sentry + price checks for downside protection (no broker-native stops)
-- Minimum $1.00 notional per order (Alpaca requirement)
-- As the account grows, positions automatically shift back to bracket orders
-
-### Safety Rails
-- Duplicate prevention: checks for existing orders before placing new ones
-- Position check: won't buy if already holding the ticker
-- Positions refreshed after each trade for accurate sector exposure
-- All trades logged with full reasoning chain
+Safety rails: no entry while the ticker has open orders or is held; positions and cash re-read after each trade; every trade logged with the plan reason, levels, gate results and a market snapshot.
 
 ## Data Sources
 
-### Alpaca Data API (primary, free — Decision 040)
-- 250-day OHLCV for indicator calculation (IEX feed)
-- News headlines with syndication-aware deduplication
-- Current quotes for market context and live price cross-checks
-
-### FRED (free)
-- VIX level, 10Y/2Y Treasury yields
-- Economic-release calendar (CPI/jobs/PPI/GDP/PCE/retail) + `data/fomc_dates.json` for FOMC
-
-### Finnhub (free)
-- Earnings calendar (blackout gate)
-- Analyst recommendation mix, company sector
-
-### SEC EDGAR (free — replaced paid SEC-API.io, Decision 035)
-- 8-K / 10-Q / 10-K filings, Form 4 insider activity
-- Requires only a `User-Agent` header with contact email
-
-### FMP (legacy, optional)
-- The original provider is retained behind `DATA_PROVIDER=fmp` for one-line revert (Decision 040)
-
-### Alpaca Markets
-- Dual credential support: separate paper and live API key pairs
-- Trading mode toggle via API (`GET/PUT /api/settings/mode`) and Flutter app
-- Paper mode uses `paper-api.alpaca.markets`, live mode uses `api.alpaca.markets`
-- Account info (portfolio value, buying power, cash)
-- Position management
-- Full order lifecycle (bracket, stop, limit, market)
+- **Alpaca Data API** (free, same keys as trading): 250-day daily bars (IEX feed for the bundle; SIP for `download-history` and the benchmark's SPY series), latest quotes, corporate actions, news for the curator
+- **FRED** (free key): economic-release calendar for the macro gate (+ `data/fomc_dates.json` for FOMC)
+- **Finnhub** (free key): earnings calendar (blackout gate), company sector, analyst recommendations for the curator
+- All market-data calls fail open (`[]` / `None` / `{}`) on a missing key or error; the gates that consume them skip rather than block
+- **Alpaca Markets**: paper and live credentials, account, positions, full order lifecycle; mode toggle via `PUT /api/settings/mode`
 
 ## Automation
 
-### Server Deployment (Docker) — Primary
-- Docker container with Python 3.12 and uv package manager
-- **Built-in scheduler** (APScheduler): all cron jobs run inside the API container
-- No host-level cron required — schedule defined in `data/schedule.json`
-- **Daily data refresh**: a `weekday_fetch` job (13:00 UTC, before the morning sentry/execute) rebuilds `data_bundle.json` every weekday so trend-regime/ATR decisions never run on stale data — previously the bundle only refreshed in the weekly Sunday pipeline and aged to 120h+ by Friday (Decision 035)
-- State persists via bind-mounted volumes (`./data`, `./state`, `./logs`)
-- Scheduler screen in Flutter app: view status, enable/disable, manual trigger
-- CLI commands still available: `docker compose run --rm titantrade <command>`
+Built-in APScheduler in the API container (`data/schedule.json`, America/New_York — Decisions 028/039). No host cron.
 
-### GitHub Actions Cron Jobs (Alternative)
-- Weekly analyst: Sunday 20:00 UTC
-- Daily sentry: Weekdays 14:00 UTC (09:00 EST) and 20:30 UTC (15:30 EST)
-- State committed back to repo after each run
-- Manual trigger via `workflow_dispatch`
+| Job | Time (ET) | Command |
+|-----|-----------|---------|
+| `weekday_fetch` | 09:00 Mon–Fri | fetch |
+| `weekday_gapcheck` | 09:35 Mon–Fri | gapcheck (+ stop coverage) |
+| `weekday_execute_morning` | 10:15 Mon–Fri | execute (= signals + execute) |
+| `weekday_execute_preclose` | 15:30 Mon–Fri | execute |
+| `daily_summary` | 16:30 Mon–Fri | Discord summary + benchmark refresh |
+| `sunday_full` | 16:00 Sun | full |
+| `monthly_curate` | 15:00 first Sunday | curate |
 
-### State Persistence
-- JSON files in `state/` directory (bind-mounted in Docker)
-- Trade log is append-only
-- Thesis history retained for 52 weeks
-- Peak portfolio value tracked for circuit breaker
-
-## Desktop App (Trade Tracker)
-
-### TitanTrade Desktop (Flutter)
-- Cross-platform desktop app (Windows, macOS, Linux)
-- Reads state files from the TitanTrade directory (mostly read-only, writes watchlist)
-- Polls JSON files every 30 seconds for updates
-
-### Screens
-- **Dashboard**: Portfolio overview, active positions, recent trades, sentry signals
-- **Active Theses**: Card grid with confidence bars, price levels, expiry countdown
-- **Thesis Detail**: Full AI reasoning, breach conditions, sentry status
-- **Trade History**: Sortable list with action filters (BUY/SELL)
-- **Trade Detail**: Full context — thesis + sentry + execution details + gate results
-- **Near Misses**: Trades blocked by 1–2 risk gates, with closeness indicators
-- **Near Miss Detail**: Gate checklist, thesis, market context at time of near-miss
-- **Watchlist**: Add/remove tracked tickers (writes to data/watchlist.json)
-- **Statistics**: Net P&L, realized P&L (BUY->SELL round-trips), unrealized P&L (open positions), operational costs per AI service
-- **Settings**: Server URL, refresh interval, paper/live trading mode toggle with confirmation dialog
-- **Scheduler**: View all cron jobs, status, next/last run, enable/disable toggle, manual trigger button
+Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/scheduler/{id}/enabled`. Job history is kept in memory per container (`GET /api/scheduler/{id}`).
 
 ## Discord Notifications
 
-### Job Alerts
-- Every scheduled job sends a Discord embed on completion (green) or failure (red)
-- Includes job name, result summary, and duration
-- Error messages included in failure notifications (truncated to 1000 chars)
-- Notification failures never crash the underlying job
-- Transient failures (network error, 429, 5xx) are retried twice with 1 s / 2 s backoff before the warning is logged (Decision 058)
-
-### Daily Portfolio Summary
-- Sent weekdays at 21:00 UTC (4 PM EST) after the last sentry run
-- Includes: portfolio value, cash, open positions with P&L, trailing stop status
-- Shows today's sentry signals (CONTINUE/ABORT counts) and any trades executed
-- Displays current trading mode (PAPER/LIVE)
-
-### Configuration
-- Single env var: `DISCORD_WEBHOOK_URL` (optional)
-- If unset, all notifications are silently skipped — no crashes, no errors
-- Uses Discord embed format with color-coded status (green/red/blue)
+- Per-job completion / failure embeds (duration, result summary, error text); transient webhook failures retried twice (058)
+- Daily summary at 16:30 ET: equity, cash, positions with P&L, the plan (insurance state, held names, free slots, today's signals), trading mode, benchmark line
+- Observability alerts: stuck in cash (≥ 70% for 3+ days), ticker churn (2+ round-trips in 7 days), split-suspected gap, suspect broker data, cooldown override, core rebalance
+- One optional env var, `DISCORD_WEBHOOK_URL`; unset → silently skipped
 
 ## Operational Cost Tracking
 
-### Per-Call AI Cost Logging
-- Every Claude and Gemini API call logs token usage to `state/costs.json`
-- Token counts captured from API response metadata (input + output)
-- Estimated USD cost computed from published model pricing
-- Labeled per stock and run type (weekly analyst / daily sentry)
-
-### Statistics Dashboard
-- **Net P&L**: Trading gains minus operational costs — the true bottom line
-- **Realized P&L**: Matched BUY->SELL round-trips with per-trade profit/loss
-- **Unrealized P&L**: Current paper gains/losses on open positions
-- **Cost breakdown**: Per-service (Claude, Gemini) call counts, tokens, and spend
-- **Recent API calls**: Last 20 calls with timestamps, descriptions, and costs
+`state/costs.json` logs every Claude call (tokens in / out, estimated USD, `run_type: "curator"`); `GET /api/costs`. Trading itself costs no tokens.
 
 ## Benchmark Metrics (vs SPY)
 
-### Risk-Adjusted Performance Measurement
-- Judges the strategy on **risk-adjusted** terms, not raw return — a downside-protected, sub-1-beta strategy underperforms SPY in a strong bull by construction
-- **Beta**: realized market exposure (cov/var of daily returns vs SPY)
-- **Alpha (Jensen's, annualized)**: return left over after paying for that beta exposure — the test of stock-selection skill
-- **Sharpe** (strategy vs SPY) and **information ratio**: return per unit of total / tracking risk
-- **Up/down capture**: average move on SPY-up vs SPY-down days — `down < up` is the defensive signature (keeps upside, eats less downside)
-- **Correlation/R², annualized volatility, total + excess return, max drawdown** for both series
-- Source: **Alpaca portfolio-equity history** (true mark-to-market each day), aligned to SPY daily closes by trading date (in market time — Alpaca stamps EOD equity at 20:00 ET)
-- Surfaced via CLI (`python -m titantrade benchmark [days] [--since YYYY-MM-DD]`), API (`GET /api/benchmark`, `/api/benchmark/refresh`), and a line on the daily Discord summary
-- SPY history comes from Alpaca's consolidated SIP feed (ended ≥16 min in the past — free-plan recency rule) so the 20:30 UTC daily refresh includes the session that just closed; indicator bars stay on the configured feed (Decision 058). The equity side of the same session comes from the `15Min` portfolio history's 16:00 ET bucket, appended when the 1D series (stamped 20:00 ET) does not have it yet (Decision 059)
-- A one-line plain-English verdict classifies the window (adding value / protection-not-selection / dominated by SPY)
+- Beta, Jensen's alpha (annualized), Sharpe for both series, information ratio, up / down capture, correlation / R², volatility, total and excess return, max drawdown, a one-line verdict
+- Source: Alpaca portfolio-equity history (with the just-closed session appended from the 15Min history, 059) aligned to SPY SIP daily closes (058)
+- CLI `benchmark [days] [--since]`, `GET /api/benchmark`, `GET /api/benchmark/refresh?days=N|since=…`, a line on the daily summary
 
-## Test Suite (Zero Token Spend)
+## Backtesting & Parameter Search
 
-All tests run without making real API calls to Claude, Gemini, Alpaca, or FMP.
-AI and broker interactions are mocked via `unittest.mock.patch`.
+- `backtest-mech`: the same `signals.py` rules on daily closes, next-close fills, per-side costs, slot accounting out of SPY, cash reserve, the insurance switch, a walk-forward helper and a coarse built-in grid → `state/backtest_mechanical.json`
+- `download-history [dir] [--days N]`: SIP daily bars for the watchlist, SPY and the 11 sector ETFs
+- `scripts/param_search/`: the Decision 062 harness — a vectorised engine validated trade-for-trade against the backtester, a 6,000-point grid, insurance × sizing stage, walk-forward of the selection procedure, plateau scoring. Data (git-ignored) in `data/param_search/`
 
-### Coverage
-- **Indicators** (31 tests): SMA, EMA, RSI, MACD, Bollinger Bands, ATR, volume, price vs SMA
-- **AI Parsing** (29 tests): JSON extraction, markdown fence removal, trailing commas, schema validation, malformed input fallbacks
-- **Risk Manager** (32 tests): All 6 gates individually, pre_trade_check integration, near-miss detection, gate dependency chains
-- **Weekly Analyst** (5 tests): Mocked Claude returning valid/invalid/partial JSON
-- **Daily Sentry** (5 tests): Mocked Gemini, price-based ABORT override, garbage response handling
-- **Executor** (12 tests): Trade context building, bracket placement, near-miss recording, resubmission logic
-- **Trailing Stops** (10 tests): Activation threshold, HWM tracking, never-below-entry, state persistence, cleanup
-- **Price Check** (6 tests): SPY stress abort, per-stock adverse moves, signal file persistence
-- **Gap-Down Protection** (6 tests): Gap detection, stop-limit cancellation, margin tolerance, edge cases
-- **Mechanical strategy** (24 tests): signal rules, insurance, thesis generation, residual core, slot sizing, target/time exits, end-to-end entry, scheduler, backtester, curator, API
-- **Stop coverage after a fill** (9 tests): entry-stop lookup, level choice for re-opened vs older positions, TP-leg recovery at the bracket level, ADJUST-re-opened end-to-end, gapcheck companion
-- **Orphan Close** (7 tests): Expired thesis, missing ticker, zero-qty positions, empty state
-- **Dynamic Entry** (13 tests): Price adjustment, chase limit, invalidated thesis, risk ratio preservation
-- **Strategy Features** (19 tests): Relative strength, correlation, macro blackout, correlation limit, two-tranche split
-- **Notifier** (15 tests): Discord embed formatting, no-op without webhook, job success/failure content, daily summary state parsing, error resilience
+## HTTP API
 
-### Running Tests
+`/api/health`, `/api/portfolio`, `/api/plan`, `/api/trades`, `/api/near-misses`, `/api/costs`, `/api/universe-proposal`, `/api/post-mortem`, `/api/benchmark`, `/api/benchmark/refresh`, `/api/settings`, `PUT /api/settings/mode`, `/api/watchlist` (GET / PUT), `/api/scheduler`, `/api/scheduler/{id}`, `POST /api/scheduler/{id}/trigger`, `PUT /api/scheduler/{id}/enabled`. See [TitanTrade/docs/api_reference.md](../TitanTrade/docs/api_reference.md).
+
+## Test Suite (zero token spend)
+
+236 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
+
+| File | Covers |
+|------|--------|
+| `test_mechanical.py` | signal rules, insurance, plan building (hold / new / watch / legacy / pending / risk-off / stale inputs), `refresh_plan`, residual core target, backtester, curator, API |
+| `test_executor.py` | stop coverage (TP-leg scenario, fractional, off-hours, gapcheck companion), target / holding-limit exits, end-to-end `execute_trades` |
+| `test_entries.py` | `handle_entry` (levels, sizing, near miss, committed cash, cooldown + override), resubmission, stop-out scan, GTC stop on fill |
+| `test_risk_manager.py` | each gate, slot sizing, dust, suspect value, macro whitelist, correlation |
+| `test_protection.py`, `test_gap_down.py` | orphan close, settled close with stop restore, gap-down protection |
+| `test_broker.py` | stop placement races, bracket whole-share guard, market hours, cancel polling |
+| `test_core_allocation.py`, `test_cooldown.py`, `test_trade_state.py`, `test_alerts.py` | core rebalance, cooldown records + override, trade log / archival / record builders, observability alerts |
+| `test_scheduler.py`, `test_api_settings.py`, `test_trading_mode.py`, `test_notifier.py` | scheduler wiring and API, settings endpoints, credential selection, Discord embeds + daily summary |
+| `test_market_data.py`, `test_benchmark.py`, `test_indicators.py`, `test_retry.py`, `test_logger.py` | data facade, benchmark maths, ATR, retry policy, logging |
+
 ```bash
-cd TitanTrade
-uv run python -m pytest tests/ -v
+cd TitanTrade && uv run --extra test python -m pytest tests/ -q
 ```

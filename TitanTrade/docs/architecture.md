@@ -2,160 +2,113 @@
 
 ## Overview
 
-The TitanTrade backend is a Python application with two faces: a CLI (one-off commands via
-`docker compose run`) and an always-on FastAPI server whose built-in APScheduler runs all
-scheduled jobs (`data/schedule.json`, interpreted in America/New_York — Decisions 028/039).
-Each job reads config, calls external APIs, and writes JSON state files.
-
-For the full system diagram (including the Flutter app), see
-[docs/architecture.md](../../docs/architecture.md).
+The backend has two faces: a CLI (one-off commands via `docker compose run`) and an always-on FastAPI server whose built-in APScheduler runs every scheduled job (`data/schedule.json`, America/New_York — Decisions 028/039). Each job reads config, calls external APIs, and writes JSON state files. The system diagram is in [docs/architecture.md](../../docs/architecture.md).
 
 ---
 
-## Pipeline Structure
+## Pipeline
 
-> **Decision 061 (2026-10-13):** the trading loop is mechanical. Each `execute` job runs
-> `mechanical.refresh_mechanical_signals` (data bundle → `signals.py` rules → the same
-> `weekly_thesis.json` / `sentry_signals.json` schemas) and then `executor.execute_trades`
-> unchanged: orphan close → gap check → residual SPY core → bracket resubmission → entries
-> through the nine gates → held-position exits (target / time; the stop is on the broker).
-> The weekly LLM analyst and the daily LLM sentry described below are the legacy
-> `strategy: "llm"` pipeline, unscheduled but runnable for A/B. Dependency flow gains
-> `signals` (leaf) → `mechanical` (uses broker, trade_state, core_allocation, risk_manager,
-> market_context) → `executor`; `curator` depends on `weekly_analyst._call_claude` only.
+### 1. Fetch (`data_fetcher.py`, 09:00 ET weekdays and in `full`)
+- 250 daily bars per watchlist name from Alpaca → `signal_inputs` (last close, rolling high over `dip_lookback_days`, `trend_sma_days` SMA), ATR-14, the last 5 bars for display, a 60-day pairwise correlation matrix
+- `market_context.build_market_context`: SPY close and 1/5/20-day returns; `sector_breadth` — SPY and the 11 sector ETFs vs their `insurance_sma_days` SMA
+- Finnhub earnings (`earnings.build_earnings_context`: next date, days away, blocked flag); FRED release calendar + `data/fomc_dates.json`
+- Output: `state/data_bundle.json`
 
+### 2. Signals (`mechanical.refresh_plan`, run by every `execute` and by `signals`)
+- Reads the bundle, the broker positions and open buy orders, the trade log, and `state/strategy.json` (written on the first run; its `started_at` separates mechanical positions from legacy ones)
+- `build_plan`: HOLD items for held mechanical positions (stop and target from the opening BUY in the trade log); the insurance state from `market_context.breadth`; `signals.evaluate_dip` on every name not held or pending; candidates ranked deepest dip first fill `max_slots − held − pending` slots as NEW items (entry at the last close, stop −`stop_pct`, target +`tp_pct`); everything else goes on the watch list with its reason; legacy positions are listed in `legacy_to_close`
+- Warns and flags `stale_inputs` when the bundle's lookback / SMA lengths differ from the parameters in force (re-run `fetch`)
+- Output: `state/plan.json`
 
-### Weekly Pipeline (Sunday 16:00 ET)
+### 3. Execute (`executor.execute_trades`, 10:15 and 15:30 ET weekdays, Sunday `full`)
+1. Market-open check; sector cache; **orphan close** (`protection.close_orphaned_positions`: every non-core position without a plan item, via `close_position_settled`); **gap-down protection**
+2. Load the plan and the bundle; read the account and positions
+3. **Core**: `mechanical.core_target_pct` = exposure scale × (1 − cash reserve) − (held overlay + planned NEW slots) / equity → `core_allocation.manage_core_position(target_pct)`; the account is re-read after the core trade
+4. **Stop-out cooldowns**: `entries.record_stop_out_cooldowns` scans filled sell stops and stamps the 72 h cooldown with the fill price
+5. **Expired brackets**: `entries.resubmit_expired_brackets` (once per ticker, ≤ 20 attempts, through `handle_entry`)
+6. **NEW items**: `entries.handle_entry` — live price → cooldown check → `pricing.entry_levels` (entry = price × 1.003, stop, target) → sanity checks → committed cash → `risk_manager.pre_trade_check` (8 gates, slot sizing) → near miss or one bracket → `_ensure_gtc_stop_on_fill`; account re-read after each entry
+7. **HOLD items**: `executor._manage_held` — stop coverage at the item's stop; exit when `unrealized_plpc ≥ tp_pct` (trigger `target`) or trading days held ≥ `max_hold_days` (trigger `holding_limit`), both via `close_position_settled`
+8. Observability alerts (stuck in cash, ticker churn)
 
-1. **Data Collection** (`data_fetcher.py`)
-   - 250 days of OHLCV per stock (for indicator calculation)
-   - Computes RSI, MACD, Bollinger, ATR, SMA crossovers
-   - News headlines (7 days) with deduplication
-   - SEC filings (24 hours)
-   - Market context: SPY, QQQ, VIX, Treasury yields, sector rotation
-   - Earnings calendar (next 60 days)
-   - Output: `state/data_bundle.json`
+### 4. Gapcheck (09:35 ET weekdays)
+`protection.check_gap_down_protection` then `executor.ensure_stop_coverage` (a GTC stop for any whole-share HOLD position without one).
 
-2. **Pass 1: Individual Analysis** (`weekly_analyst.py`)
-   - Claude analyzes each stock with full data + indicators + market context
-   - Performance feedback injected (last 4 weeks results + confidence calibration)
-   - Output: per-stock thesis with entry, stop, take-profit, breach condition
-
-3. **Pass 2: Portfolio Ranking** (`weekly_analyst.py`)
-   - Claude sees all watchlist theses simultaneously
-   - Selects top 3-5 trades considering sector diversification and market regime
-   - Output: `state/weekly_thesis.json` with `selected_for_trading` flag per thesis
-
-### Daily Pipeline (10:15 + 15:30 ET)
-
-1. **Layer 1: Market Health** (`daily_sentry.py`)
-   - Check if SPY dropped >2% (market-wide stress signal)
-
-2. **Layer 2: Price-Based Check** (`daily_sentry.py`)
-   - Check if any held stock moved >3% against thesis since entry
-   - Graduated override (Decisions 045, 057): >=5% forces ABORT regardless of news;
-     3-5% ABORTs only if Layer 3 corroborates (conflicting headlines or market
-     stress), otherwise logged as noise — the broker-side stop remains the protection
-
-3. **Layer 3: News-Based Check** (`daily_sentry.py`)
-   - Gemini Flash compares today's headlines vs thesis breach condition
-   - Receives price and market alerts as additional context
-   - Output: `state/sentry_signals.json`
-
-4. **Risk Gates** (`risk_manager.py`)
-   - Nine gates must ALL pass before any new entry
-
-5. **Execution** (`executor.py`)
-   - Bracket orders with broker-side stop-losses for new entries
-   - Market sells on ABORT signals
-   - Auto-resubmits expired day-only brackets with fresh risk checks
+### 5. Daily summary (16:30 ET weekdays) and curate (first Sunday 15:00 ET)
+Discord summary with the plan section + benchmark refresh; the Claude universe proposal and post-mortem.
 
 ---
 
 ## Module Dependency Graph
 
 ```
-config.py
-├── logger.py
-├── retry.py
-├── indicators.py           <- Pure computation, no API calls
-├── market_context.py       <- SPY, VIX, sectors (via market_data: Alpaca+FRED)
-├── earnings.py             <- Earnings calendar (via market_data: Finnhub)
-├── risk_manager.py         <- All risk gates (uses indicators, market_context)
-├── performance.py          <- Trade stats + feedback (reads state files)
-├── data_fetcher.py         <- Master data collection (uses all above)
-├── weekly_analyst.py       <- Two-pass Claude analysis (uses data_fetcher, performance)
-├── daily_sentry.py         <- Three-layer sentry (uses data_fetcher, Gemini)
-├── price_check.py          <- Lightweight intraday price checks (no LLM)
-├── benchmark.py            <- Risk-adjusted metrics vs SPY: beta/alpha/Sharpe/capture (reads Alpaca portfolio history + SPY; pure compute_metrics)
-│
-│   ── Execution layer (ADR 036), dependency flow top → bottom ──
-├── broker.py               <- Alpaca REST client (the ONLY module that calls Alpaca)
-├── trade_state.py          <- Trade log / near-miss store, state loader, record builders
-├── trailing_state.py       <- Trailing-stop state (HWM, trail, TP1/pyramid flags)
-├── pricing.py              <- Trend regime + entry-price selection (pure)
-├── cooldown.py             <- ABORT re-entry cooldown state + override policy
-├── alerts.py               <- Discord observability alerts (uses trade_state, notifier)
-├── core_allocation.py      <- Always-on SPY core + hedge swap (uses broker, trade_state)
-├── protection.py           <- Orphan close + gap-down protection (uses broker, trade_state, core_allocation)
-├── entries.py              <- New entries + bracket resubmission (uses broker, pricing, cooldown, risk_manager)
-├── positions.py            <- Trailing stop + TP1 + pyramid (uses broker, trade_state, trailing_state)
-└── executor.py             <- Orchestrator: execute_trades() wires entries/positions/protection/
-                               core_allocation together (691 LOC, was 3,267)
+config.py, logger.py, retry.py
+├── indicators.py        <- ATR, correlation (pure)
+├── signals.py           <- dip / SMA / breadth / insurance / ranking rules (pure; shared with the backtester)
+├── market_data.py       <- facade over data_providers/native.py (Alpaca + FRED + Finnhub)
+├── market_context.py    <- sector cache, sector breadth, SPY context
+├── earnings.py          <- earnings calendar → blackout flag
+├── data_fetcher.py      <- the data bundle (uses indicators, signals, market_context, earnings)
+├── broker.py            <- Alpaca REST client (the ONLY module that calls the trading API)
+├── trade_state.py       <- trade log / near misses (archival), opening-buy lookups, record builders
+├── pricing.py           <- entry levels, bracket sanity, ATR lookup, earnings block (pure)
+├── cooldown.py          <- stop-out cooldown state + override policy
+├── risk_manager.py      <- the 8 gates, drawdown breaker, overlay headroom (uses market_context)
+├── alerts.py            <- stuck-in-cash / churn alerts (uses trade_state, notifier)
+├── core_allocation.py   <- SPY core rebalance (uses broker, trade_state)
+├── protection.py        <- settled close, orphan close, gap-down (uses broker, trade_state)
+├── entries.py           <- handle_entry, resubmission, stop-out scan (uses broker, pricing, cooldown, risk_manager, trade_state)
+├── mechanical.py        <- plan builder + core target (uses signals, broker, trade_state, market_context, risk_manager)
+├── executor.py          <- execute_trades orchestrator, stop coverage, held exits (uses all of the above)
+├── curator.py           <- Claude universe proposal + post-mortem (uses market_data, cost_logger, notifier)
+├── benchmark.py         <- metrics vs SPY (broker portfolio history + SIP bars)
+├── backtest/            <- data_loader (SIP bars), mechanical (backtester + walk-forward on signals.py)
+├── notifier.py          <- Discord embeds + daily summary
+├── scheduler.py         <- APScheduler jobs → the commands in __main__
+└── api.py               <- FastAPI endpoints over state/ + scheduler
 ```
 
-> **Executor decomposition complete (ADR 036):** the former 3,267-line `executor.py` god-module is now
-> a 691-line orchestrator plus the 10 focused modules above. No module below imports `executor`
-> (clean DAG, no cycles). `executor.py` re-exports the symbols `execute_trades` calls, so
-> `from titantrade.executor import X` and `@patch("titantrade.executor.X")` still resolve for
-> orchestrator-resident callers; tests that exercise a moved function directly import/patch it from
-> its home module. Behavior-preserving; 424 tests green.
+No module imports `executor`. `executor.py` re-exports the broker functions it calls, so `titantrade.executor.<name>` patch targets resolve in tests.
 
 ---
 
 ## State Files
 
-All state lives in `state/` as JSON files. No database.
-
-| File | Purpose | Updated By |
-|------|---------|------------|
-| `data_bundle.json` | Full data snapshot (OHLCV, indicators, news) | data_fetcher |
-| `weekly_thesis.json` | Active theses + ranking | weekly_analyst |
-| `sentry_signals.json` | Latest sentry results | daily_sentry |
-| `trade_log.json` | All trades (append-only) | executor |
-| `near_misses.json` | Trades blocked by <=2 gates | executor |
-| `costs.json` | Per-API-call token usage + estimated cost | cost_logger |
-| `portfolio.json` | Initial portfolio state | manual |
-| `peak_portfolio.json` | High-water mark for drawdown | risk_manager |
-| `thesis_history.json` | Archived theses (52 weeks) | weekly_analyst |
-| `trailing_stops.json` | Per-ticker trailing stop HWM + state | executor |
-| `pricecheck_signals.json` | Latest intraday price check results | price_check |
-| `benchmark_metrics.json` | Beta/alpha/Sharpe/capture vs SPY | benchmark |
+| File | Purpose | Written by |
+|------|---------|-----------|
+| `data_bundle.json` | Signal inputs, ATR, correlations, market context, earnings, macro calendar | fetch |
+| `plan.json` | NEW / HOLD items, watch, candidates, insurance, slots, legacy positions | signals |
+| `strategy.json` | `started_at` of the mechanical strategy | first signals run |
+| `trade_log.json` | Every order placed (append-only, archived past 500) | executor |
+| `near_misses.json` | Entries blocked by ≤ 2 gates (archived past 200) | entries |
+| `portfolio.json` | Equity, cash, positions as the last run left them | executor |
+| `abort_cooldown.json` | Stop-out cooldowns with exit price | entries |
+| `peak_portfolio.json` | Drawdown high-water mark | risk_manager |
+| `alert_state.json` | Alert dedup | alerts |
+| `costs.json` | Claude token spend | cost_logger (curator) |
+| `benchmark_metrics.json` | Metrics vs SPY | benchmark |
+| `universe_proposal.json`, `post_mortem.json` | Monthly curation | curator |
+| `backtest_mechanical.json` | Last backtest | backtest-mech |
+| `sector_cache.json` | ticker → sector | market_context |
 
 ---
 
 ## Risk Control Summary
 
-| Control | Type | Value | Enforced In |
-|---------|------|-------|-------------|
-| Position sizing | ATR-based | 2.5% portfolio risk per ATR | risk_manager |
-| Position cap | Fixed | 25% of portfolio max | risk_manager |
-| Stop-loss | Broker-native | 5% below entry (stop-limit) | executor (Alpaca) |
-| Confidence gate | AI quality | >= 0.55 floor (sizing-scaled above) | risk_manager |
-| Earnings blackout | Calendar | 2 days before earnings | risk_manager |
-| Drawdown breaker | Portfolio | Halt at 8% from peak | risk_manager |
-| Min notional | Fixed | $500 per order (dust guard, Decision 054) | risk_manager |
-| Account-value sanity | Data | ±50% vs peak → suspect data: block + alert, peak untouched (Decision 054) | risk_manager |
-| Split guard | Data | Gap >30% below stop → check corporate-actions feed before liquidating (Decision 054) | protection |
-| Min stop distance | Fixed | Stop < 1.5% below entry → entry/resubmit refused as noise-level (Decision 055) | pricing/entries |
-| Same-run ABORT guard | Sequencing | Current sentry ABORT → no entry/resubmit (exit is coming, Decision 055) | entries |
-| Stop-out cooldown | Sequencing | Broker-side stop fill → 72h re-entry cooldown, fill-time stamped (Decision 056) | entries/cooldown |
-| Exit-anchored override | Fixed | Cooldown override needs price ≥ 1% above the recorded exit price, not just above the thesis stop (Decision 059) | cooldown/entries |
-| Stale-ADJUST guard | Data | ADJUST levels skipped for positions opened after the review (Decision 056) | executor/trade_state |
-| ADJUST live-price floor | Fixed | Analyst raise at/above the live mark or < 1.5% below it → existing stop kept (Decision 058) | pricing/executor |
-| Cash reserve | Portfolio | 5% minimum cash (net of pending buys; account re-read after each executed entry, Decision 058) | risk_manager/executor |
-| Sector exposure | Portfolio | 50% max per sector | risk_manager |
-| Thesis review | Weekly | CONTINUE/ADJUST/CLOSE cycle (no hard expiry) | weekly_analyst |
-| Pass 2 selection | AI quality | Top 3-5 only | executor |
-| Price-based abort | Market | >=5% always; 3-5% with news confirmation | daily_sentry |
-| Market-wide alert | Market | SPY -2% intraday | daily_sentry |
+| Control | Value | Enforced in |
+|---------|-------|-------------|
+| Slot size / max slots | 25% of equity × 3 (flat) | risk_manager (`pre_trade_check`) |
+| Overlay cap | 70% of equity | risk_manager |
+| Cash reserve | 5%, net of pending buys, re-read after each entry | risk_manager / executor |
+| Min notional | $500 (dust guard, 054) | risk_manager |
+| Drawdown breaker | 8% from peak; ±50% → suspect data (054) | risk_manager |
+| Earnings blackout | 2 days | earnings / risk_manager |
+| Macro blackout | 6 h, high-impact only | risk_manager |
+| Sector / correlation | 50% / 0.75 | risk_manager |
+| Stop | −12% stop-limit, GTC after fill, one coverage helper (060) | entries / executor |
+| Target / holding limit | +20% / 60 trading days, close-based | executor |
+| Min stop distance | 1.5% (055) | pricing / entries |
+| Settled close | cancel → terminal → sell → restore stop (063) | protection |
+| Gap-down protection | quote + corporate-actions cross-check (053/054) | protection |
+| Stop-out cooldown | 72 h; override ≥ 24 h and ≥ 1% above the exit (056/059) | cooldown / entries |
+| Insurance | SPY < SMA200 and breadth < 50% → exposure × 0.5, no new entries | signals / mechanical |
+| Core | SPY = residual, 5% rebalance band | mechanical / core_allocation |

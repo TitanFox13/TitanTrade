@@ -1,144 +1,77 @@
 # TitanTrade System Architecture
 
-TitanTrade is a semi-automated equity trading system with two components: a Python backend
-that runs AI-driven analysis and executes trades, and a Flutter desktop app that provides
-a visual dashboard over the backend's state files.
+TitanTrade is a mechanical equity trading system: a Python backend builds a plan from prices, pushes it through programmatic risk gates and executes it on Alpaca with broker-side stops. The FastAPI server is the only front end (Decision 063 deleted the unused Flutter dashboard).
 
 ---
 
 ## Components
 
-### TitanTrade Backend (`TitanTrade/`)
-Python backend responsible for all data collection, mechanical signal generation (Decision 061 —
-the LLMs are out of the trading loop; Claude only proposes universe changes monthly), risk management, and
-trade execution. Runs on a scheduled cadence via APScheduler inside the always-on
-Docker API container (`data/schedule.json`, ET times).
+### Backend (`TitanTrade/`)
+Data collection, the signal rules, the plan, the risk gates, execution, the monthly LLM curation, the SPY benchmark, the HTTP API and the built-in scheduler (APScheduler inside the always-on API container, `data/schedule.json`, America/New_York). See [TitanTrade/docs/architecture.md](../TitanTrade/docs/architecture.md) for internals.
 
-See [TitanTrade/docs/architecture.md](../TitanTrade/docs/architecture.md) for internals.
-
-### TitanTrade Desktop (`titan_trade_app/`)
-Flutter desktop app that reads the backend's JSON state files and presents them as a
-visual dashboard. Mostly read-only — the one write path is watchlist management.
-
-See [titan_trade_app/docs/architecture.md](../titan_trade_app/docs/architecture.md) for internals.
+### Legacy (`TitanTrade/legacy/`)
+Frozen snapshots of the LLM-era pipeline (weekly Claude analyst, Gemini sentry, trailing / TP1 / pyramid manager, intraday price checks, FMP provider, the old backtester, their tests, probe scripts and prompt docs). Not importable, not tested, not built into the Docker image. The last commit on which all of it ran is tagged `v2-llm-pipeline`.
 
 ---
 
 ## System Diagram
 
 ```
-                    +------------------+
-                    |  Server (Docker)  |
-                    |  (Cron Triggers)  |
-                    +--------+---------+
-                             |
-              +--------------+--------------+
-              |                             |
-     Sunday 16:00 ET               Daily 10:15 & 15:30 ET
-              |                             |
-    +---------v----------+       +----------v---------+
-    | weekly_analyst.py   |       | daily_sentry.py    |
-    | Pass 1: Per-stock   |       | Layer 1: SPY check |
-    | Pass 2: Portfolio   |       | Layer 2: Price move|
-    |   ranking (top 3-5) |       | Layer 3: News/AI   |
-    +--------+------------+       +----------+---------+
-             |                               |
-             |  weekly_thesis.json           |  sentry_signals.json
-             +------------+------------------+
-                          |
-                +---------v----------+
-                |   risk_manager.py   |
-                | Gate 1: Confidence  |
-                | Gate 2: Earnings    |
-                | Gate 3: Drawdown    |
-                | Gate 4: Cash reserve|
-                | Gate 5: Vol sizing  |
-                | Gate 6: Sector limit|
-                +--------+-----------+
-                         |
-                +---------v----------+
-                |    executor.py      |
-                | Bracket orders      |
-                | Native stop-losses  |
-                +--------+-----------+
-                         |
-                +--------v----------+
-                |   Alpaca Markets   |
-                |  (Paper/Live)      |
-                +--------+----------+
-                         |
-                +--------v----------+
-                |  state/*.json      |
-                |  (JSON files)      |
-                +--------+----------+
-                         |
-                +--------v----------+
-                | TitanTrade Desktop |
-                | (Flutter app)      |
-                +--------------------+
+APScheduler (api container, America/New_York)
+├─ 09:00 Mon–Fri   fetch          data_fetcher → state/data_bundle.json
+├─ 09:35 Mon–Fri   gapcheck       protection.check_gap_down_protection + executor.ensure_stop_coverage
+├─ 10:15 Mon–Fri   execute        mechanical.refresh_plan → state/plan.json → executor.execute_trades
+├─ 15:30 Mon–Fri   execute        (same)
+├─ 16:30 Mon–Fri   daily_summary  notifier (Discord) + benchmark refresh
+├─ Sun 16:00       full           fetch → signals → execute
+└─ 1st Sun 15:00   curate         curator (Claude) → universe_proposal.json, post_mortem.json
+
+   data_bundle.json ──┐
+   broker positions ──┼──► mechanical.build_plan ──► plan.json
+   trade_log.json  ───┘        items  NEW  (dip signal + free slot: entry, stop −12%, target +20%)
+   open buy orders ───┘               HOLD (held since the strategy start: stop + target from the trade log)
+                               watch (signal but no slot / risk-off / below trend), candidates, insurance,
+                               free_slots, legacy_to_close
+                                          │
+                                          ▼
+                          executor.execute_trades (market open only for orders)
+                            1  orphan close — any non-core position without a plan item (cancel → settle → sell)
+                            2  gap-down protection
+                            3  SPY core → residual target (scale × 95% − overlay − planned slots)
+                            4  stop-out cooldown scan (broker stop fills → 72 h cooldown)
+                            5  expired-bracket resubmission
+                            6  NEW items → risk_manager (8 gates) → one near-market bracket → GTC stop on fill
+                            7  HOLD items → stop coverage; +target / holding-limit exits (cancel → settle → sell)
+                                          │
+                                          ▼
+                                  Alpaca (paper / live)
+                                          │
+                                          ▼
+                     state/*.json ◄──► FastAPI /api/* at https://trade.praguefun.cz (Cloudflare tunnel)
 ```
 
 ---
 
-## Component Boundary
+## The Strategy
 
-The two components communicate over HTTP. The backend exposes a REST API; the app polls it.
-
-| Direction | What | Endpoint |
-|-----------|------|----------|
-| Backend → App | Portfolio, trades, theses, sentry, near misses, costs | `GET /api/*` |
-| App → Backend | Watchlist edits | `PUT /api/watchlist` |
-
-The app polls all endpoints at a configurable interval (default 30s). The API is served
-by the backend's FastAPI server, exposed publicly at `https://trade.praguefun.cz` via
-a Cloudflare tunnel.
-
----
-
-## AI Agents
-
-Two AI models run in distinct roles:
-
-| Agent | Model | Cadence | Role |
-|-------|-------|---------|------|
-| The Analyst | Claude Opus 4.8 (adaptive thinking) | Weekly (Sunday) | Deep two-pass portfolio analysis |
-| The Sentry | Gemini Flash Lite (3.1, structured output) | Daily (×2) | Fast binary conflict detection |
-
-See [docs/agent_instructions.md](agent_instructions.md) for agent design and behavior.
+- **Entry**: a watchlist name closes ≥ 8% below its 90-day high while above its 150-day SMA. Candidates are ranked deepest dip first and take the free slots (3 × 25% of equity, flat sizing). The order is one bracket at the live price + 0.3% with a −12% stop and a +20% target; a GTC stop replaces the bracket's DAY stop leg on fill.
+- **Exits**: the broker stop, the +20% target and the 60-trading-day holding limit. Nothing else sells a position.
+- **Core**: SPY is the residual of the book — exposure scale × 95% minus the overlay — so the account is fully invested unless slots are in use.
+- **Insurance**: exposure halves only while SPY is below its 200-day SMA *and* fewer than half of the 11 sector ETFs are above theirs. New entries pause while risk-off; held positions keep their exits.
+- **Parameters** live in `data/watchlist.json` → `settings.mechanical` (Decision 062 plateau) and are read at every run.
 
 ---
 
 ## Risk Architecture
 
-Nine programmatic gates sit between every AI recommendation and actual trade execution
-(confidence, earnings, drawdown, cash reserve, overlay cap, position size, sector
-exposure, macro blackout, correlation). No AI output can bypass them — they are
-enforced in code, not in prompts.
+Eight programmatic gates sit between the plan and every entry: earnings blackout, drawdown circuit breaker (with the ±50% suspect-value guard), cash reserve net of pending buys, overlay cap, position size (slot ≥ $500 notional), sector exposure, macro blackout, correlation. They are enforced in code; no input can bypass them.
 
-The gates also defend against *bad broker data*, not just bad AI output (Decision 054):
-orders below a $500 minimum notional are blocked as dust, account values ±50% off the
-recorded peak are treated as data corruption rather than real drawdowns, and gap-down
-liquidations deeper than 30% below the stop are cross-checked against the corporate-actions
-feed so a stock split is never sold as a crash.
+Around the gates: broker-side GTC stops with one coverage helper on every path (Decision 060), a 1.5% minimum stop distance (055), the settled close for every exit (063 — cancel the resting stop, wait for the terminal state, sell, restore the stop if the sell fails), gap-down protection cross-checked against the live quote and the corporate-actions feed (053/054), and a 72 h re-entry cooldown after a stop-out with an override only after 24 h at ≥ 1% above the exit (056/059).
 
-Entry validation additionally refuses degenerate setups (Decision 055): a stop closer
-than 1.5% to the entry (a noise-level stop that would tag out within minutes), and any
-entry or bracket resubmission for a ticker whose current sentry signal is ABORT (the
-executor is about to exit it — entering first just forces a same-minute round-trip).
+See [TitanTrade/docs/risk_management.md](../TitanTrade/docs/risk_management.md).
 
-The same floor guards the weekly review's stop raises (Decision 058): the market-open run
-that applies Sunday's ADJUST level measures it against the position's live mark and keeps the
-existing stop when the raise sits at/above the price or inside 1.5% of it — Sunday's level
-meets Monday's gap. Within one run the executor also re-reads the broker's cash after every
-executed entry, so an instantly-filled bracket (no longer an open order) cannot be spent twice.
+---
 
-Protective exits are symmetric (Decision 056): a broker-side stop-loss fill starts the
-same 72h re-entry cooldown an ABORT does (with the same sentry-confirmed override), and
-weekly-review ADJUST levels are never applied to a position opened after the review was
-generated — they were computed for a position that no longer exists. The cooldown record
-carries the exit price, and the override only re-enters once the price is at least 1%
-above it (Decision 059) — measured against the thesis stop alone, "recovered" was true
-for nearly every exit and the system re-bought the same names at the same price a day
-later.
+## The LLM's Place
 
-See [TitanTrade/docs/risk_management.md](../TitanTrade/docs/risk_management.md) for details.
+Claude runs once a month (`curate`) and proposes universe changes plus a post-mortem of the month's trades. The proposal is written to `state/universe_proposal.json`, posted to Discord, and applied by the operator through `PUT /api/watchlist`. It cannot place, size or close an order. See [docs/agent_instructions.md](agent_instructions.md).

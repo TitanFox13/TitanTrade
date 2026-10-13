@@ -1,408 +1,161 @@
 # Data Schemas
 
-## 0. Enhanced Data Bundle (`data_fetcher.py` output)
-
-The data bundle now includes technical indicators, market context, and earnings:
+## 1. Watchlist (`data/watchlist.json`)
 
 ```json
 {
-  "generated_at": "2026-03-29T20:00:00Z",
-  "market_context": {
-    "market_regime": "bullish",
-    "vix": { "level": 16.5, "classification": "normal" },
-    "treasury": { "yield_10y": 4.25, "yield_2y": 3.95 },
-    "spy": {
-      "return_1d": 0.3, "return_5d": 1.2, "return_20d": 2.8,
-      "indicators": { "rsi_14": 55.2, "...": "..." }
-    },
-    "qqq": { "...": "..." },
-    "sector_rotation": {
-      "performance_5d": { "Technology": 1.5, "Healthcare": -0.3, "..." : "..." },
-      "strongest": [["Technology", 1.5], ["Financials", 1.2]],
-      "weakest": [["Utilities", -1.1], ["Real Estate", -0.8]]
-    }
-  },
-  "stocks": {
-    "AAPL": {
-      "ohlcv_recent": [ "... last 5 bars ..." ],
-      "technical_indicators": {
-        "rsi_14": 42.5,
-        "macd": { "macd_line": 0.85, "signal_line": 0.62, "histogram": 0.23 },
-        "bollinger": { "upper": 192.5, "middle": 186.8, "lower": 181.1 },
-        "atr_14": 3.25,
-        "price_vs_sma": {
-          "current_price": 185.5, "sma_20": 186.8, "sma_50": 183.2, "sma_200": 178.5,
-          "above_sma_50": true, "above_sma_200": true, "golden_cross": true
-        },
-        "volume": { "avg_volume_5d": 52000000, "avg_volume_20d": 48000000, "volume_ratio_5d_20d": 1.08 }
-      },
-      "atr_14": 3.25,
-      "news": [ "..." ],
-      "sec_filings": [ "..." ],
-      "earnings": {
-        "next_earnings_date": "2026-04-25",
-        "days_until_earnings": 27,
-        "is_blocked": false
-      }
-    }
-  }
-}
-```
-
----
-
-## 0b. Mechanical signal inputs (Decision 061)
-
-Per stock in the data bundle: `signal_inputs = {close, high_lookback, sma_trend, lookback_days, trend_sma_days}` (computed from the full 250-day history, since only `DISPLAY_DAYS` bars are saved). In `market_context.breadth`: `{sma_days, sectors_above, sectors_total, pct, flags, spy_close, spy_sma, spy_above_sma}`.
-
-`state/strategy.json`: `{"strategy": "mechanical", "started_at": ISO, "decision": "061"}` — positions whose opening BUY predates `started_at` are legacy and get no thesis.
-
-`state/signals.json`: `{generated_at, strategy, started_at, insurance: {risk_off, spy_above_sma, sector_breadth, exposure_scale}, breadth, candidates: [{ticker, dip_pct, chosen}], held_mechanical, legacy_to_close, pending_buys, free_slots, new_signals, params}`.
-
-`state/universe_proposal.json`: `{generated_at, watchlist, proposal: {remove: [{ticker, reason}], add: [{ticker, sector, reason}], notes}, raw, status}`. `state/post_mortem.json`: `{generated_at, review: {summary, observations}, raw}`. `state/backtest_mechanical.json`: `{summary, trades, walk_forward?}`.
-
-Watchlist settings gained `strategy` (`"mechanical"` | `"llm"`) and an optional `mechanical` object overriding `dip_pct, dip_lookback_days, trend_sma_days, slot_pct, max_slots, tp_pct, stop_pct, max_hold_days, insurance_sma_days, insurance_breadth, insurance_scale, sector_etfs`.
-
-## 1. Watchlist Configuration (`data/watchlist.json`)
-
-```json
-{
-  "watchlist": ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "META", "BRK.B", "LLY", "JPM"],
+  "watchlist": ["CRWD", "ANET", "LLY", "DXCM", "HCA", "JPM", "GS", "DVN", "WMT", "URI", "GE", "DASH", "DECK", "FCX", "EQIX"],
   "settings": {
-    "risk_per_trade": 0.10,
     "trading_mode": "paper",
-    "stop_loss_pct": 0.05
+    "mechanical": {
+      "dip_pct": 0.08, "dip_lookback_days": 90, "trend_sma_days": 150,
+      "max_hold_days": 60, "tp_pct": 0.2, "stop_pct": 0.12,
+      "slot_pct": 0.25, "max_slots": 3,
+      "insurance_sma_days": 200, "insurance_breadth": 0.5, "insurance_scale": 0.5
+    }
   }
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `watchlist` | string[] | Ticker symbols to track |
-| `settings.risk_per_trade` | float | Max % of portfolio per position (0.10 = 10%) |
-| `settings.trading_mode` | string | "paper" or "live" |
-| `settings.stop_loss_pct` | float | Stop-loss % below entry (0.05 = 5%) |
+`settings.mechanical` may carry any of `config.MECHANICAL_FIELDS` (the keys above plus `sector_etfs`, `core_ticker`, `core_rebalance_band_pct`); missing keys use the `TradingSettings` defaults. `TRADING_MODE` in the environment overrides `trading_mode`. `PUT /api/watchlist` rewrites `watchlist` and keeps `settings`.
 
----
+## 2. Schedule (`data/schedule.json`)
 
-## 2. Data Bundle (`data_fetcher.py` output)
+`{"timezone": "America/New_York", "jobs": [{"id", "name", "command", "cron": {day_of_week?, day?, hour, minute}, "enabled"}]}`. Commands: `full`, `fetch`, `signals`, `execute`, `gapcheck`, `resubmit`, `daily_summary`, `curate`.
+
+## 3. Data Bundle (`state/data_bundle.json`)
 
 ```json
 {
-  "generated_at": "2026-03-29T20:00:00Z",
+  "generated_at": "2026-10-13T13:00:12+00:00",
+  "market_context": {
+    "generated_at": "…",
+    "spy": {"close": 778.1, "return_1d": 0.3, "return_5d": 1.2, "return_20d": 2.8},
+    "breadth": {"sma_days": 200, "sectors_above": 5, "sectors_total": 11, "pct": 0.4545,
+                "flags": {"XLK": true, "XLE": false, "…": null},
+                "spy_close": 778.1, "spy_sma": 741.2, "spy_above_sma": true}
+  },
+  "economic_calendar": [{"date": "2026-10-15T12:30:00+00:00", "event": "CPI", "…": "…"}],
+  "correlation_matrix": {"AAPL": {"MSFT": 0.71}},
   "stocks": {
-    "AAPL": {
-      "ohlcv": [
-        {
-          "date": "2026-03-28",
-          "open": 185.00,
-          "high": 187.50,
-          "low": 184.20,
-          "close": 186.80,
-          "volume": 52000000
-        }
-      ],
-      "news": [
-        {
-          "title": "Apple Reports Strong Q1 Services Revenue",
-          "snippet": "Apple's services segment grew 18% year-over-year...",
-          "published_at": "2026-03-27T14:30:00Z",
-          "source": "Reuters"
-        }
-      ],
-      "sec_filings": [
-        {
-          "form_type": "8-K",
-          "filed_at": "2026-03-28T16:00:00Z",
-          "description": "Results of Operations and Financial Condition",
-          "url": "https://www.sec.gov/..."
-        }
-      ]
+    "DASH": {
+      "ohlcv_recent": [{"date": "2026-10-12", "open": 0, "high": 0, "low": 0, "close": 0, "volume": 0}],
+      "atr_14": 7.85,
+      "signal_inputs": {"close": 232.1, "high_lookback": 283.0, "sma_trend": 225.4, "lookback_days": 90, "trend_sma_days": 150},
+      "earnings": {"next_earnings_date": "2026-11-05", "days_until_earnings": 23, "is_blocked": false},
+      "sector": "Communication Services"
     }
   }
 }
 ```
 
----
+A stock that failed to fetch carries `"error"` and empty inputs; the plan treats it as no signal.
 
-## 3. Weekly Thesis (`state/weekly_thesis.json`)
+## 4. Strategy (`state/strategy.json`)
 
-```json
-{
-  "generated_at": "2026-03-29T20:00:00Z",
-  "expires_at": "2026-04-12T20:00:00Z",
-  "theses": [
-    {
-      "ticker": "AAPL",
-      "thesis": "BULLISH",
-      "confidence": 0.78,
-      "target_entry_price": 185.50,
-      "stop_loss_price": 176.23,
-      "take_profit_price": 198.00,
-      "thesis_breach_condition": "CEO departure or revenue guidance cut >10%",
-      "reasoning": "Strong iPhone 16 cycle, services revenue acceleration..."
-    }
-  ]
-}
-```
+`{"strategy": "mechanical", "started_at": "2026-10-13T12:43:24+00:00", "decision": "061"}` — written once by the first signals run. A position whose opening BUY predates `started_at` is legacy: no plan item, sold by the orphan close.
 
-| Field | Type | Values | Description |
-|-------|------|--------|-------------|
-| `thesis` | string | BULLISH / BEARISH / NEUTRAL | Weekly directional call |
-| `confidence` | float | 0.0 - 1.0 | AI confidence level |
-| `target_entry_price` | float / null | | Limit order price for entry (null if not BULLISH) |
-| `stop_loss_price` | float / null | | Native broker stop-loss price (null if not BULLISH) |
-| `take_profit_price` | float / null | | Broker-side take-profit limit (null if no clear catalyst) |
-| `thesis_breach_condition` | string | | Event that invalidates thesis |
-| `reasoning` | string | | Full AI reasoning text |
-
----
-
-## 4. Sentry Signal (`daily_sentry.py` output)
+## 5. Plan (`state/plan.json`)
 
 ```json
 {
-  "generated_at": "2026-03-29T09:00:00Z",
-  "run_type": "pre_market",
-  "signals": [
-    {
-      "ticker": "AAPL",
-      "signal": "CONTINUE",
-      "conflicting_headlines": [],
-      "reasoning": "No material news contradicting bullish thesis"
-    }
-  ]
+  "generated_at": "2026-10-13T14:15:03+00:00",
+  "strategy": "mechanical",
+  "started_at": "2026-10-13T12:43:24+00:00",
+  "params": {"dip_pct": 0.08, "dip_lookback_days": 90, "trend_sma_days": 150, "slot_pct": 0.25, "max_slots": 3,
+             "tp_pct": 0.2, "stop_pct": 0.12, "max_hold_days": 60,
+             "insurance_sma_days": 200, "insurance_breadth": 0.5, "insurance_scale": 0.5},
+  "stale_inputs": false,
+  "insurance": {"risk_off": false, "spy_above_sma": true, "sector_breadth": 0.4545, "exposure_scale": 1.0},
+  "breadth": {"sma_days": 200, "sectors_above": 5, "sectors_total": 11, "pct": 0.4545, "spy_close": 778.1, "spy_sma": 741.2, "spy_above_sma": true},
+  "items": [
+    {"ticker": "DASH", "action": "HOLD", "sector": "Communication Services", "entry_price": 192.9,
+     "stop_price": 169.75, "target_price": 231.48, "opened_at": "2026-10-13T14:16:40+00:00",
+     "reason": "held since 2026-10-13; stop 169.75, target 231.48, limit 60 trading days"},
+    {"ticker": "URI", "action": "NEW", "sector": "Industrials", "entry_price": 1068.4,
+     "stop_price": 940.19, "target_price": 1282.08, "dip_pct": 0.112,
+     "reason": "11.2% below its 90-day high, above its 150-day SMA"}
+  ],
+  "watch": [{"ticker": "GS", "sector": "Financials", "dip_pct": 0.09, "above_trend": true, "reason": "signal, no free slot"}],
+  "candidates": [{"ticker": "URI", "dip_pct": 0.112, "chosen": true}, {"ticker": "GS", "dip_pct": 0.09, "chosen": false}],
+  "held": ["DASH", "JPM"],
+  "legacy_to_close": [],
+  "pending_buys": [],
+  "free_slots": 1,
+  "new_signals": 1
 }
 ```
 
-| Field | Type | Values | Description |
-|-------|------|--------|-------------|
-| `signal` | string | CONTINUE / ABORT | Whether to proceed with thesis |
-| `conflicting_headlines` | string[] | | Headlines that triggered ABORT |
-
----
-
-## 5. Portfolio State (`state/portfolio.json`)
-
-```json
-{
-  "last_updated": "2026-03-29T15:30:00Z",
-  "cash_balance": 100000.00,
-  "positions": [
-    {
-      "ticker": "AAPL",
-      "shares": 50,
-      "entry_price": 185.50,
-      "entry_date": "2026-03-24",
-      "current_price": 186.80,
-      "stop_loss_price": 176.23,
-      "unrealized_pnl": 65.00
-    }
-  ]
-}
-```
-
----
+| Field | Meaning |
+|-------|---------|
+| `items[].action` | `NEW` — enter this run (entry = last close; the executor re-prices at the live mark × 1.003 and recomputes stop / target); `HOLD` — held mechanical position (stop / target from the opening BUY in the trade log) |
+| `watch[]` | Names with a dip signal that were not taken (no free slot, risk-off, pending order) and names not in an uptrend, with the reason |
+| `candidates[]` | Every name with a signal, ranked deepest dip first, `chosen` for the ones that became NEW items |
+| `stale_inputs` | True when the bundle's lookback / SMA lengths differ from `params` — re-run `fetch` |
+| `insurance.exposure_scale` | 1.0, or `insurance_scale` while `risk_off` |
+| `free_slots` | `max_slots − held − pending_buys` |
 
 ## 6. Trade Log (`state/trade_log.json`)
 
 ```json
-{
-  "trades": [
-    {
-      "id": "trade_001",
-      "ticker": "AAPL",
-      "action": "BUY",
-      "shares": 50,
-      "price": 185.50,
-      "total_value": 9275.00,
-      "timestamp": "2026-03-24T09:35:00Z",
-      "trigger": "weekly_thesis",
-      "thesis_id": "thesis_2026_w13",
-      "reasoning": "Bullish thesis with 78% confidence, entry at target price"
-    }
-  ]
-}
+{"trades": [{
+  "id": "trade_3f9a1c2e", "ticker": "URI", "action": "BUY", "shares": 26.0, "price": 1068.4, "total_value": 27778.4,
+  "timestamp": "2026-10-13T14:16:41+00:00", "trigger": "entry", "reasoning": "11.2% below its 90-day high, above its 150-day SMA",
+  "stop_price": 940.19, "target_price": 1282.08, "order_type": "bracket", "dip_pct": 0.112,
+  "risk_flags": [], "gate_results": {"earnings": {"passed": true, "detail": "…"}, "…": "…"},
+  "context": {"close": 1065.0, "high_lookback": 1199.5, "sma_trend": 1010.2, "atr_14": 24.1,
+              "earnings_days_away": 12, "sector": "Industrials", "spy_return_5d": 1.2, "sector_breadth": 0.4545}
+}]}
 ```
 
-| Field | Type | Values | Description |
-|-------|------|--------|-------------|
-| `action` | string | BUY / SELL | Trade direction |
-| `trigger` | string | weekly_thesis / sentry_abort / stop_loss | What triggered the trade |
-| `confidence` | float / null | 0.0 - 1.0 | AI confidence (BUY trades only) |
-| `stop_loss_price` | float / null | | Broker stop-loss price (BUY trades only) |
-| `take_profit_price` | float / null | | Broker take-profit price (BUY trades only) |
-| `risk_flags` | string[] | | Warnings from risk gates |
-| `gate_results` | object / null | | Per-gate pass/fail results (see below) |
-| `context` | object / null | | Market/technical snapshot at trade time (see below) |
+| `trigger` | Written by |
+|-----------|-----------|
+| `entry`, `bracket_resubmission` | entries (BUY) |
+| `target`, `holding_limit` | executor via the settled close (SELL) |
+| `orphan_close`, `gap_down_protection` | protection (SELL) |
+| `core_rebalance` | core_allocation (BUY / SELL of SPY) |
 
-### Gate Results Object
+Records written before Decision 063 carry `stop_loss_price` / `take_profit_price`; readers (`trade_state.position_entry_stop`, `mechanical._hold_item`) accept both spellings. Past 500 records the oldest are moved to `state/archive/trade_log.<timestamp>.json`.
 
-Each key is a gate name (`confidence`, `earnings`, `drawdown`, `cash_reserve`, `overlay_cap`, `position_size`, `sector_exposure`, `macro_blackout`, `correlation`). Min-notional (dust) blocks report under `position_size`; suspect broker-data blocks report under `drawdown` (Decision 054):
-
-```json
-{
-  "confidence": { "passed": true, "detail": "Confidence 0.78 >= 0.70" },
-  "earnings": { "passed": true, "detail": "Not in earnings blackout" },
-  "drawdown": { "passed": true, "detail": "Drawdown 2.1% within limit" },
-  "cash_reserve": { "passed": true, "detail": "$68,000 available after reserve" },
-  "position_size": { "passed": true, "detail": "53 shares (9.8% of portfolio)" },
-  "sector_exposure": { "passed": true, "detail": "Sector at 15.2%" }
-}
-```
-
-### Trade Context Object
-
-```json
-{
-  "market_regime": "bullish",
-  "vix_level": 16.5,
-  "vix_classification": "normal",
-  "spy_return_1d": 0.3,
-  "technicals": {
-    "rsi_14": 42.5,
-    "macd_histogram": 0.23,
-    "atr_14": 3.25,
-    "price_vs_sma_50": "above",
-    "price_vs_sma_200": "above"
-  },
-  "sentry_signal": "CONTINUE",
-  "sentry_reasoning": "No material news contradicting thesis",
-  "recent_news": ["Apple Reports Strong Q1...", "iPhone 16 demand..."],
-  "earnings_days_away": 27,
-  "sector": "Technology"
-}
-```
-
----
+`gate_results` keys: `earnings`, `drawdown`, `cash_reserve`, `overlay_cap`, `position_size`, `sector_exposure`, `macro_blackout`, `correlation`, each `{"passed": bool, "detail": str}`.
 
 ## 7. Near Misses (`state/near_misses.json`)
 
-Trades that were blocked by 2 or fewer risk gates. Helps identify opportunities
-that were close to execution.
+Entries blocked by ≤ 2 gates: `{"near_misses": [{"id": "nm_…", "timestamp", "ticker", "dip_pct", "entry_price", "stop_price", "target_price", "reason", "failed_gates": ["cash_reserve"], "gate_results": {…}, "total_gates_failed": 1, "context": {…same as the trade context…}}]}`. Archived past 200.
+
+## 8. Cooldowns (`state/abort_cooldown.json`)
+
+`{"DVN": {"aborted_at": "<fill time ISO>", "reason": "stop-loss exit", "exit_price": 43.42}}` — stamped by the stop-out scan at the fill time (idempotent); expires after 72 h; the override needs ≥ 24 h and a price ≥ 1% above `exit_price`.
+
+## 9. Costs (`state/costs.json`)
+
+`{"costs": [{"id": "cost_…", "timestamp", "service": "claude", "model": "claude-opus-4-8", "description": "Universe review", "input_tokens", "output_tokens", "estimated_cost_usd", "run_type": "curator"}]}`.
+
+## 10. Curation (`state/universe_proposal.json`, `state/post_mortem.json`)
+
+`{"generated_at", "watchlist": [...], "proposal": {"remove": [{"ticker", "reason"}], "add": [{"ticker", "sector", "reason"}], "notes"}, "raw", "status": "advisory — apply through the watchlist editor"}` and `{"generated_at", "review": {"summary", "observations": [...]}, "raw"}`.
+
+## 11. Benchmark Metrics (`state/benchmark_metrics.json`)
 
 ```json
 {
-  "near_misses": [
-    {
-      "id": "nm_abc123",
-      "timestamp": "2026-03-29T14:05:00Z",
-      "ticker": "AAPL",
-      "confidence": 0.78,
-      "thesis": "BULLISH",
-      "target_entry_price": 185.50,
-      "stop_loss_price": 176.23,
-      "take_profit_price": 198.00,
-      "reasoning": "Strong iPhone cycle...",
-      "failed_gates": ["earnings"],
-      "gate_results": { "...same structure as above..." },
-      "total_gates_failed": 1,
-      "context": { "...same structure as trade context..." }
-    }
-  ]
+  "insufficient_data": false, "n_days": 13, "beta": 0.841, "alpha_annual_pct": 32.46,
+  "sharpe_strategy": 0.46, "sharpe_spy": -1.44, "info_ratio": 3.97, "correlation": 0.883, "r_squared": 0.78,
+  "vol_strategy_annual_pct": 18.72, "vol_spy_annual_pct": 19.66,
+  "total_return_strategy_pct": 0.36, "total_return_spy_pct": -1.54, "excess_return_pct": 1.9,
+  "up_capture": 0.98, "down_capture": 0.71, "up_days": 7, "down_days": 6,
+  "max_drawdown_strategy_pct": -3.68, "max_drawdown_spy_pct": -4.46, "rf_annual_pct": 0.0,
+  "window_start": "2026-06-01", "window_end": "2026-06-18", "since": "2026-06-01", "lookback_days": null,
+  "computed_at": "2026-06-22T16:30:00Z", "verdict": "Adding value — positive alpha AND higher risk-adjusted return than SPY."
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `failed_gates` | string[] | Names of gates that blocked the trade |
-| `gate_results` | object | Per-gate pass/fail with detail strings |
-| `total_gates_failed` | int | 1 or 2 (only recorded if <= 2) |
-| `context` | object | Market/technical snapshot at time of near miss |
+Beta = cov / var of daily returns vs SPY; alpha = Jensen's, annualized; `down_capture < up_capture` is the defensive signature; drawdowns ≤ 0. Equity comes from Alpaca's portfolio history (the just-closed session appended from the 15Min series), SPY from SIP daily closes, aligned by trading date.
 
----
+## 12. Other
 
-## 8. Operational Costs (`state/costs.json`)
-
-Tracks per-API-call token usage and estimated costs for AI model inference.
-
-```json
-{
-  "costs": [
-    {
-      "id": "cost_abc12345",
-      "timestamp": "2026-03-29T20:05:00Z",
-      "service": "claude",
-      "model": "claude-opus-4-8",
-      "description": "Weekly Pass 1: AAPL",
-      "input_tokens": 4800,
-      "output_tokens": 1200,
-      "estimated_cost_usd": 0.03240,
-      "run_type": "weekly_analyst"
-    },
-    {
-      "id": "cost_def67890",
-      "timestamp": "2026-03-30T13:00:00Z",
-      "service": "gemini",
-      "model": "gemini-3.1-flash-lite",
-      "description": "Daily sentry: AAPL",
-      "input_tokens": 2100,
-      "output_tokens": 350,
-      "estimated_cost_usd": 0.00035,
-      "run_type": "daily_sentry"
-    }
-  ]
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `service` | string | "claude" or "gemini" |
-| `model` | string | Model identifier used for the call |
-| `description` | string | Human-readable label for the call |
-| `input_tokens` | int | Prompt/input token count |
-| `output_tokens` | int | Completion/output token count |
-| `estimated_cost_usd` | float | Estimated cost based on published pricing |
-| `run_type` | string | "weekly_analyst" or "daily_sentry" |
-
-## 9. Benchmark Metrics (`state/benchmark_metrics.json`)
-
-Risk-adjusted performance of the strategy vs SPY. Written by `benchmark.py`
-(refreshed by the `daily_summary` job; recomputable via the `benchmark` CLI or
-`/api/benchmark/refresh`). Computed from the Alpaca portfolio-equity history
-aligned to SPY daily closes by trading date.
-
-```json
-{
-  "insufficient_data": false,
-  "n_days": 13,
-  "beta": 0.841,
-  "alpha_annual_pct": 32.46,
-  "sharpe_strategy": 0.46,
-  "sharpe_spy": -1.44,
-  "info_ratio": 3.97,
-  "correlation": 0.883,
-  "r_squared": 0.78,
-  "vol_strategy_annual_pct": 18.72,
-  "vol_spy_annual_pct": 19.66,
-  "total_return_strategy_pct": 0.36,
-  "total_return_spy_pct": -1.54,
-  "excess_return_pct": 1.9,
-  "up_capture": 0.98,
-  "down_capture": 0.71,
-  "up_days": 7,
-  "down_days": 6,
-  "max_drawdown_strategy_pct": -3.68,
-  "max_drawdown_spy_pct": -4.46,
-  "rf_annual_pct": 0.0,
-  "window_start": "2026-06-01",
-  "window_end": "2026-06-18",
-  "since": "2026-06-01",
-  "lookback_days": null,
-  "computed_at": "2026-06-22T16:30:00Z",
-  "verdict": "Adding value — positive alpha AND higher risk-adjusted return than SPY."
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `n_days` | int | Number of daily returns in the window |
-| `beta` | float\|null | Realized exposure to SPY (cov/var of daily returns); null if SPY had zero variance |
-| `alpha_annual_pct` | float\|null | Jensen's alpha, annualized — return after paying for beta. Magnitude is noisy on short windows |
-| `sharpe_strategy` / `sharpe_spy` | float\|null | Annualized return / volatility, strategy vs SPY |
-| `info_ratio` | float\|null | Active return ÷ tracking error (annualized) |
-| `up_capture` / `down_capture` | float\|null | Avg strategy move ÷ avg SPY move on SPY-up / SPY-down days; `down < up` is defensive |
-| `max_drawdown_strategy_pct` / `max_drawdown_spy_pct` | float | Largest peak-to-trough decline over the window (≤ 0) |
-| `window_start` / `window_end` | string | First / last aligned trading date |
-| `since` / `lookback_days` | string\|null / int\|null | Window anchor (one or the other) |
-| `verdict` | string | One-line plain-English classification |
+- `state/portfolio.json`: `{"last_updated", "portfolio_value", "cash", "positions": [{"symbol", "qty", "avg_entry_price", "current_price", "market_value", "unrealized_plpc"}]}` — written at the end of every execute run; the daily summary and `/api/portfolio` (when Alpaca is unreachable) read it.
+- `state/peak_portfolio.json`: `{"peak_value": float, "updated_at"}` — never written with a value > 150% of the previous peak (suspect-value guard).
+- `state/alert_state.json`: dedup timestamps for the observability alerts and `stuck_in_cash_since`.
+- `state/backtest_mechanical.json`: `{"summary", "trades", "walk_forward"?}` from `backtest-mech`.
+- `state/sector_cache.json`: ticker → sector (Finnhub), refreshed when a name is missing.

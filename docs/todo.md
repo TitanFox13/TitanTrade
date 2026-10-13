@@ -18,7 +18,7 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [x] **Backtester for the mechanical strategy** (`backtest/mechanical.py`, `backtest-mech`, `download-history --days N` with sector ETFs) using the same `signals.py` code as live; walk-forward helper and a coarse built-in grid.
 - [x] Schedule rewritten (`data/schedule.json`); `strategy: "mechanical"` in `data/watchlist.json`; 612 tests green.
 - [x] **Deployed 2026-10-13 12:42 UTC** (commit `bdc558a`, both images, 7 jobs, health ok); first signals run 12:43 UTC: strategy started, insurance on, DASH signal, 8 legacy positions queued for the 14:15 UTC orphan close. **Verify after the 14:15 UTC run**: legacy positions sold, SPY at ≈75% of equity, DASH bracket placed/filled at ≈20%, `/api/signals` served.
-- [ ] **Flutter app follow-ups**: show `/api/signals` (insurance state, ranked candidates, slots) and `/api/universe-proposal`; the sentry and price-check panels now show static mechanical content.
+- [x] ~~Flutter app follow-ups~~ — the app was deleted in Decision 063 (unused); `/api/plan` replaced `/api/signals`.
 - [ ] **Go/stop rule (rewritten)**: fund ≥ $25k only when a quarter of paper behaves like the backtest AND return ≥ SPY − 2 pp/yr over the window AND max DD ≤ 0.7 × SPY's in any SPY drawdown ≥ 10%.
 
 ## Phase 2.1: Parameter search on long history (2026-10-13) — Decision 062
@@ -27,6 +27,17 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [x] Chosen plateau midpoint applied to `data/watchlist.json` settings.mechanical: dip 8% / 90 d / SMA150 / 60 d / +20% / −12%, 25% × 3 slots, insurance unchanged (SMA200, breadth 0.5, scale 0.5).
 - [ ] **Watch**: the first weeks under the new parameters — candidate count per run (expect more than under 10%/60 d), the 70% overlay cap trimming the third slot, and that targets/time exits fire at 20% / 60 d.
 - [ ] **Next search (not before 6 months of live data)**: extend the sector universe test with a hindsight-free *name* universe (e.g. the S&P 100 constituents as of 2010 from a point-in-time list), add a second hold-out era, and re-run stage 3 only — stage 1/2 numbers are already on file (`data/param_search/stage*.json`, regenerate with the scripts).
+
+## Phase 2.2: Cleanup after the conversion — legacy freeze, plan schema, app deleted (2026-10-13) — Decision 063
+Operator: "larger cleanup — redundant code and docs, perhaps even the architecture"; answers: old LLM code → `legacy/` (not deleted), Flutter app → deleted, thesis/sentry schema → plain plan.
+- [x] `legacy/` holds the LLM-era modules, their tests, the pyramid probe script, the full indicator suite and the prompt-engineering doc; tag `v2-llm-pipeline` = last commit with all 613 tests green. Not importable, not collected, not in the image.
+- [x] `titan_trade_app/` deleted; dashboard-only endpoints removed; the API has 18 routes.
+- [x] `state/plan.json` (`mechanical.build_plan` / `refresh_plan`) replaces `weekly_thesis.json` + `sentry_signals.json` + `signals.json`; the executor consumes NEW / HOLD items directly. Trade records carry `stop_price` / `target_price` (old spellings still read).
+- [x] Eight gates (confidence gate removed); `handle_entry` = one near-market bracket + GTC stop on fill; `close_position_settled` for every exit — fixes the 40310000 orphan-close rejections of the 14:15 UTC first run (FCX / HCA / LLY were left bare until the manual trigger).
+- [x] Config and env trimmed (Gemini, FMP, SEC, `strategy`, `risk_per_trade`, `stop_loss_pct`); `data/watchlist.json` settings = `trading_mode` + `mechanical`.
+- [x] 236 tests, all mocked, ruff clean; docs rewritten for one system (CLAUDE.md, root docs, backend docs).
+- [ ] **Deploy and verify**: both images rebuilt; 7 jobs registered; `signals` writes `plan.json` and `/api/plan` serves it; next execute run's log shows the plan items and no `weekly_thesis` reference; old `weekly_thesis.json` / `sentry_signals.json` / `signals.json` / `trailing_stops.json` / `pricecheck_signals.json` / `thesis_history.json` in `state/` can be deleted after the first clean run.
+- [ ] **Technical debt left on purpose**: `scripts/param_search/` is research code (ruff E70x style only); `broker.py` (570 lines) and `benchmark.py` are unchanged from the LLM era and could lose a few unused helpers at the next pass.
 
 ## Phase 1.36: September 29 checkup — exit-anchored cooldown override, closed-session benchmark equity, ATR floor rejected (2026-09-29) — Decision 059
 Prompted by the operator's "the bot has been underperforming for months". Checkup (Sep 22 → Sep 28): 0 errors in 30 days, 8 jobs `completed`, $6.26 AI in September, both images current, every position stop-covered, cash 5.7%. Windows to Sep 28: clean since Jul 8 (57 td) **+3.18% vs SPY +2.71%** (beta 0.64, Sharpe 1.22 vs 1.09); since the Aug 12 peak **−2.55% vs −0.89%**; since ADR 057 +1.15% vs +0.06%; since ADR 046 +10.30% vs +3.72%; inception +11.64% vs +21.15% (all of it April). Verdict given: three months ≈ tie with SPY in a flat market; the lag since the peak is churn — 20 of 37 exits since Aug 13 re-bought within 7 days at a higher price ($1,915 re-entry gap ≈ 1.7% of equity). **Operator decisions (2026-09-29): keep the bot in paper, do not fund it, ship the data-backed fixes, judge the bot on a new clean window from the deploy date, and decide funding by the rule below.**
@@ -432,7 +443,7 @@ From a 14-day paper-log review (see Decision 035). All six found bugs fixed:
 - [ ] Portfolio rebalancing automation
 - [ ] Multi-account support
 
-## Phase 5: Desktop App (Trade Tracker)
+## Phase 5: Desktop App (Trade Tracker) — deleted in Decision 063 (unused; the API is the only front end)
 - [x] Flutter project structure and routing (go_router)
 - [x] Data models matching TitanTrade JSON schemas
 - [x] File-reading providers with 30-second polling
@@ -450,13 +461,14 @@ From a 14-day paper-log review (see Decision 035). All six found bugs fixed:
 - [ ] Export trade history to CSV
 
 ## Known Limitations
-- GitHub Actions cron has 5-15 min scheduling variance (mitigated by server deployment)
-- Flutter app reads state files read-only except for watchlist management
-- Flutter app requires local filesystem access (not a web app)
-- FMP free tier rate limits (250/day) tight with market context + 10 stocks
-- Alpaca bracket orders are day-only (not GTC), need daily resubmission
-- SEC-API real-time tier is paid ($49/month)
-- No intraday price monitoring between sentry runs
+- Alpaca bracket orders are DAY-only (no GTC bracket): expired entries are resubmitted the next morning, and a filled bracket needs its own GTC stop (placed on fill and by the 09:35 ET coverage job)
+- Whole shares only: a 25% slot below one share is skipped (irrelevant above ~$5k equity at current prices)
+- Positions are evaluated at two run times a day (10:15 / 15:30 ET); the stop is the only intraday protection, by design
+- The strategy's edge on a hindsight-free universe is small (+0.5 to +1 pp/yr before insurance, Decision 062) and period-dependent; it loses to SPY in low-volatility bulls
+- The benchmark window still carries the CRWD split artifact of July 2026 until it rolls out
+- The API has no authentication of its own (Cloudflare tunnel only)
 
 ## Technical Debt
-- None yet (greenfield project)
+- `scripts/param_search/`: research scripts, not lint-clean (E70x), numpy-only, documented in their README
+- `broker.py` and `benchmark.py` were not touched by the Decision 063 cleanup; a few helpers may be unused now
+- `legacy/` is frozen and will rot against the current module layout — it is a reference, not a fallback (use the tag)

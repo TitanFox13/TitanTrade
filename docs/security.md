@@ -2,70 +2,31 @@
 
 ## API Key Management
 
-### Rules
-1. **Never commit API keys** to the repository
-2. All keys loaded via environment variables (`os.environ`)
-3. `.env` file is in `.gitignore`
-4. GitHub Secrets used for CI/CD
-5. No API keys in log files or AI prompts
+1. **Never commit API keys.** All keys come from the environment (`.env`, git-ignored, loaded by `python-dotenv`; Docker reads the same file).
+2. Required: `ALPACA_PAPER_KEY` / `ALPACA_PAPER_SECRET`, `CLAUDE_KEY`. Optional: `ALPACA_LIVE_KEY` / `ALPACA_LIVE_SECRET`, `FRED_KEY`, `FINNHUB_KEY`, `DISCORD_WEBHOOK_URL`, `CLOUDFLARE_TUNNEL_TOKEN`.
+3. No key is ever logged or sent to the LLM; the curator prompt carries price and trade data only.
+4. Rotate keys quarterly (Alpaca dashboard, Anthropic console, FRED / Finnhub account pages).
 
 ### Dual Alpaca Credentials
-- `.env` holds separate paper and live Alpaca key pairs
-- Legacy `ALPACA_KEY`/`ALPACA_SECRET` are accepted as paper-key fallback
-- `load_config()` selects the correct credentials based on `trading_mode`
-- Live mode raises an error if live keys are missing (fail-safe)
-
-### Key Rotation
-- Rotate all API keys quarterly
-- Alpaca keys (both paper and live) can be regenerated in the dashboard
-- FMP keys regenerated in account settings
-- Claude/Gemini keys managed via their respective consoles
+- Separate paper and live key pairs; legacy `ALPACA_KEY` / `ALPACA_SECRET` are accepted as the paper fallback.
+- `load_config()` selects the pair from `trading_mode`; live mode without live keys raises (fail-safe).
+- Live mode is enabled via `PUT /api/settings/mode` (or `settings.trading_mode` in `data/watchlist.json`); the API refuses it when live keys are missing. `TRADING_MODE` in the environment overrides the file.
 
 ## Trading Safety
 
-### Paper Trading Default
-- System defaults to paper trading mode
-- Paper Alpaca credentials (`ALPACA_PAPER_KEY`, `ALPACA_PAPER_SECRET`) are required
-- Live Alpaca credentials (`ALPACA_LIVE_KEY`, `ALPACA_LIVE_SECRET`) are optional
-- Live trading requires toggling via `PUT /api/settings/mode` (or directly in watchlist.json)
-- The API refuses to enable live mode if live keys are not configured
-- The Flutter app shows a confirmation dialog before enabling live trading
-- Each mode uses its own credential set and Alpaca endpoint (paper vs live)
-
-### Position Limits
-- Hard-coded maximum position size: 10% of portfolio
-- Hard-coded stop-loss: 5% below entry
-- These limits are enforced in code, not just in AI prompts
-- AI cannot override position sizing rules
-
-### Order Validation
-- Every order is validated before submission:
-  - Is the market open? (or is this a valid extended-hours order?)
-  - Does the order exceed position size limits?
-  - Is there already an open position for this ticker?
-  - Is the thesis still valid (not expired)?
+- Paper trading is the default and the current state (todo Phase 2.0 gates going live).
+- Position limits are code, not configuration the LLM can reach: 25% slots, max 3, 70% overlay cap, 5% cash reserve, $500 minimum notional, 8% drawdown breaker, 50% sector cap, 75% correlation cap.
+- Every entry is a bracket with a −12% stop; a GTC stop replaces the DAY leg on fill, and the stop-coverage job re-places a missing stop five minutes into every session.
+- Every exit cancels the resting stop, waits for the cancel to settle, sells at market and restores the stop if the sell fails — a position is never left bare by a failed exit.
+- The only LLM output the system reads is the monthly universe proposal, and it is applied by a human.
 
 ## Data Security
 
-### Sensitive Data
-- Portfolio values and positions are stored in `state/` files
-- These files should NOT be in a public repository
-- Use a private repo or encrypt state files for public repos
-
-### AI Prompt Safety
-- Never include API keys in AI prompts
-- AI reasoning is logged but does not contain credentials
-- Input data is hashed for reproducibility without exposing raw data
+- `state/` holds portfolio values, positions and the trade log; it is git-ignored and bind-mounted into the containers. Keep the repository private.
+- The API is read-mostly: the write paths are the watchlist, the trading mode and scheduler enable / trigger. It sits behind a Cloudflare tunnel; there is no authentication in the app itself, so access control is the tunnel's.
 
 ## Operational Security
 
-### GitHub Actions
-- All secrets stored as encrypted repository secrets
-- Workflow files are version-controlled and auditable
-- Bot commits use a dedicated email address
-- Branch protection recommended on main branch
-
-### Rate Limiting
-- Built-in retry logic with exponential backoff
-- Respects API rate limits to avoid account suspension
-- Maximum 3 retries before graceful failure
+- Retry logic with exponential backoff and `Retry-After` support on every external call; 4xx errors are not retried and keep the broker's diagnostic body (`HTTPError`).
+- Discord webhook posts retry transient failures twice; a notification failure never fails the job.
+- The Docker image copies `src/` and `data/` only; `legacy/` and `scripts/` never reach production.

@@ -1,192 +1,68 @@
 # API Reference
 
-## External APIs Used
+## External APIs
 
-### 1. Market Data — Alpaca + FRED + Finnhub (Decision 040)
+### Alpaca Data API
+**Purpose**: daily bars, latest quotes, corporate actions, news (curator)
+**Base URL**: `https://data.alpaca.markets` (same keys as trading)
 
-The former FMP dependency (€25/mo) was replaced with free sources behind the
-`market_data.py` facade. `DATA_PROVIDER=fmp` (+ a valid `FMP_KEY`) reverts to
-the retained FMP provider (`data_providers/fmp.py`) with no code change.
+| Endpoint | Used for |
+|----------|----------|
+| `/v2/stocks/{symbol}/bars` | 250-day daily bars for the bundle (IEX feed); SIP for `download-history` and the benchmark's SPY series (must end ≥ 15 min in the past) |
+| `/v2/stocks/{symbol}/quotes/latest` | Live price for entries, gap-down cross-check, core rebalance |
+| `/v1beta1/corporate-actions` | Split check before a deep gap-down liquidation |
+| `/v1beta1/news` | Headlines for the curator brief |
 
-#### Alpaca Data API
-**Purpose**: OHLCV bars, latest quotes, daily change %, news
-**Base URL**: `https://data.alpaca.markets` (IEX feed, free tier; same keys as trading)
+### FRED (St. Louis Fed)
+**Purpose**: economic-release calendar for the macro gate. **Auth**: `FRED_KEY` query parameter.
+`/release/dates?release_id=…` for CPI (10), jobs (50), PPI (46), GDP (53), PCE (54), retail (17). FOMC dates come from `data/fomc_dates.json`.
 
-| Endpoint | Purpose |
-|----------|---------|
-| `/v2/stocks/{symbol}/bars` | OHLCV daily candles (250-day history) |
-| `/v2/stocks/{symbol}/quotes/latest` | Current price quote |
-| `/v1beta1/news` | News headlines (cursor-paginated, deduplicated) |
+### Finnhub
+**Purpose**: earnings dates (blackout gate), company sector, analyst recommendations (curator). **Auth**: `FINNHUB_KEY` query parameter.
+`/calendar/earnings`, `/stock/profile2`, `/stock/recommendation`.
 
-#### FRED (St. Louis Fed)
-**Purpose**: VIX, treasury yields, economic-release calendar
-**Base URL**: `https://api.stlouisfed.org/fred`
-**Auth**: free `FRED_KEY` as query parameter
+All market-data functions fail open (`[]` / `None` / `{}`) on a missing key or error; the gates that consume them skip rather than block.
 
-| Endpoint | Purpose |
-|----------|---------|
-| `/series/observations` | VIX level, 10Y/2Y treasury yields |
-| `/release/dates?release_id=…` | Upcoming CPI (10), jobs (50), PPI (46), GDP (53), PCE (54), retail (17) release dates |
+### Alpaca Trading API
+**Base URL**: `https://paper-api.alpaca.markets` (paper) / `https://api.alpaca.markets` (live). **Auth**: `APCA-API-KEY-ID` / `APCA-API-SECRET-KEY` headers.
 
-FOMC meeting dates are not a FRED release — they live in `data/fomc_dates.json`
-(verified against federalreserve.gov).
+| Endpoint | Method | Used for |
+|----------|--------|----------|
+| `/v2/account` | GET | Equity, cash, buying power |
+| `/v2/positions`, `/v2/positions/{symbol}` | GET | Positions (incl. `unrealized_plpc` for the target exit) |
+| `/v2/positions/{symbol}` | DELETE | Close at market (settled close) |
+| `/v2/orders` | POST | Bracket entries, GTC stop-limits, market core trades |
+| `/v2/orders?status=open` | GET | Open orders (the held stop leg of a bracket is **not** returned) |
+| `/v2/orders?status=closed` | GET | Expired brackets, filled stops (cooldown scan) |
+| `/v2/orders/{id}` | GET / DELETE | Poll a cancel to a terminal state; cancel |
+| `/v2/clock` | GET | Market open check |
+| `/v2/account/portfolio/history` | GET | Benchmark equity series (1D + 15Min) |
 
-#### Finnhub
-**Purpose**: per-ticker earnings dates, analyst recommendation trend, sector
-**Base URL**: `https://finnhub.io/api/v1`
-**Auth**: free `FINNHUB_KEY` as query parameter
-
-| Endpoint | Purpose |
-|----------|---------|
-| `/calendar/earnings` | Upcoming earnings dates (blackout gate) |
-| `/stock/recommendation` | Analyst recommendation mix (strong-buy…strong-sell) |
-| `/stock/profile2` | Company sector |
-
-All market-data functions fail open (`[]`/`None`/`{}`) on a missing key or
-error — the gates that consume them skip rather than block. Price-target
-consensus was dropped with FMP (no free source).
----
-
-### 2. SEC EDGAR (free)
-**Purpose**: SEC filing monitoring (8-K, 10-Q, 10-K, Form 4)
-**Base URLs**:
-  - `https://www.sec.gov/files/company_tickers.json` — ticker→CIK lookup
-  - `https://data.sec.gov/submissions/CIK{cik}.json` — per-company filings
-**Auth**: None. A descriptive `User-Agent` header with contact email is required
-(set `SEC_USER_AGENT` env var). Rate limit: 10 req/sec globally.
-
-#### Endpoints Used
-
-| Endpoint | Purpose |
-|----------|---------|
-| `/files/company_tickers.json` | Map ~10k US-listed tickers to CIKs (cached locally) |
-| `/submissions/CIK{cik}.json` | All recent filings for a company, newest-first |
-
-#### Example: Fetch GS filings
-```
-GET https://data.sec.gov/submissions/CIK0000886982.json
-Headers: User-Agent: TitanTrade/1.0 (contact@example.com)
-
-Response includes filings.recent with parallel arrays:
-  form, filingDate, accessionNumber, primaryDocument, primaryDocDescription
-```
-
-#### Filing URL Construction
-```
-https://www.sec.gov/Archives/edgar/data/{cik_unpadded}/{accession_no_no_dashes}/{primary_doc}
-```
+### Anthropic Claude
+**Purpose**: the monthly universe proposal and post-mortem only. `POST https://api.anthropic.com/v1/messages`, header `x-api-key`. Model `claude-opus-4-8` (`CLAUDE_MODEL`), adaptive thinking, 16,000 max tokens, no sampling parameters. Every call is cost-logged to `state/costs.json`.
 
 ---
 
-### 3. Alpaca Markets
-**Purpose**: Trade execution (paper and live)
-**Base URL (Paper)**: `https://paper-api.alpaca.markets`
-**Base URL (Live)**: `https://api.alpaca.markets`
-**Auth**: Headers `APCA-API-KEY-ID` and `APCA-API-SECRET-KEY`
+## TitanTrade HTTP API (FastAPI, `/api/`)
 
-#### Endpoints Used
-
-| Endpoint | Method | Purpose |
+| Endpoint | Method | Returns |
 |----------|--------|---------|
-| `/v2/account` | GET | Account info and buying power |
-| `/v2/positions` | GET | Current open positions |
-| `/v2/positions/{symbol}` | GET | Position for specific stock |
-| `/v2/orders` | POST | Place new order |
-| `/v2/orders` | GET | List open orders |
-| `/v2/orders/{id}` | DELETE | Cancel an order |
+| `/api/health` | GET | `{"status": "ok"}` |
+| `/api/portfolio` | GET | Live account + positions from Alpaca |
+| `/api/plan` | GET | `state/plan.json` — NEW / HOLD items, watch, candidates, insurance, free slots (404 until the first signals run) |
+| `/api/trades` | GET | `state/trade_log.json` |
+| `/api/near-misses` | GET | `state/near_misses.json` |
+| `/api/costs` | GET | `state/costs.json` |
+| `/api/universe-proposal` | GET | The monthly Claude proposal (404 until the first `curate`) |
+| `/api/post-mortem` | GET | The monthly post-mortem (404 until the first `curate`) |
+| `/api/benchmark` | GET | Last computed metrics vs SPY |
+| `/api/benchmark/refresh` | GET | Recompute now (`?days=N` or `?since=YYYY-MM-DD`) |
+| `/api/settings` | GET | `{trading_mode, mechanical, live_keys_configured}` |
+| `/api/settings/mode` | PUT | `{"trading_mode": "paper" \| "live"}`; 400 when live keys are missing |
+| `/api/watchlist` | GET / PUT | `data/watchlist.json`; PUT body `{"watchlist": [...]}` (settings preserved) |
+| `/api/scheduler` | GET | All jobs with status, next / last run |
+| `/api/scheduler/{job_id}` | GET | One job + its run history (in-memory, per container) |
+| `/api/scheduler/{job_id}/trigger` | POST | Run a job now (background) |
+| `/api/scheduler/{job_id}/enabled` | PUT | `{"enabled": bool}` |
 
-#### Example: Place Limit Buy
-```
-POST /v2/orders
-{
-  "symbol": "AAPL",
-  "qty": 10,
-  "side": "buy",
-  "type": "limit",
-  "limit_price": 185.50,
-  "time_in_force": "day"
-}
-```
-
----
-
-### 4. Anthropic Claude API
-**Purpose**: Weekly deep fundamental analysis
-**Base URL**: `https://api.anthropic.com/v1`
-**Auth**: Header `x-api-key: {CLAUDE_KEY}`
-
-#### Endpoint Used
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/messages` | POST | Send analysis prompt, receive thesis |
-
-#### Configuration
-- Model: `claude-opus-4-8` (default) or configurable via `CLAUDE_MODEL` env var (Decision 050 — the analyst is the alpha source, so it runs the most capable model)
-- Adaptive thinking enabled; no `temperature` (Opus 4.8 rejects sampling params)
-- Max tokens: 16000 (headroom for thinking tokens)
-- Refusal stop-reason handling + thinking-aware text extraction
-
----
-
-### 5. Google Gemini API
-**Purpose**: Daily fast sentiment conflict detection
-**Base URL**: `https://generativelanguage.googleapis.com/v1beta`
-**Auth**: API key as query parameter `?key={GEMINI_KEY}`
-
-#### Endpoint Used
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/models/{model}:generateContent` | POST | Sentiment classification |
-
-#### Configuration
-- Model: `gemini-3.1-flash-lite` (default; `GEMINI_MODEL` env override)
-- 503-fallback chain (Decision 041): `gemini-2.5-flash` → `gemini-2.5-flash-lite` → `gemini-flash-latest`
-- Structured output (`responseMimeType: application/json` + `responseSchema`), thinking budget 0 (Decision 039)
-- Max tokens: 2048
-
----
-
-## TitanTrade Internal API (FastAPI)
-
-The backend exposes these endpoints at `{base_url}/api/`:
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/health` | GET | Health check (returns `{"status": "ok"}`) |
-| `/api/portfolio` | GET | Current portfolio holdings |
-| `/api/trades` | GET | Trade history log |
-| `/api/theses` | GET | Weekly analysis theses |
-| `/api/sentry` | GET | Daily sentry signals |
-| `/api/near-misses` | GET | Trades blocked by 1-2 risk gates |
-| `/api/costs` | GET | API call costs and token usage |
-| `/api/trailing-stops` | GET | Trailing stop state |
-| `/api/pricecheck` | GET | Intraday price check signals |
-| `/api/benchmark` | GET | Performance vs SPY: beta, alpha, Sharpe, capture ratios (last computed) |
-| `/api/benchmark/refresh` | GET | Recompute benchmark metrics live (`?days=N`, `?since=YYYY-MM-DD`) |
-| `/api/backtest-results` | GET | Latest backtest results |
-| `/api/watchlist` | GET | Current watchlist |
-| `/api/watchlist` | PUT | Update watchlist tickers |
-| `/api/settings` | GET | Trading mode + whether live keys are configured |
-| `/api/settings/mode` | PUT | Switch between `paper` and `live` trading |
-| `/api/actions/analyze` | POST | Trigger weekly analysis (background job) |
-| `/api/actions/download-history` | POST | Download OHLCV data (background job) |
-| `/api/actions/backtest` | POST | Run backtest (background job) |
-| `/api/jobs/{job_id}` | GET | Poll background job status |
-| `/api/scheduler` | GET | List all scheduled jobs with status |
-| `/api/scheduler/{job_id}/trigger` | POST | Manually trigger a scheduled job |
-| `/api/scheduler/{job_id}/enabled` | PUT | Enable or disable a scheduled job |
-
-### Decision 061 endpoints
-
-| Endpoint | Returns |
-|---|---|
-| `GET /api/signals` | `state/signals.json`: insurance state (`risk_off`, `spy_above_sma`, `sector_breadth`, `exposure_scale`), ranked dip candidates with `chosen`, `held_mechanical`, `legacy_to_close`, `pending_buys`, `free_slots`, the parameters in force. 404 until the first signals run. |
-| `GET /api/universe-proposal` | `state/universe_proposal.json`: the monthly LLM proposal (`remove` / `add` with reasons, `notes`), advisory — apply via `PUT /api/watchlist`. 404 until the first `curate` run. |
-
-`GET /api/theses` and `GET /api/sentry` keep their schemas; under the mechanical strategy the thesis file is regenerated at every signals run (`strategy: "mechanical"`, `insurance`, `ranking`) and the sentry file carries CONTINUE for every selected/held name with the insurance state under `market_health`.
-
-## Internal Data Schemas
-
-See `docs/data_schemas.md` for JSON schema definitions of all internal data structures.
+The API has no authentication of its own; it is reachable only through the Cloudflare tunnel at `https://trade.praguefun.cz`. Schemas of the files it serves: [data_schemas.md](data_schemas.md).
