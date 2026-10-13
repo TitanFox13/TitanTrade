@@ -98,6 +98,21 @@ Momentum ranking lost to anti-momentum in every window — short-horizon mean re
 
 **Reading across (a)–(d) and Evidence 2:** every rule that sells a dip (sentry, price check, weekly drops, momentum ranking, tight analyst stops) lost; every rule that held through dips won. The only regime where dip-selling paid — a sustained decline — was Feb–Apr 2025, and the mechanical trend filter did help there, then gave it back by July. No component has shown *return* skill; the mechanical risk layer has shown *drawdown* control, and it is the only layer that can be backtested.
 
+**(e) Can we have both — return ≥ SPY and a smaller drawdown? Same 2-year test, protection moved from the stock level to the portfolio level** (basket figures, 2024-10-14 → 2026-10-12 / 2025 crash / crash+recovery):
+
+| Design | 2-yr return | max DD | Sharpe | crash | crash + recovery |
+|---|---|---|---|---|---|
+| SPY | +33.2% | −19.0% | 0.96 | −19.0% | +0.8% |
+| EW all 15, no protection | +55.3% | −23.5% | 1.22 | −23.3% | +1.5% |
+| Per-name SMA50 filter, slot to cash (stock-level, like today) | +22.6% | −11.2% | 1.03 | −10.8% | −2.0% |
+| Per-name SMA50 filter, slots renormalised | +28.3% | −22.9% | 0.84 | −21.8% | −12.6% |
+| EW all, exposure = share of names above SMA50 (partial de-risk) | +24.8% | **−10.3%** | 1.19 | −10.2% | +0.3% |
+| **Breadth switch: EW all while ≥ 50% of names above SMA200, else cash** | **+34.0%** | **−16.8%** | 1.07 | −15.0% | −7.7% |
+| SPY > 200-day switch, else cash (Faber) | +25.5% | −19.9% | 0.87 | −19.1% | −13.9% |
+| SPY > 200-day switch, else half exposure | +40.1% | −21.2% | 1.15 | −21.1% | −6.1% |
+
+Against SPY, "both" was achieved by exactly one design (the breadth switch: +34.0% vs +33.2%, −16.8% vs −19.0%), marginally, and only because the universe's raw +55% left room to pay the whipsaw premium. Against the unprotected universe, no protection achieved both: every one cost return. The window contains only a V-shaped crash (the worst case for any protection); over a cycle with a sustained bear, slow portfolio-level switches historically earn their premium back. Conclusion: "both" is a *horizon* question, not a false dilemma — reachable in expectation over a cycle with slow, portfolio-level de-risking (breadth / partial exposure), never within every window and never verifiable in a three-month live test; and the per-name dip-selling the live system does today is the most expensive way to buy protection (it pays the premium weekly on single-name noise). Renormalising slots into the still-trending names is the worst of both (it concentrates into the last names to fall).
+
 **Recommendation recorded (not decided):**
 1. Retire the sentry's exit authority (both the −5% reference rule and the LLM override) and the price-check abort; the resting stop + 3×ATR trail becomes the only exit. Keep Gemini only as a fact flag (earnings/binary events in the next N days → no new entry) and the market-stress input to the core hedge. Highest confidence, largest measured leak.
 2. Retire the weekly analyst's selection, direction and confidence roles: hold every universe name that passes the mechanical gates, sized by ATR, no confidence scaling. Then test its one surviving job — the initial stop level — against k×ATR on the two-year backtest; if mechanical ≈ analyst, the weekly LLM leaves the trading loop.
