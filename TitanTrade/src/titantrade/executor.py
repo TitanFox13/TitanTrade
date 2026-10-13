@@ -31,9 +31,12 @@ from titantrade.entries import (
 from titantrade.positions import manage_trailing_stop, maybe_pyramid_position
 from titantrade.pricing import adjust_stop_too_tight
 from titantrade.core_allocation import _is_core_ticker, manage_core_position
+from titantrade.mechanical import core_target_pct
+from titantrade.signals import trading_days_between
 from titantrade.protection import check_gap_down_protection, close_orphaned_positions
 from titantrade.trade_state import (
     _append_trade, _load, _trade_record, position_entry_stop, position_opened_after,
+    position_opened_at,
 )
 from titantrade.alerts import _maybe_alert_stuck_in_cash, _maybe_alert_ticker_churn
 from titantrade.cooldown import _record_abort_cooldown
@@ -418,6 +421,96 @@ def _manage_held_bullish(
     return trades
 
 
+def _close_position_settled(
+    ticker: str, cfg: Config, *, trigger: str, reason: str,
+) -> dict[str, Any] | None:
+    """Cancel resting orders, wait for each to settle, market-sell, record.
+
+    Same cancel-settle pattern as the abort and bearish-exit paths (ADR 037/042):
+    the protective stop holds the shares, so closing before its cancel settles
+    403s. On a failed close the stop is restored so the position is not naked.
+    """
+    open_orders = get_open_orders(ticker, cfg)
+    for order in open_orders:
+        try:
+            cancel_order(order["id"], cfg)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"{trigger} {ticker}: cancel {order.get('id')} failed: {exc}")
+    for order in open_orders:
+        _wait_for_order_canceled(order["id"], cfg)
+    position = get_position(ticker, cfg)
+    if not position:
+        return None
+    qty = float(position.get("qty") or 0)
+    if qty <= 0:
+        return None
+    try:
+        close_position_at_market(ticker, cfg)
+    except Exception as exc:  # noqa: BLE001
+        log.error(f"{trigger} close failed for {ticker}: {exc} — restoring stop")
+        stop = next(
+            (float(o.get("stop_price") or 0) for o in open_orders
+             if o.get("type") in ("stop", "stop_limit") and o.get("side") == "sell"),
+            0.0,
+        )
+        if stop > 0:
+            try:
+                place_native_stop_loss(ticker, qty, stop, cfg)
+            except Exception as rexc:  # noqa: BLE001
+                log.error(f"CRITICAL: {ticker} is naked — stop restore failed: {rexc}")
+        return None
+    trade = _trade_record(
+        ticker=ticker, action="SELL", shares=qty,
+        price=float(position.get("current_price") or 0),
+        trigger=trigger, reasoning=reason,
+    )
+    _append_trade(trade)
+    log_decision(log, "executor", ticker, f"SELL ({trigger})", reason)
+    return trade
+
+
+def _manage_held_mechanical(
+    ticker: str,
+    thesis: dict[str, Any],
+    cfg: Config,
+    *,
+    market_open: bool,
+    thesis_generated_at: str | None,
+) -> list[dict[str, Any]]:
+    """Decision 061 held-position management: keep the stop on the book, then
+    exit at the target or after the holding period, evaluated at the executor
+    runs (close-based exits, exactly as backtested). No trailing, TP1,
+    pyramiding or sentry — the stop, the target and the clock are the exits."""
+    position = get_position(ticker, cfg)
+    if not position:
+        return []
+    _ensure_coverage(
+        ticker, thesis, thesis_generated_at, cfg,
+        market_open=market_open, position=position,
+    )
+    if not market_open:
+        return []
+    qty = float(position.get("qty") or 0)
+    if qty <= 0:
+        return []
+    try:
+        plpc = float(position.get("unrealized_plpc") or 0)
+    except (TypeError, ValueError):
+        plpc = 0.0
+    days = trading_days_between(position_opened_at(ticker))
+    if plpc >= cfg.trading.tp_pct:
+        trigger = "mechanical_tp"
+        reason = f"{plpc:+.1%} reached the +{cfg.trading.tp_pct:.0%} target after {days} trading days"
+    elif days >= cfg.trading.max_hold_days:
+        trigger = "mechanical_time"
+        reason = f"{days} trading days held (limit {cfg.trading.max_hold_days}) at {plpc:+.1%}"
+    else:
+        return []
+    log.info(f"Mechanical exit for {ticker}: {reason}")
+    trade = _close_position_settled(ticker, cfg, trigger=trigger, reason=reason)
+    return [trade] if trade else []
+
+
 def _position_live_price(position: dict[str, Any] | None) -> float | None:
     """Best available live mark for a broker position (Alpaca ``current_price``),
     or None when missing/non-numeric — callers fail open (Decision 058)."""
@@ -547,16 +640,43 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
 
     executed: list[dict[str, Any]] = orphan_trades + gap_trades
 
+    # Decision 061: under the mechanical strategy SPY is the residual —
+    # exposure scale × investable − (held overlay + this run's planned slots) —
+    # so the core frees the cash the entries below will need, and buys SPY
+    # back after exits. The legacy pipeline keeps its fixed core target.
+    mechanical = cfg.trading.strategy == "mechanical"
+    core_target: float | None = None
+    if mechanical:
+        held_now = {p.get("symbol") for p in positions}
+        planned = sum(
+            1 for t in thesis_doc["theses"]
+            if t.get("selected_for_trading") and t.get("review_action") == "NEW"
+            and t.get("ticker") not in held_now
+        )
+        scale = float((sentry_doc.get("market_health", {}) or {}).get("exposure_scale") or 1.0)
+        core_target = core_target_pct(
+            cfg, portfolio_value, positions,
+            planned_new_slots=planned, exposure_scale=scale,
+        )
+        log.info(
+            f"Mechanical core target {core_target:.0%} of equity "
+            f"(planned new slots {planned}, exposure scale {scale})"
+        )
+
     # Always-deployed core allocation: maintain SPY (or hedge under stress) at
     # the configured target. Solves the "83% cash in a rising market" problem
     # — the portfolio participates in the market regardless of whether the AI
     # has actionable picks.
     if market_open:
         try:
-            core_trade = manage_core_position(cfg)
+            core_trade = manage_core_position(cfg, target_pct=core_target)
             if core_trade:
                 executed.append(core_trade)
                 positions = get_positions(cfg)
+                # The core trade moved cash; size the entries on fresh numbers.
+                account = get_account(cfg)
+                portfolio_value = float(account.get("portfolio_value", portfolio_value))
+                cash_balance = float(account.get("cash", cash_balance))
         except Exception as exc:
             log.error(f"Core position management failed: {exc}")
 
@@ -907,12 +1027,18 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
         # 4b. Holding a BULLISH position: ensure stop-loss + trailing stop
         # ------------------------------------------------------------------
         elif direction == "BULLISH" and ticker in held_tickers:
-            executed.extend(_manage_held_bullish(
-                ticker, thesis, cfg, market_open=market_open,
-                data_bundle=data_bundle, sentry=sentry,
-                portfolio_value=portfolio_value,
-                thesis_generated_at=thesis_doc.get("generated_at"),
-            ))
+            if mechanical:
+                executed.extend(_manage_held_mechanical(
+                    ticker, thesis, cfg, market_open=market_open,
+                    thesis_generated_at=thesis_doc.get("generated_at"),
+                ))
+            else:
+                executed.extend(_manage_held_bullish(
+                    ticker, thesis, cfg, market_open=market_open,
+                    data_bundle=data_bundle, sentry=sentry,
+                    portfolio_value=portfolio_value,
+                    thesis_generated_at=thesis_doc.get("generated_at"),
+                ))
     # Clean up trailing state for tickers no longer held
     try:
         final_positions = get_positions(cfg)

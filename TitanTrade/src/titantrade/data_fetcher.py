@@ -20,6 +20,7 @@ from typing import Any
 from titantrade import market_data
 from titantrade.config import Config, STATE_DIR, load_config
 from titantrade.earnings import build_earnings_context
+from titantrade.signals import rolling_high, sma
 from titantrade.indicators import atr as compute_atr
 from titantrade.indicators import compute_all_indicators
 from titantrade.logger import get_logger
@@ -140,11 +141,23 @@ def build_stock_data(ticker: str, cfg: Config) -> dict[str, Any]:
     # Only send last N days of OHLCV to Claude (it doesn't need 250 candles)
     recent_bars = all_bars[-DISPLAY_DAYS:] if len(all_bars) > DISPLAY_DAYS else all_bars
 
+    # Decision 061: the three numbers the mechanical entry rule needs, computed
+    # from the full history here because only DISPLAY_DAYS of bars are saved.
+    closes = [b["close"] for b in all_bars]
+    signal_inputs = {
+        "close": closes[-1] if closes else None,
+        "high_lookback": rolling_high(closes, cfg.trading.dip_lookback_days),
+        "sma_trend": sma(closes, cfg.trading.trend_sma_days),
+        "lookback_days": cfg.trading.dip_lookback_days,
+        "trend_sma_days": cfg.trading.trend_sma_days,
+    }
+
     return {
         "ohlcv_recent": recent_bars,
         "ohlcv_full": all_bars,  # Kept for correlation/RS computation
         "technical_indicators": indicators,
         "atr_14": stock_atr,
+        "signal_inputs": signal_inputs,
         "news": fetch_news(ticker, cfg),
         "sec_filings": fetch_sec_filings(ticker),
         "insider_trades": fetch_insider_trades(ticker),

@@ -1,6 +1,18 @@
 # TitanTrade Features
 
-## AI Features
+## Strategy — mechanical (Decision 061)
+
+Since 2026-10-13 every trading decision is a rule on prices; the LLMs are out of the loop.
+
+- **Entry**: a watchlist name closes ≥ 10% below its 60-day high while above its 200-day SMA. Candidates ranked deepest dip first fill the free slots (3 × 20% of equity, flat sizing). The entry is a near-market two-tranche bracket through the unchanged nine gates, with a −12% stop and a +10% target.
+- **Exits**: the GTC stop-limit (−12%), the +10% target and the 40-trading-day holding limit, the latter two evaluated at every executor run. Nothing else sells a position.
+- **Core**: SPY is the residual — exposure scale × 95% − overlay — so the account is fully invested unless slots are in use.
+- **Insurance**: two-signal confirmation; exposure halves only while SPY is below its 200-day SMA *and* fewer than half of the 11 sector ETFs are above theirs. New entries pause while risk-off; held positions keep their exits.
+- **Signals snapshot**: `state/signals.json` / `GET /api/signals` — insurance state, ranked candidates, slots, legacy positions awaiting close.
+- **Backtester**: `backtest-mech` runs the same rule code on daily closes with next-close fills, costs and walk-forward; the parameter search is the operator's next phase.
+- **The LLM's jobs now**: a monthly universe-curation proposal and a post-mortem (`curate`), both advisory.
+
+## AI Features (legacy — `strategy: "llm"`, unscheduled since Decision 061)
 
 ### Two-Pass Weekly Analysis (Claude Opus 4.8, adaptive thinking)
 - Runs on `claude-opus-4-8` with adaptive thinking — the most capable model on the strategy's alpha source (Decision 050; replaced the retired `claude-sonnet-4-20250514`)
@@ -133,14 +145,14 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - **Gap-down protection**: detects unfilled stop-limit orders after overnight gaps and immediately market-sells the unprotected position. The stale stop's cancel is polled to a terminal state *before* the market sell so the sell isn't rejected for still-held qty (Decision 035). Before selling, the live market quote is cross-checked (Decision 053), and gaps deeper than 30% below the stop are checked against the corporate-actions feed — a recent split announcement means the stop is stale, not the market, so the sale is skipped and alerted instead of liquidating at a split-artifact bottom (Decision 054, the CRWD 4:1 lesson)
 - **Never-bare guarantee** (Decision 035): after a partial sell (TP1), the sell is polled to `filled` before the breakeven stop is sized; `place_native_stop_loss` clamps to the broker-reported `available` qty if momentarily short. A position is never left without a stop after a partial sell or stop replace.
 
-### Trailing Stops
+### Trailing Stops (legacy — not used by the mechanical strategy)
 - Activates once a position gains 5%+ from entry price
 - Trails 3.0× ATR below the high-water mark (ratchets up only, never down); falls back to a 5% trail when ATR is unavailable. Widened from 2.5× (Decision 048): a full-cycle backtest incl. the 2022 −25% bear showed wider trailing captures more upside in rallies with no added downside (the trailing isn't the binding exit in a bear)
 - Never trails below entry price (locks in at least breakeven)
 - Never trails below the original thesis stop (doesn't widen risk)
 - Cancels the existing stop and replaces with a higher one each execution cycle
 
-### Pyramiding Into Winners
+### Pyramiding Into Winners (legacy — not used by the mechanical strategy)
 - Adds to a position once per ticker when it's working (+5% gain with the trailing stop active, so combined downside is bounded)
 - Adds 50% of the original notional, capped at the per-ticker concentration limit (30% of portfolio)
 - **Cancel → market-buy → re-stop** (Decision 037): a live probe proved Alpaca rejects *both* market and limit buys against a resting protective stop, so the add drops the stop, market-buys (fastest fill = shortest unprotected window), then re-places a stop covering the full enlarged position. Every failure path restores a stop (never silently bare). This is an explicit, bounded exception to the "never bare" model, accepted to enable the feature.
@@ -152,7 +164,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - Weekly position reviews: CONTINUE, ADJUST (update levels), or CLOSE (explicit exit) — the review prompt carries the real days-held from the trade log (Decision 058; it had read 0 for every position)
 - Pass 2 selection filter (only top 3-5 new trades execute)
 
-### Bear Market Hedging
+### Bear Market Hedging (legacy — not used by the mechanical strategy)
 - In bearish/crisis regimes, inverse ETFs (SH, PSQ, SDS) are added to the analysis
 - Claude can recommend buying inverse ETFs to profit from market declines
 - These are regular long positions — no margin or shorting mechanics required
@@ -164,7 +176,7 @@ All indicators computed from 250-day OHLCV history before sending to Claude:
 - **Price-based ABORT exits**: Market sell (urgent, price already moving)
 - **Backtesting**: Configurable slippage model (default 0.15% per fill) for realistic results
 
-### Intraday Price Checks
+### Intraday Price Checks (legacy — not used by the mechanical strategy)
 - Lightweight price-only checks between the 9 AM and 3:30 PM sentry runs
 - Zero LLM cost — only checks SPY drops and per-stock adverse moves
 - Same 3% adverse / 2% SPY thresholds as the sentry's Layer 1 and 2
@@ -333,6 +345,7 @@ AI and broker interactions are mocked via `unittest.mock.patch`.
 - **Trailing Stops** (10 tests): Activation threshold, HWM tracking, never-below-entry, state persistence, cleanup
 - **Price Check** (6 tests): SPY stress abort, per-stock adverse moves, signal file persistence
 - **Gap-Down Protection** (6 tests): Gap detection, stop-limit cancellation, margin tolerance, edge cases
+- **Mechanical strategy** (24 tests): signal rules, insurance, thesis generation, residual core, slot sizing, target/time exits, end-to-end entry, scheduler, backtester, curator, API
 - **Stop coverage after a fill** (9 tests): entry-stop lookup, level choice for re-opened vs older positions, TP-leg recovery at the bracket level, ADJUST-re-opened end-to-end, gapcheck companion
 - **Orphan Close** (7 tests): Expired thesis, missing ticker, zero-qty positions, empty state
 - **Dynamic Entry** (13 tests): Price adjustment, chase limit, invalidated thesis, risk ratio preservation

@@ -6,7 +6,13 @@ TitanTrade's risk management follows the principle: **the system's job is to not
 money, and secondarily to make money.** Every feature exists to prevent catastrophic
 losses. Missed opportunities are cheap; blown accounts are permanent.
 
-## Three Lines of Defense
+## Mechanical strategy (Decision 061) — what protects the book now
+
+- **Position-level**: a GTC stop-limit at −12% on every whole-share overlay position (placed by the bracket, converted on fill, re-placed by the 09:35 stop-coverage job if ever missing — Decision 060), a +10% target and a 40-trading-day limit evaluated at each executor run, and the orphan close for anything without a thesis (legacy positions after the conversion).
+- **Portfolio-level**: flat 20% slots (max 3 → overlay ≤ 60%), the 5% cash reserve, the drawdown circuit breaker, sector/correlation/earnings/macro gates, and the two-signal insurance (SPY < 200-day SMA **and** sector breadth < 50% → exposure halves, no new entries). Fails open when its inputs are unknown.
+- **What no longer sells**: the LLM sentry, the intraday price check, the hedge swap and the trailing/TP1 manager — all measured as net losses or untested (Decision 060 Evidence 3). The sections below describe the legacy `strategy: "llm"` pipeline, kept for A/B runs.
+
+## Three Lines of Defense (legacy pipeline)
 
 ### Line 1: AI Quality Control
 - **Two-pass analysis**: Pass 2 filters out low-quality ideas from Pass 1

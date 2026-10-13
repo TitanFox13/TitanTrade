@@ -163,3 +163,14 @@ re-entered position bare over a weekend. Lesson: an invariant that matters
 gets one function, called from every path that can break it, plus the
 earliest job of the day as a backstop. A guard that skips a block for one
 good reason must not skip the safety check hiding in the same block.
+
+### Backtest What Trades, Trade What You Backtested (Decision 061)
+The LLM pipeline could only be judged forward, one week at a time; after five
+months that was 22 samples, and the verdict ("no signal") took an audit to
+reach. The mechanical replacement was tested on a decade before it ran a day
+live, because the rule code is one module shared by the executor and the
+backtester. Keep it that way: a rule that lives only in the live path cannot
+be tested, and a backtest that re-implements the live rule tests something
+else. Corollary for the coming parameter search: the more you can test, the
+more you must distrust the best result — pick plateaus, hold out time, and
+charge costs.

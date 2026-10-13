@@ -178,6 +178,15 @@ The backend exposes these endpoints at `{base_url}/api/`:
 | `/api/scheduler/{job_id}/trigger` | POST | Manually trigger a scheduled job |
 | `/api/scheduler/{job_id}/enabled` | PUT | Enable or disable a scheduled job |
 
+### Decision 061 endpoints
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/signals` | `state/signals.json`: insurance state (`risk_off`, `spy_above_sma`, `sector_breadth`, `exposure_scale`), ranked dip candidates with `chosen`, `held_mechanical`, `legacy_to_close`, `pending_buys`, `free_slots`, the parameters in force. 404 until the first signals run. |
+| `GET /api/universe-proposal` | `state/universe_proposal.json`: the monthly LLM proposal (`remove` / `add` with reasons, `notes`), advisory — apply via `PUT /api/watchlist`. 404 until the first `curate` run. |
+
+`GET /api/theses` and `GET /api/sentry` keep their schemas; under the mechanical strategy the thesis file is regenerated at every signals run (`strategy: "mechanical"`, `insurance`, `ranking`) and the sentry file carries CONTINUE for every selected/held name with the insurance state under `market_health`.
+
 ## Internal Data Schemas
 
 See `docs/data_schemas.md` for JSON schema definitions of all internal data structures.

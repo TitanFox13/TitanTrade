@@ -142,3 +142,12 @@ lib/
 | `file_picker` | Directory selection on setup |
 | `shared_preferences` | Persist data path + refresh interval |
 | `window_manager` | Window size and title control |
+
+## Backend change: mechanical strategy (Decision 061, 2026-10-13)
+
+The app's data contracts are unchanged, but their meaning moved: `/api/theses` is regenerated
+at every signals run from price rules (NEUTRAL names carry the reason there is no signal),
+`/api/sentry` shows CONTINUE for every selected/held name with the insurance state under
+`market_health`, and `/api/pricecheck` is no longer refreshed. Two new endpoints are not yet
+surfaced: `/api/signals` (insurance state, ranked candidates, slots) and `/api/universe-proposal`
+(the monthly LLM proposal). Follow-up tracked in docs/todo.md Phase 2.0.

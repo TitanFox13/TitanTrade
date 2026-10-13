@@ -14,6 +14,17 @@ For the full system diagram (including the Flutter app), see
 
 ## Pipeline Structure
 
+> **Decision 061 (2026-10-13):** the trading loop is mechanical. Each `execute` job runs
+> `mechanical.refresh_mechanical_signals` (data bundle → `signals.py` rules → the same
+> `weekly_thesis.json` / `sentry_signals.json` schemas) and then `executor.execute_trades`
+> unchanged: orphan close → gap check → residual SPY core → bracket resubmission → entries
+> through the nine gates → held-position exits (target / time; the stop is on the broker).
+> The weekly LLM analyst and the daily LLM sentry described below are the legacy
+> `strategy: "llm"` pipeline, unscheduled but runnable for A/B. Dependency flow gains
+> `signals` (leaf) → `mechanical` (uses broker, trade_state, core_allocation, risk_manager,
+> market_context) → `executor`; `curator` depends on `weekly_analyst._call_claude` only.
+
+
 ### Weekly Pipeline (Sunday 16:00 ET)
 
 1. **Data Collection** (`data_fetcher.py`)

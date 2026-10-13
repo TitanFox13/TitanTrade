@@ -126,7 +126,7 @@ class TestCommandRegistry:
             assert callable(fn), f"Command {name} is not callable"
 
     def test_expected_commands_exist(self):
-        expected = {"full", "fetch", "sentry", "execute", "sentry_execute", "pricecheck", "gapcheck", "resubmit", "daily_summary"}
+        expected = {"full", "fetch", "sentry", "execute", "sentry_execute", "signals", "curate", "pricecheck", "gapcheck", "resubmit", "daily_summary"}
         assert set(COMMANDS.keys()) == expected
 
     def test_fetch_command_registered(self):

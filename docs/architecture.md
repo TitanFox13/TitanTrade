@@ -9,7 +9,8 @@ a visual dashboard over the backend's state files.
 ## Components
 
 ### TitanTrade Backend (`TitanTrade/`)
-Python backend responsible for all data collection, AI analysis, risk management, and
+Python backend responsible for all data collection, mechanical signal generation (Decision 061 —
+the LLMs are out of the trading loop; Claude only proposes universe changes monthly), risk management, and
 trade execution. Runs on a scheduled cadence via APScheduler inside the always-on
 Docker API container (`data/schedule.json`, ET times).
 

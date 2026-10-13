@@ -21,6 +21,8 @@ def main() -> None:
         "execute": "titantrade.executor",
         "pricecheck": "titantrade.price_check",
         "benchmark": "titantrade.benchmark",
+        "signals": "titantrade.mechanical",
+        "curate": "titantrade.curator",
     }
 
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
@@ -28,9 +30,11 @@ def main() -> None:
         print()
         print("Commands:")
         print("  fetch            Fetch data bundle (prices, news, filings)")
-        print("  analyze          Run weekly Claude analysis")
-        print("  sentry           Run daily Gemini sentry check")
-        print("  execute          Execute trades via Alpaca")
+        print("  signals          Mechanical signals → thesis/sentry state files (Decision 061)")
+        print("  execute          Execute trades via Alpaca (run `signals` first under the mechanical strategy)")
+        print("  curate           Monthly LLM universe-curation proposal + post-mortem (no orders)")
+        print("  analyze          [legacy strategy=llm] Run weekly Claude analysis")
+        print("  sentry           [legacy strategy=llm] Run daily Gemini sentry check")
         print("  pricecheck       Intraday price check (no LLM, pure price)")
         print("  benchmark [days] Performance vs SPY: beta, alpha, Sharpe (--since YYYY-MM-DD)")
         print("  gapcheck         Check for unfilled stop-limits after gap-downs")
@@ -39,7 +43,9 @@ def main() -> None:
         print("  backtest [dir]   Run backtest on historical data (default: data/historical)")
         print("                   mirrors the live strategy; add --legacy for the old dip-buy path")
         print("  backtest-ab [dir]  A/B compare baseline vs confidence-scaled sizing (legacy strategy)")
-        print("  download-history [dir]  Download OHLCV from FMP for backtesting")
+        print("  backtest-mech [dir] [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--split YYYY-MM-DD] [--grid]")
+        print("                   Mechanical strategy backtest (Decision 061); --grid runs walk-forward over the built-in grid")
+        print("  download-history [dir] [--days N]  Download OHLCV (watchlist + SPY + sector ETFs) for backtesting")
         sys.exit(0)
 
     command = sys.argv[1]
@@ -95,8 +101,18 @@ def main() -> None:
         from titantrade.config import load_config as _load_cfg
 
         cfg = _load_cfg()
-        data_dir = sys.argv[2] if len(sys.argv) > 2 else "data/historical"
-        download_historical_data(cfg.trading.watchlist, cfg, data_dir)
+        args = [a for a in sys.argv[2:] if not a.startswith("--")]
+        data_dir = args[0] if args else "data/historical"
+        days = int(sys.argv[sys.argv.index("--days") + 1]) if "--days" in sys.argv else 750
+        download_historical_data(
+            cfg.trading.watchlist + list(cfg.trading.sector_etfs), cfg, data_dir, days=days,
+        )
+        return
+
+    if command == "backtest-mech":
+        from titantrade.backtest.mechanical import main as mech_main
+
+        mech_main(sys.argv[2:])
         return
 
     if command == "gapcheck":
@@ -140,15 +156,25 @@ def main() -> None:
 
     if command == "full":
         from titantrade.config import load_config
-        from titantrade.weekly_analyst import run_weekly_analysis
-        from titantrade.daily_sentry import run_daily_sentry
         from titantrade.executor import execute_trades
 
         cfg = load_config()
-        print("Step 1/3: Running weekly analysis...")
-        run_weekly_analysis(cfg)
-        print("Step 2/3: Running daily sentry...")
-        run_daily_sentry(cfg)
+        if cfg.trading.strategy == "mechanical":
+            from titantrade.data_fetcher import main as fetch_main
+            from titantrade.mechanical import refresh_mechanical_signals
+
+            print("Step 1/3: Fetching data bundle...")
+            fetch_main()
+            print("Step 2/3: Computing mechanical signals...")
+            refresh_mechanical_signals(cfg)
+        else:
+            from titantrade.weekly_analyst import run_weekly_analysis
+            from titantrade.daily_sentry import run_daily_sentry
+
+            print("Step 1/3: Running weekly analysis...")
+            run_weekly_analysis(cfg)
+            print("Step 2/3: Running daily sentry...")
+            run_daily_sentry(cfg)
         print("Step 3/3: Executing trades...")
         trades = execute_trades(cfg)
         print(f"Done. {len(trades)} trades executed.")

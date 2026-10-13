@@ -142,6 +142,26 @@ def sentry() -> dict:
     return data
 
 
+@app.get("/api/signals")
+def signals() -> dict:
+    """Decision 061: mechanical signal snapshot (insurance state, ranked dip
+    candidates, slots, legacy positions awaiting close)."""
+    data = _read_state("signals.json")
+    if not data:
+        raise HTTPException(status_code=404, detail="signals.json not found")
+    return data
+
+
+@app.get("/api/universe-proposal")
+def universe_proposal() -> dict:
+    """Decision 061: the monthly LLM universe-curation proposal (advisory —
+    the operator applies changes through PUT /api/watchlist)."""
+    data = _read_state("universe_proposal.json")
+    if not data:
+        raise HTTPException(status_code=404, detail="universe_proposal.json not found")
+    return data
+
+
 @app.get("/api/near-misses")
 def near_misses() -> dict:
     data = _read_state("near_misses.json")

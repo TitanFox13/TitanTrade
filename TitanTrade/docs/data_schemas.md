@@ -51,6 +51,18 @@ The data bundle now includes technical indicators, market context, and earnings:
 
 ---
 
+## 0b. Mechanical signal inputs (Decision 061)
+
+Per stock in the data bundle: `signal_inputs = {close, high_lookback, sma_trend, lookback_days, trend_sma_days}` (computed from the full 250-day history, since only `DISPLAY_DAYS` bars are saved). In `market_context.breadth`: `{sma_days, sectors_above, sectors_total, pct, flags, spy_close, spy_sma, spy_above_sma}`.
+
+`state/strategy.json`: `{"strategy": "mechanical", "started_at": ISO, "decision": "061"}` — positions whose opening BUY predates `started_at` are legacy and get no thesis.
+
+`state/signals.json`: `{generated_at, strategy, started_at, insurance: {risk_off, spy_above_sma, sector_breadth, exposure_scale}, breadth, candidates: [{ticker, dip_pct, chosen}], held_mechanical, legacy_to_close, pending_buys, free_slots, new_signals, params}`.
+
+`state/universe_proposal.json`: `{generated_at, watchlist, proposal: {remove: [{ticker, reason}], add: [{ticker, sector, reason}], notes}, raw, status}`. `state/post_mortem.json`: `{generated_at, review: {summary, observations}, raw}`. `state/backtest_mechanical.json`: `{summary, trades, walk_forward?}`.
+
+Watchlist settings gained `strategy` (`"mechanical"` | `"llm"`) and an optional `mechanical` object overriding `dip_pct, dip_lookback_days, trend_sma_days, slot_pct, max_slots, tp_pct, stop_pct, max_hold_days, insurance_sma_days, insurance_breadth, insurance_scale, sector_etfs`.
+
 ## 1. Watchlist Configuration (`data/watchlist.json`)
 
 ```json

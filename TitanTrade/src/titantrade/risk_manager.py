@@ -672,10 +672,17 @@ def pre_trade_check(
     # Gate 5: Position sizing (depends on gate 4 passing)
     shares = 0.0
     if investable > 0 and entry_price > 0:
-        shares = volatility_adjusted_shares(
-            portfolio_value, entry_price, stock_atr, cfg.trading.risk_per_trade,
-            confidence=confidence, vix=vix,
-        )
+        if getattr(cfg.trading, "strategy", "llm") == "mechanical":
+            # Decision 061: fixed slot sizing — no ATR, confidence or VIX
+            # scaling (none of them showed signal; the backtest used flat slots).
+            raw = portfolio_value * cfg.trading.slot_pct / entry_price
+            shares = float(int(raw)) if raw >= 1.0 else round(raw, 2)
+            log.info(f"Slot sizing: {cfg.trading.slot_pct:.0%} of ${portfolio_value:,.0f} → {shares} shares")
+        else:
+            shares = volatility_adjusted_shares(
+                portfolio_value, entry_price, stock_atr, cfg.trading.risk_per_trade,
+                confidence=confidence, vix=vix,
+            )
         position_value = shares * entry_price
 
         # Reduce if exceeding investable cash

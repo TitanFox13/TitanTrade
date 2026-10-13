@@ -15,17 +15,20 @@ docs/                   Project-wide documentation
 ### Python backend (from TitanTrade/)
 
 ```bash
-uv run python -m titantrade fetch        # Fetch data bundle
-uv run python -m titantrade analyze      # Weekly Claude analysis (2-pass)
-uv run python -m titantrade sentry       # Daily Gemini sentry (3-layer)
-uv run python -m titantrade execute      # Execute trades via Alpaca
-uv run python -m titantrade pricecheck   # Intraday price check (no LLM)
+uv run python -m titantrade fetch        # Fetch data bundle (prices, indicators, breadth, news, earnings)
+uv run python -m titantrade signals      # Mechanical signals → weekly_thesis.json / sentry_signals.json / signals.json (ADR 061)
+uv run python -m titantrade execute      # Execute trades via Alpaca (scheduler runs signals first)
 uv run python -m titantrade gapcheck     # Gap-down stop-limit protection + place missing stops
 uv run python -m titantrade resubmit     # Resubmit expired brackets
+uv run python -m titantrade curate       # Monthly LLM universe proposal + post-mortem (no orders)
 uv run python -m titantrade benchmark [days] # Performance vs SPY: beta/alpha/Sharpe (--since YYYY-MM-DD)
-uv run python -m titantrade full             # Full pipeline (fetch → analyze → sentry → execute)
-uv run python -m titantrade backtest [dir]   # Run backtest on historical data
-uv run python -m titantrade download-history [dir]  # Download OHLCV for backtesting
+uv run python -m titantrade full             # Full pipeline (fetch → signals → execute)
+uv run python -m titantrade backtest-mech [dir] [--start] [--end] [--split] [--grid]  # Mechanical strategy backtest / walk-forward
+uv run python -m titantrade download-history [dir] [--days N]  # Download OHLCV (watchlist + SPY + sector ETFs)
+uv run python -m titantrade analyze      # [legacy strategy=llm] Weekly Claude analysis
+uv run python -m titantrade sentry       # [legacy strategy=llm] Daily Gemini sentry
+uv run python -m titantrade pricecheck   # [legacy] Intraday price check
+uv run python -m titantrade backtest [dir]   # [legacy] Backtest of the LLM-era rules with synthetic theses
 ```
 
 ### Tests (zero token spend)
@@ -34,7 +37,7 @@ uv run python -m titantrade download-history [dir]  # Download OHLCV for backtes
 cd TitanTrade && uv run --extra test python -m pytest tests/ -v
 ```
 
-`pytest` lives in the `test` optional-dependency extra, so the `--extra test` flag is required (a bare `uv run` omits it → `No module named pytest`). All 587 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens. `ruff`/`vulture` are in the `dev` extra for lint/dead-code checks.
+`pytest` lives in the `test` optional-dependency extra, so the `--extra test` flag is required (a bare `uv run` omits it → `No module named pytest`). All 612 tests mock AI (Claude, Gemini) and broker (Alpaca, FMP) calls. No real orders, no tokens. `ruff`/`vulture` are in the `dev` extra for lint/dead-code checks.
 
 ### Flutter app (from titan_trade_app/)
 
@@ -53,10 +56,11 @@ docker compose run --rm titantrade <command>             # CLI commands
 
 ## Architecture
 
-- **The Analyst** (Claude): weekly 2-pass analysis — per-stock thesis + portfolio ranking
-- **The Sentry** (Gemini Flash): daily 3-layer conflict detection (market + price + news)
-- **Risk Manager**: 9 programmatic gates between AI and execution
-- **Executor**: Alpaca bracket orders with broker-native stops + trailing stops
+- **Mechanical signals** (ADR 061, `signals.py` + `mechanical.py`): buy a watchlist name ≥10% below its 60-day high while above its 200-day SMA, 20% slots (max 3), exits at +10% / −12% stop / 40 trading days; SPY is the residual; two-signal insurance (SPY < SMA200 and sector breadth < 50% → half exposure). Writes the thesis/sentry state files the executor consumes.
+- **Risk Manager**: 9 programmatic gates between the signal and execution (slot sizing under the mechanical strategy)
+- **Executor**: Alpaca bracket orders with broker-native GTC stops; target/time exits evaluated at each run
+- **Curator** (Claude, monthly): universe-curation proposal + post-mortem — advisory, never places orders
+- **Legacy (`strategy: "llm"`, unscheduled)**: the weekly 2-pass Claude analyst and the daily Gemini sentry
 - **API Server**: FastAPI serving state files, exposed at trade.praguefun.cz via Cloudflare tunnel
 - **Desktop App**: Flutter Riverpod app polling the API
 
@@ -64,8 +68,12 @@ docker compose run --rm titantrade <command>             # CLI commands
 
 | File | Purpose |
 |------|---------|
-| `src/titantrade/weekly_analyst.py` | 2-pass Claude analysis |
-| `src/titantrade/daily_sentry.py` | 3-layer Gemini sentry |
+| `src/titantrade/signals.py` | Pure mechanical rules: dip-in-uptrend, breadth, two-signal insurance (shared by live + backtest) |
+| `src/titantrade/mechanical.py` | Mechanical driver: thesis/sentry/signals state files, residual core target, legacy detection |
+| `src/titantrade/curator.py` | Monthly LLM universe proposal + post-mortem (advisory) |
+| `src/titantrade/backtest/mechanical.py` | Mechanical-strategy backtester + walk-forward |
+| `src/titantrade/weekly_analyst.py` | [legacy] 2-pass Claude analysis |
+| `src/titantrade/daily_sentry.py` | [legacy] 3-layer Gemini sentry |
 | `src/titantrade/executor.py` | Execution **orchestrator** (`execute_trades`) — wires the modules below together |
 | `src/titantrade/broker.py` | Alpaca REST client — the only module that talks to Alpaca |
 | `src/titantrade/entries.py` | New-position entry + expired-bracket resubmission (all 9 risk gates) |
@@ -101,8 +109,12 @@ This project is strict about documentation. When making changes:
 
 | File | Updated By |
 |------|-----------|
-| `weekly_thesis.json` | weekly_analyst (refreshed by the weekly review cycle) |
-| `sentry_signals.json` | daily_sentry |
+| `weekly_thesis.json` | mechanical (every signals run; legacy: weekly_analyst) |
+| `sentry_signals.json` | mechanical (CONTINUE + insurance state; legacy: daily_sentry) |
+| `signals.json` | mechanical (insurance, ranked candidates, slots, legacy-to-close) |
+| `strategy.json` | mechanical (strategy start timestamp — positions opened before it are legacy) |
+| `universe_proposal.json`, `post_mortem.json` | curator (monthly) |
+| `backtest_mechanical.json` | backtest-mech |
 | `trade_log.json` | executor (append-only) |
 | `near_misses.json` | executor (blocked by <=2 gates) |
 | `trailing_stops.json` | executor (per-ticker HWM + trail price) |

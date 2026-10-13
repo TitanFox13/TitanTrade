@@ -176,6 +176,35 @@ def fetch_sector_performance(cfg: Config) -> dict[str, float | None]:
     return result
 
 
+def sector_breadth(cfg: Config, spy_bars: list[dict[str, Any]]) -> dict[str, Any]:
+    """Decision 061 insurance inputs: share of sector ETFs above their SMA and
+    whether SPY is above its own. Each ETF needs ~250 bars; failures leave
+    the ETF out of the count (fails open toward full exposure)."""
+    from titantrade.signals import above_sma_flags, breadth, sma
+
+    n = cfg.trading.insurance_sma_days
+    series: dict[str, list[float]] = {}
+    for etf in cfg.trading.sector_etfs:
+        try:
+            bars = _fetch_bars(etf, cfg, days=250)
+            series[etf] = [b["close"] for b in bars]
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"Breadth: bars for {etf} failed: {exc}")
+    flags = above_sma_flags(series, n)
+    spy_closes = [b["close"] for b in spy_bars]
+    spy_sma = sma(spy_closes, n)
+    return {
+        "sma_days": n,
+        "sectors_above": sum(1 for f in flags.values() if f),
+        "sectors_total": sum(1 for f in flags.values() if f is not None),
+        "pct": breadth(flags.values()),
+        "flags": flags,
+        "spy_close": spy_closes[-1] if spy_closes else None,
+        "spy_sma": round(spy_sma, 2) if spy_sma else None,
+        "spy_above_sma": (spy_closes[-1] > spy_sma) if (spy_closes and spy_sma) else None,
+    }
+
+
 def build_market_context(cfg: Config) -> dict[str, Any]:
     """Build the full market context bundle.
 
@@ -232,6 +261,13 @@ def build_market_context(cfg: Config) -> dict[str, Any]:
             "weakest": sorted_sectors[-3:] if sorted_sectors else [],
         },
     }
+
+    # Decision 061: insurance-switch inputs
+    try:
+        context["breadth"] = sector_breadth(cfg, spy_bars)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"Sector breadth failed (insurance fails open): {exc}")
+        context["breadth"] = {}
 
     # Include raw bars for downstream relative strength / correlation computation
     # These are stripped before saving to state

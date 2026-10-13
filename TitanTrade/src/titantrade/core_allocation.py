@@ -22,7 +22,7 @@ log = get_logger("core_allocation")
 # Core allocation: always-deployed SPY base + stress-state hedge swap
 # ---------------------------------------------------------------------------
 
-def manage_core_position(cfg: Config) -> dict[str, Any] | None:
+def manage_core_position(cfg: Config, target_pct: float | None = None) -> dict[str, Any] | None:
     """Maintain the always-on core market exposure (and swap to hedge on stress).
 
     Strategic role: solve the cash-drag problem. Even when the AI thesis
@@ -60,7 +60,11 @@ def manage_core_position(cfg: Config) -> dict[str, Any] | None:
     if portfolio_value <= 0:
         return None
 
-    target_value = portfolio_value * cfg.trading.core_allocation_pct
+    # Decision 061: the mechanical strategy passes a residual target
+    # (exposure scale × investable − overlay); the legacy pipeline uses the
+    # fixed core_allocation_pct.
+    core_pct = cfg.trading.core_allocation_pct if target_pct is None else max(0.0, min(1.0, target_pct))
+    target_value = portfolio_value * core_pct
     band_value = portfolio_value * cfg.trading.core_rebalance_band_pct
 
     positions = get_positions(cfg)
@@ -142,7 +146,7 @@ def manage_core_position(cfg: Config) -> dict[str, Any] | None:
                 price=current_price,
                 trigger="core_rebalance",
                 reasoning=(
-                    f"Core rebalance: target {cfg.trading.core_allocation_pct:.0%} "
+                    f"Core rebalance: target {core_pct:.0%} "
                     f"= ${target_value:.0f}, current ${current_value:.0f} "
                     f"(stress={stress})"
                 ),

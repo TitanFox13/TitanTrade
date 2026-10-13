@@ -109,7 +109,7 @@ docker compose run --rm titantrade fetch      # Fetch data bundle
 docker compose run --rm titantrade analyze    # Run weekly Claude analysis
 docker compose run --rm titantrade sentry     # Run daily sentry check
 docker compose run --rm titantrade execute    # Execute trades
-docker compose run --rm titantrade full       # Full pipeline: fetch -> analyze -> sentry -> execute
+docker compose run --rm titantrade full       # Full pipeline: fetch -> signals -> execute (Decision 061)
 ```
 
 ### Scheduling (built-in APScheduler — no host cron needed)
@@ -120,14 +120,13 @@ All jobs run inside the always-on `api` container via APScheduler
 
 | Job | Time (ET) | Command |
 |-----|-----------|---------|
-| `weekday_fetch` | 09:00 Mon-Fri | fetch (refresh data bundle) |
-| `weekday_gapcheck` | 09:35 Mon-Fri | gapcheck |
-| `weekday_sentry_morning` | 10:15 Mon-Fri | sentry + execute |
-| `weekday_pricecheck_midday` | 12:00 Mon-Fri | pricecheck |
-| `weekday_pricecheck_afternoon` | 14:00 Mon-Fri | pricecheck |
-| `weekday_sentry_preclose` | 15:30 Mon-Fri | sentry + execute |
+| `weekday_fetch` | 09:00 Mon-Fri | fetch (refresh data bundle incl. sector breadth) |
+| `weekday_gapcheck` | 09:35 Mon-Fri | gapcheck + stop coverage (Decision 060) |
+| `weekday_execute_morning` | 10:15 Mon-Fri | execute (= mechanical signals → execute, Decision 061) |
+| `weekday_execute_preclose` | 15:30 Mon-Fri | execute (= mechanical signals → execute) |
 | `daily_summary` | 16:30 Mon-Fri | Discord daily summary (+ benchmark refresh; SPY bars from SIP and the equity close from the 15Min history so the just-closed session is included, Decisions 058/059) |
-| `sunday_full` | 16:00 Sun | full pipeline (fetch → analyze → sentry → execute) |
+| `sunday_full` | 16:00 Sun | full pipeline (fetch → signals → execute) |
+| `monthly_curate` | 15:00 first Sunday | curate (LLM universe proposal + post-mortem; no orders) |
 
 Manage via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`,
 `PUT /api/scheduler/{id}/enabled`, or the Flutter Scheduler screen.

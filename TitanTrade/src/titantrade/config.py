@@ -161,6 +161,23 @@ class TradingSettings:
     core_allocation_pct: float = 0.30  # Target 30% of portfolio in the core
     core_rebalance_band_pct: float = 0.05  # Rebalance if drift exceeds 5%pts
 
+    # --- Decision 061: mechanical strategy (default). "llm" = legacy pipeline ---
+    strategy: str = "mechanical"
+    dip_pct: float = 0.10            # entry: close >= 10% below the lookback high...
+    dip_lookback_days: int = 60      # ...of the last 60 sessions...
+    trend_sma_days: int = 200        # ...while above its 200-day SMA
+    slot_pct: float = 0.20           # each overlay position = 20% of equity, swapped out of SPY
+    max_slots: int = 3
+    tp_pct: float = 0.10             # exit at +10% (checked at each executor run)
+    stop_pct: float = 0.12           # broker stop-limit at -12%
+    max_hold_days: int = 40          # trading days, then exit back to SPY
+    insurance_sma_days: int = 200    # de-risk only if SPY < SMA AND sector breadth < threshold
+    insurance_breadth: float = 0.5
+    insurance_scale: float = 0.5     # exposure multiplier while risk-off
+    sector_etfs: list[str] = field(default_factory=lambda: [
+        "XLK", "XLV", "XLF", "XLE", "XLI", "XLY", "XLB", "XLRE", "XLP", "XLU", "XLC",
+    ])
+
 
 @dataclass(frozen=True)
 class Config:
@@ -185,11 +202,23 @@ def load_watchlist() -> TradingSettings:
         data = json.load(f)
     settings = data.get("settings", {})
     mode = os.environ.get("TRADING_MODE", settings.get("trading_mode", "paper"))
+    # Decision 061: strategy selection + mechanical parameters live under
+    # settings.strategy / settings.mechanical so the watchlist editor and the
+    # parameter search can change them without a code deploy.
+    mech = settings.get("mechanical", {}) or {}
+    mech_fields = {
+        "dip_pct", "dip_lookback_days", "trend_sma_days", "slot_pct", "max_slots",
+        "tp_pct", "stop_pct", "max_hold_days", "insurance_sma_days",
+        "insurance_breadth", "insurance_scale", "sector_etfs",
+    }
+    overrides = {k: v for k, v in mech.items() if k in mech_fields}
     return TradingSettings(
         watchlist=data.get("watchlist", TradingSettings().watchlist),
         risk_per_trade=settings.get("risk_per_trade", 0.10),
         trading_mode=mode,
         stop_loss_pct=settings.get("stop_loss_pct", 0.05),
+        strategy=settings.get("strategy", TradingSettings().strategy),
+        **overrides,
     )
 
 
