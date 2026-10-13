@@ -145,6 +145,18 @@ def build_theses(
         breadth_threshold=cfg.trading.insurance_breadth, scale=cfg.trading.insurance_scale,
     )
 
+    # The bundle bakes the lookback/SMA lengths into signal_inputs at fetch
+    # time; after a parameter change the inputs are stale until the next fetch.
+    sample = next((v.get("signal_inputs") for v in stocks.values() if v.get("signal_inputs")), None)
+    if sample and (sample.get("lookback_days") != cfg.trading.dip_lookback_days
+                   or sample.get("trend_sma_days") != cfg.trading.trend_sma_days):
+        log.warning(
+            f"signal_inputs were computed for {sample.get('lookback_days')}d/"
+            f"{sample.get('trend_sma_days')}d but settings say "
+            f"{cfg.trading.dip_lookback_days}d/{cfg.trading.trend_sma_days}d — "
+            f"run `titantrade fetch` to refresh them"
+        )
+
     held = {p.get("symbol", ""): p for p in positions if float(p.get("qty") or 0) > 0}
     theses: list[dict[str, Any]] = []
     states: dict[str, dict[str, Any]] = {}

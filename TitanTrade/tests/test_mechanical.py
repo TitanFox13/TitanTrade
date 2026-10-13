@@ -129,6 +129,15 @@ class TestBuildTheses:
         assert by["DDD"]["review_action"] == "NEW" and by["DDD"]["selected_for_trading"] is True
         assert by["AAA"]["thesis"] == "NEUTRAL"
 
+    def test_stale_signal_inputs_are_flagged(self, fake_config, tmp_state_dir, caplog):
+        from titantrade.mechanical import build_theses
+        self._trade_log(tmp_state_dir)
+        cfg = _mech_cfg(fake_config, dip_lookback_days=90, trend_sma_days=150)
+        bundle = _bundle(AAA=_inp(88, 100, 80), BBB=_inp(100, 100, 80), CCC=_inp(100, 100, 80), DDD=_inp(100, 100, 80))  # inputs say 60/200
+        with caplog.at_level("WARNING"):
+            build_theses(cfg, bundle, [], set(), started_at=STARTED)
+        assert "run `titantrade fetch`" in caplog.text
+
     def test_refresh_writes_the_three_state_files(self, fake_config, tmp_state_dir):
         from titantrade.mechanical import refresh_mechanical_signals
         self._trade_log(tmp_state_dir)
