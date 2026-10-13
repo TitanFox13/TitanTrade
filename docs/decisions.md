@@ -17,7 +17,7 @@
 
 **Behaviour change**: none intended beyond item 5 and the removal of the sentry-confirmation half of the cooldown override (item 4), which had no sentry to read since Decision 061. Live parameters, the schedule and the gates' thresholds are unchanged; the clean window from Decision 062 continues.
 
-**Deployed**: __DEPLOY_NOTE__
+**Deployed**: 2026-10-13 14:47 UTC, commit `9bf2754` — both images rebuilt, API restarted, health ok, 7 jobs registered, the CLI image imports `titantrade.executor` / `mechanical` through its `uv run` entrypoint. First `signals` run under the new code wrote `state/plan.json`: 3 HOLD items at the live stops (JPM 297.37 / target 404.42, URI 940.20 / 1278.71, DASH 169.75 / 231.89), 0 free slots, FCX on the watch list at an 8.3% dip (signal, no slot), insurance on (SPY above its 200-day SMA, breadth 45.5%), no legacy positions, inputs not stale. The 19:30 UTC pre-close run is the first `execute` on the plan schema; the old `weekly_thesis.json` / `sentry_signals.json` / `signals.json` / `trailing_stops.json` / `pricecheck_signals.json` / `thesis_history.json` / `cik_cache.json` / `backtest_results.json` in `state/` are now unread and can be deleted at the next checkup.
 
 ## Decision 062: Parameter plateau for the mechanical strategy (first search, 2016–2026 and 1999–2026)
 **Date**: 2026-10-13
