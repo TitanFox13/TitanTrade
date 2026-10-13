@@ -61,6 +61,51 @@ Selected beat not-selected in 7 of 22 weeks (4 of 14 clean); top-4 confidence be
 
 **Component split (same day, operator asked whether Sunday's analysis works at all):** the watchlist is curated by the operator (app → `save_watchlist`, Decision 049 swap), so the universe's +18.6% is the operator's, not the analyst's. By analyst output, chained EW next-week return over the same 22 reviews: direction call — BULLISH +18.8% vs NEUTRAL/BEARISH +24.4%, bullish beat non-bullish in 11 of 21 weeks (no directional skill; at 4 weeks pooled +1.9% vs +4.4%); Pass 2 ranking — SELECTED +12.6% vs BULLISH-but-not-selected +68.2% (about 2 names a week, 41 stock-weeks, so noisy, but negative at both horizons); confidence — within-week demeaned top-third +0.37%/wk vs bottom-third +0.20%/wk (≈0.3 standard errors, noise), and the week's average confidence has no relation to the next week's SPY (Spearman +0.01). What was *not* measured here and held up elsewhere: the analyst's stop levels (Decision 059 Evidence 2 found no mechanical level that beat them) and the daily sentry (Decision 057). Precise statement: the selection, ranking and confidence outputs of the Sunday review carry no detectable signal at the horizon the system trades; the return came from the operator's universe plus the mechanical layer (gates, trail, stops).
 
+### Evidence 3 — component value audit (operator opened the hold for "heavy refinements", 2026-10-13)
+Five tests on the paper account's own history and SIP bars. Nothing shipped; the operator decides.
+
+**(a) Realised P&L by exit mechanism, overlay sells 2026-05-12 → 10-12** (FIFO on Alpaca fills at order level, CRWD lots converted ×4/÷4 at the 2026-07-02 phantom split):
+
+| Exit mechanism | Exits | Realised | Wins | Stock vs SPY 20 td after the exit |
+|---|---|---|---|---|
+| Sentry −5% catastrophic rule (mechanical, measured from the thesis reference) | 19 | **−$3,037** | 1/19 | **+4.4%** (lower after in 6/18) |
+| Sentry LLM price-override / news call | 7 | **−$2,229** | 0/7 | +1.6% (lower after in 2/6) |
+| Intraday price-check abort | 2 | −$234 | 1/2 | — |
+| Weekly review turned bearish | 1 | −$143 | 0/1 | — |
+| Weekly review dropped the name (profit-taking exits) | 4 | +$3,687 | 3/4 | (CRWD split artefact, n/a) |
+| Broker-side: initial stop / 3×ATR trail / TP1 (mechanical) | 93 | **+$8,356** | 50/93 | ≈ 0 (median −0.2% at 10 td, 0.0% at 20 td) |
+| Total overlay realised | | +$6,717 | | |
+
+The sentry as a whole: 26 exits, 1 win, −$5.3k ≈ 5% of equity, and the names it sold went on to beat SPY. Its −5% rule is in effect a 5% hard stop stapled on top of the 3×ATR trail, so the tight one always fires first and sells the dip. The broker-side mechanical exits are a wash on direction (stops are insurance) and the profit capture (trail + TP1) is where the realised gain came from.
+
+**(b) Risk gate — trend_regime blocks** (65 near-miss records, 31 unique ticker-days): blocked names +3.3% vs SPY over the next 20 td (rose 21/23); executed entries over the same period +5.8% vs SPY at 20 td. Mild positive discrimination at 20 days, negative at 5 days. Inconclusive.
+
+**(c) Mechanical selection on the same 15 names, weekly rebalanced, 2024-10-14 → 2026-10-12** (basket figures; book = 34% SPY + 60% basket):
+
+| Rule | 2-yr return | max DD | Sharpe | beta | 2025 crash (Feb 19 → Apr 8) | crash + recovery (→ Jul 1) | live window (May 11 → Oct 12) |
+|---|---|---|---|---|---|---|---|
+| SPY | +33.2% | −19.0% | 0.96 | 1 | −19.0% | +0.8% | +5.2% |
+| EW all 15 | **+55.3%** | −23.5% | **1.22** | 1.06 | −23.3% | +1.5% | **+17.7%** |
+| EW above SMA50 (slot kept in cash otherwise) | +22.6% | **−11.2%** | 1.03 | 0.37 | **−10.8%** | −2.0% | +8.8% |
+| EW above SMA200 | +19.2% | −14.2% | 0.82 | 0.49 | −13.3% | −5.9% | +10.3% |
+| EW SMA20 > SMA50 (the live trend_regime gate) | +22.7% | −12.9% | 0.97 | 0.47 | −12.9% | −6.2% | +12.5% |
+| Top-7 by 60-day momentum among > SMA50 | +24.7% | −20.3% | 0.72 | 0.59 | −19.5% | −10.1% | +7.0% |
+| Bottom-7 by 60-day momentum among > SMA50 | +34.5% | −19.1% | 0.99 | 0.54 | −18.3% | −7.7% | +17.4% |
+
+Momentum ranking lost to anti-momentum in every window — short-horizon mean reversion dominated this universe. Trend filters halved the crash drawdown and gave the recovery back; over two years they did not improve Sharpe over plain equal weight. Caveat: the 15 names were chosen in 2026 with hindsight, so the universe's absolute edge (+55% vs +33%) is not a forward expectation; the *relative* ranking of rules on the same names is the usable result.
+
+**(d) Live strategy vs its own passive book, May 12 → Oct 12:** strategy +11.4%, passive book (34% SPY + 60% EW universe) +12.3%, SPY +5.4%. The active apparatus roughly broke even against holding the universe: the mechanical exits (+$8.4k) and the review's profit-taking drops (+$3.7k) paid for the sentry (−$5.3k) and the selection drag.
+
+**Reading across (a)–(d) and Evidence 2:** every rule that sells a dip (sentry, price check, weekly drops, momentum ranking, tight analyst stops) lost; every rule that held through dips won. The only regime where dip-selling paid — a sustained decline — was Feb–Apr 2025, and the mechanical trend filter did help there, then gave it back by July. No component has shown *return* skill; the mechanical risk layer has shown *drawdown* control, and it is the only layer that can be backtested.
+
+**Recommendation recorded (not decided):**
+1. Retire the sentry's exit authority (both the −5% reference rule and the LLM override) and the price-check abort; the resting stop + 3×ATR trail becomes the only exit. Keep Gemini only as a fact flag (earnings/binary events in the next N days → no new entry) and the market-stress input to the core hedge. Highest confidence, largest measured leak.
+2. Retire the weekly analyst's selection, direction and confidence roles: hold every universe name that passes the mechanical gates, sized by ATR, no confidence scaling. Then test its one surviving job — the initial stop level — against k×ATR on the two-year backtest; if mechanical ≈ analyst, the weekly LLM leaves the trading loop.
+3. Make the mechanical strategy the thing that is backtested: the existing `backtest/` engine already mirrors the live executor with synthetic theses; run it over 2024-10 → 2026-10 on the universe, compare with the live window, then iterate rules there, never live. Extend to 10+ years and a hindsight-free universe before trusting any number.
+4. Reassign the LLM budget to universe curation proposals (operator approves) and natural-language post-mortems — jobs that cannot hurt orders.
+5. Decide the goal before redesigning: "beat SPY" has no evidence-backed component to stand on (the honest version is EW universe + SPY core, full drawdown); "SPY-like return with half the drawdown" is what the mechanical layer delivers (two-year: +25% vs +33%, max DD −13% vs −19%). The go/stop rule's two legs (return ≥ SPY *and* smaller drawdown) are unlikely to be met together by either design.
+Not recommended: momentum ranking, a bigger watchlist for an LLM picker, loosening −5% to −7% (same mechanism), more LLM layers.
+
 ## Decision 059: Exit-anchored cooldown override + closed-session benchmark equity; ATR-scaled ADJUST floor tested and rejected (September 29 checkup)
 **Date**: 2026-09-29
 **Decision**: two changes and one negative result, each decided on the paper account's own fills rather than on the churn "feel" that four checkups had reported:
