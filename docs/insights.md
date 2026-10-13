@@ -174,3 +174,13 @@ be tested, and a backtest that re-implements the live rule tests something
 else. Corollary for the coming parameter search: the more you can test, the
 more you must distrust the best result — pick plateaus, hold out time, and
 charge costs.
+
+### Optimise Across Universes, Not Within Windows (Decision 062)
+The first parameter search ran 6,000 configurations on four datasets. On the
+hindsight-free sector universe, the point that won each training window lost
+to SPY in every test window; the point that merely agreed across universes
+and eras won most of them. Small edges are found by consensus and plateau
+width, not by the maximum of one backtest. Procedure for every future search:
+several universes (at least one chosen without hindsight), in-sample /
+out-of-sample halves, the median over neighbours as the score, and a
+walk-forward of the *selection rule* itself before anything goes live.

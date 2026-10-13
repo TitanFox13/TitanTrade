@@ -26,3 +26,6 @@ logs/*.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Decision 062 parameter-search data (downloaded histories)
+data/param_search/

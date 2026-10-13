@@ -25,6 +25,7 @@ uv run python -m titantrade benchmark [days] # Performance vs SPY: beta/alpha/Sh
 uv run python -m titantrade full             # Full pipeline (fetch → signals → execute)
 uv run python -m titantrade backtest-mech [dir] [--start] [--end] [--split] [--grid]  # Mechanical strategy backtest / walk-forward
 uv run python -m titantrade download-history [dir] [--days N]  # Download OHLCV (watchlist + SPY + sector ETFs)
+uv run --with numpy python scripts/param_search/search.py  # Decision 062 parameter search harness (see scripts/param_search/README.md)
 uv run python -m titantrade analyze      # [legacy strategy=llm] Weekly Claude analysis
 uv run python -m titantrade sentry       # [legacy strategy=llm] Daily Gemini sentry
 uv run python -m titantrade pricecheck   # [legacy] Intraday price check

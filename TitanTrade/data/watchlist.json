@@ -20,6 +20,19 @@
     "risk_per_trade": 0.1,
     "trading_mode": "paper",
     "stop_loss_pct": 0.05,
-    "strategy": "mechanical"
+    "strategy": "mechanical",
+    "mechanical": {
+      "dip_pct": 0.08,
+      "dip_lookback_days": 90,
+      "trend_sma_days": 150,
+      "max_hold_days": 60,
+      "tp_pct": 0.2,
+      "stop_pct": 0.12,
+      "slot_pct": 0.25,
+      "max_slots": 3,
+      "insurance_sma_days": 200,
+      "insurance_breadth": 0.5,
+      "insurance_scale": 0.5
+    }
   }
 }

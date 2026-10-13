@@ -30,7 +30,8 @@ def download_historical_data(
 
     for ticker in tickers + ["SPY"]:
         print(f"Downloading {ticker}...")
-        bars = market_data.get_ohlcv(ticker, cfg, days=days)
+        # SIP feed: IEX history starts ~2020, SIP reaches 2016 (Decision 061 search)
+        bars = market_data.get_ohlcv(ticker, cfg, days=days, feed="sip")
         path = out / f"{ticker}.json"
         with open(path, "w") as f:
             json.dump(bars, f)

@@ -4,8 +4,8 @@
 
 Since 2026-10-13 every trading decision is a rule on prices; the LLMs are out of the loop.
 
-- **Entry**: a watchlist name closes ≥ 10% below its 60-day high while above its 200-day SMA. Candidates ranked deepest dip first fill the free slots (3 × 20% of equity, flat sizing). The entry is a near-market two-tranche bracket through the unchanged nine gates, with a −12% stop and a +10% target.
-- **Exits**: the GTC stop-limit (−12%), the +10% target and the 40-trading-day holding limit, the latter two evaluated at every executor run. Nothing else sells a position.
+- **Entry** (parameters per Decision 062): a watchlist name closes ≥ 8% below its 90-day high while above its 150-day SMA. Candidates ranked deepest dip first fill the free slots (3 × 25% of equity, flat sizing; the 70% overlay cap trims the third). The entry is a near-market two-tranche bracket through the unchanged nine gates, with a −12% stop and a +20% target.
+- **Exits**: the GTC stop-limit (−12%), the +20% target and the 60-trading-day holding limit, the latter two evaluated at every executor run. Nothing else sells a position.
 - **Core**: SPY is the residual — exposure scale × 95% − overlay — so the account is fully invested unless slots are in use.
 - **Insurance**: two-signal confirmation; exposure halves only while SPY is below its 200-day SMA *and* fewer than half of the 11 sector ETFs are above theirs. New entries pause while risk-off; held positions keep their exits.
 - **Signals snapshot**: `state/signals.json` / `GET /api/signals` — insurance state, ranked candidates, slots, legacy positions awaiting close.

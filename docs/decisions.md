@@ -1,5 +1,32 @@
 # Important Decisions Log
 
+## Decision 062: Parameter plateau for the mechanical strategy (first search, 2016–2026 and 1999–2026)
+**Date**: 2026-10-13
+**Decision**: the live parameters move from the Decision 061 defaults to the centre of the plateau found by a staged search on four datasets, and the search harness is kept in the repo (`scripts/param_search/`) so the next search extends this one instead of restarting it.
+
+| Parameter | Decision 061 default | **Decision 062** |
+|---|---|---|
+| dip below the lookback high | 10% | **8%** |
+| lookback | 60 d | **90 d** |
+| trend filter | 200-day SMA | **150-day SMA** |
+| holding limit | 40 trading days | **60** |
+| target | +10% | **+20%** |
+| stop | −12% | −12% (unchanged) |
+| slot / max slots | 20% × 3 | **25% × 3** (the 70% overlay cap trims the third slot to 20%) |
+| insurance | SPY < SMA200 and sector breadth < 50% → 50% exposure | unchanged |
+
+**Method.** `scripts/param_search/fastbt.py` is a vectorised engine with the same semantics as `backtest/mechanical.py` (validated trade-for-trade: identical trade lists and equity to 1e-9 on three parameter sets, 100× faster). Data: Alpaca SIP daily bars 2016-01 → 2026-10 for the 15 names, SPY and the 11 sector ETFs (`download-history` now uses the SIP feed; IEX history starts in 2020), and Yahoo adjusted daily closes 1993/1999 → 2026 (SPY from 1993, sectors from 1998, names from their listing dates). Four datasets: **A** Alpaca names 2016 →, **D** Alpaca sectors 2016 →, **B** Yahoo names 1999 →, **C** Yahoo sectors 1999 → (B/D/C mix hindsight: the names were chosen in 2026; the sector ETFs are the hindsight-free universe). Next-close fills, 0.05% per side, 5% cash reserve, SPY residual, weekly-equivalent daily evaluation. Stage 1: 6,000-point grid over dip (6–15%) × lookback (40–120 d) × trend SMA (100/150/200) × hold (20–90 d) × target (6–20%) × stop (8–20%), insurance off, 20% × 3; scored on full period, in-sample/out-of-sample halves (split 2022 for Alpaca, 2018 for Yahoo), recency-weighted annual excess (0.8^years), and **plateau** = median over the twelve one-step neighbours. Stage 2: insurance (SMA 150/200 × breadth 0.4/0.5/0.6 × scale 0/0.25/0.5/0.75/1) × sizing (slot 15/20/25% × 2–5 slots) around three centres. Stage 3: an honest walk-forward of the *selection procedure* — the grid is run on a training window only, the plateau-best point is selected there, and that point is run fresh on the next window.
+
+**Stage 1 — what every dataset agreed on.** Marginal effects (mean excess CAGR vs SPY over all other settings) point the same way on all four datasets: target 20% > 15% > 10% (the strongest knob: +0.7 to +2.3 pp from 10% to 20%), dip 8% ≥ 10%, trend SMA 150 ≥ 200 ≥ 100, hold 40–90 d ≈ flat, stop 8–20% flat. Cross-dataset rank 1 by plateau out-of-sample excess: dip 8% / 120 d / SMA150 / 60 d / +20% / −10% (A +7.8 full, +6.6 in-sample / +9.3 out-of-sample; D +2.2, +0.9 / +3.8; B +7.2, +5.1 / +12.1; C +1.4, +0.9 / +2.7 — positive in all eight halves). The sector-universe full-period best differs only in lookback (60 d) and stop (20%). The live defaults: A +4.8, D +1.2 (2.9 trades/yr), B +5.1, C +1.0. The chosen midpoint (8 / 90 / 150 / 60 / 20 / 12): A +4.9 (in-sample −4.1 / out-of-sample +16.7 — the 15-name Alpaca decade is the noisiest sample), D +2.1 (+1.5 / +2.9), B +8.0 (+8.3 / +7.5), C +1.5 (+0.9 / +3.1); its twelve neighbours: D min +0.5 / median +1.6 / max +2.8, C +0.8 / +1.3 / +1.8, B +3.6 / +6.5 / +9.5, A −0.2 / +5.9 / +9.1 — a plateau, not a peak.
+
+**Stage 2 — insurance and sizing.** Insurance is a pure trade-off on every dataset: each step of scale below 1 lowers both the excess and the drawdown, and 0.5 is the knee. On the 27-year hindsight-free sectors with the sector-best centre: insurance off +2.3 pp/yr excess at −53% max drawdown (SPY −55%); scale 0.75 → +1.2 at −45%; **scale 0.5 → +0.6 at −35%, Sharpe 0.69 vs SPY 0.53, 2008 −35% vs −55%, 2000–02 −31% vs −48%, 2022 −11% vs −25%**; scale 0 → −0.5 at −32%. With the consensus centre the same row reads −0.4 at −35%. On the Alpaca decade (three V-shaped recoveries, one bear) insurance costs more: sectors scale 0.5 → −0.3 to +0.7 at −24% (SPY −34%); names +6.1 at −31% (SPY −34%). SMA 200 ≥ 150 for the switch; breadth 0.4/0.5/0.6 is noise, 0.5 kept. Sizing: 25% slots beat 20% by 0.3–1.5 pp on every dataset at the same drawdown on sectors (slightly higher on names); 2–3 slots best on sectors, 3–4 on names.
+
+**Stage 3 — the honest part.** Selecting the plateau-best point on a training window and running it on the next window **did not generalise on the hindsight-free sectors**: the per-window winners (always 6% dips, short holds, many trades) lost to SPY in all three sector tests (−1.4, −0.5, −1.7 pp) and were mixed on the names (+5.6, −0.7, +8.7, +4.3). The fixed cross-dataset consensus did better: sectors +1.9 (2022 → 2026), −0.4 (2009 → 2017), +2.4 (2018 → 2026), −1.0 (2014 → 2019); names +9.4, +3.6, +11.8, −1.8; the live defaults: sectors +1.5, −0.9, +1.7, −0.4. Reading: the edge on a hindsight-free universe is real but small — about +0.5 to +1 pp/yr before insurance, period-dependent (it loses in low-volatility bulls such as 2014–2019) — and it is captured by broad parameter agreement across universes and eras, not by optimisation. Any future search must be judged this way.
+
+**What to expect live (names universe, insurance on):** return around SPY plus the names' edge over SPY (which is the operator's universe, not the system), a third less drawdown in a 2008- or 2022-type decline, lag in V-shaped recoveries, 5–8 trades a year per slot with 70–80% winners at the 20% target or the 60-day clock, and more candidates than the 10%/60-day rule produced (the 8%/90-day rule fires on roughly twice as many days).
+
+**Applied**: `data/watchlist.json` → `settings.mechanical` (no code deploy needed; the executor reads it at every run). The clean window restarts at the first run under these parameters.
+
 ## Decision 061: Mechanical strategy — the LLM leaves the trading loop (October 13 audit → conversion)
 **Date**: 2026-10-13
 **Decision**: after the component audit (Decision 060, Evidence 2–3) the operator opened the hold and asked for a full conversion: every trading decision becomes a rule on prices, the LLMs keep only jobs that cannot touch orders, and the strategy becomes backtestable so the coming parameter search runs on a decade of data instead of on 22 weekly samples. The live pipeline is now:
