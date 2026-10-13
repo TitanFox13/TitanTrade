@@ -45,6 +45,20 @@ Per-name buy-and-hold over the clean window (weeks selected): CRWD +37.6% (12), 
 
 Reading: **over the three-month clean window the analyst's basket trailed SPY by 1.8 pp (selection), and the execution layer added 1.2–1.7 pp over passively holding those picks** — the stops cut GS/GE/DECK's −13…−18% short, the trail and pyramid rode CRWD and FCX — which brought the strategy back to ≈ SPY. **The lag since the Aug 12 peak is selection:** the basket lost 4.6% while SPY gained 0.7%; execution recovered about 1 pp of that, it did not cause it. Only the two-week window since Sep 29 shows execution as the net cost (picks ≈ SPY, five stop-outs −0.6 pp). One more selection signal: holding every selected name statically beat the weekly re-selected basket by 2.7 pp over the clean window, so the analyst's weekly rotation (dropping winners, adding GS/GE) is itself a drag. Caveats: equal weight vs the bot's risk-based sizing; price return on both sides; 9–67 trading days. Implication for the hold: the next lever, if any, is on the analyst's side (selection and rotation), not the risk machinery — and it needs the same fills-first test before anything ships.
 
+### Evidence 2 — would a bigger watchlist help? (operator question, 2026-10-13)
+Test: for every weekly review since Decision 046 (22 reviews, May 10 → Oct 4), the equal-weight return of the names the analyst *selected* vs the names it *left out* over the following week (first close after the review → first close after the next), plus the top-4 vs bottom-4 by confidence, and the Spearman rank correlation between confidence and next-week return. SIP closes, split-adjusted.
+
+| Basket (EW, re-formed weekly) | Since May 10 (22 w) | Clean since Jul 5 (14 w) |
+|---|---|---|
+| SPY | +5.2% | +3.6% |
+| Whole 15-name watchlist | **+18.6%** | +6.0% |
+| Analyst's selected names (~10/week) | +12.6% | +1.1% |
+| Names the analyst left out (~5/week) | **+29.8%** | **+17.0%** |
+| Top-4 by confidence | +20.6% | +4.4% |
+| Bottom-4 by confidence | +20.7% | +3.7% |
+
+Selected beat not-selected in 7 of 22 weeks (4 of 14 clean); top-4 confidence beat bottom-4 in 11 of 22; mean Spearman(confidence, next-week return) = −0.05 (sd 0.26) — zero. Reading: the *universe* was excellent (the 15 names beat SPY by 13 pp) and the *picker* subtracted from it: the analyst's confidence does not discriminate within the list at the horizon the system acts on (weekly re-selection), and the names it drops tend to be last week's losers that rebound — the weekly version of the churn mechanism. Doubling the watchlist therefore buys nothing: with no ranking skill, 10-from-30 has the same expected return as 10-from-15, the book cannot hold more positions anyway (94% invested, whole-share and $500-notional limits, $25k PDT floor for real money), and Claude cost doubles. What the numbers point at instead — *not* decided, not shipped: (a) trade the gated watchlist rather than the confidence-ranked subset (static EW of the watchlist beat the selected basket by 6 pp since May); (b) curate the universe, which is where the edge actually came from. Caveats: 22 weeks, ~5 names in the left-out group, one bull-ish regime, equal weighting, one-week horizon (the analyst frames "medium_term" — a 4-week version of the test is the fair follow-up before anything changes).
+
 ## Decision 059: Exit-anchored cooldown override + closed-session benchmark equity; ATR-scaled ADJUST floor tested and rejected (September 29 checkup)
 **Date**: 2026-09-29
 **Decision**: two changes and one negative result, each decided on the paper account's own fills rather than on the churn "feel" that four checkups had reported:
