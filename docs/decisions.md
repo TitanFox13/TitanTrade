@@ -132,6 +132,20 @@ Rules beating SPY on both CAGR and max DD: **0 of 30** in-sample, 0 out-of-sampl
 
 Reading: over a decade with four drawdowns, slow portfolio-level protection never beat buy-and-hold on return on any basket. It is insurance with a premium of **1.5–2 pp of CAGR per year for the cheapest designs** (two-signal confirmation at 50%, vol-target 20%: a third less max drawdown, higher Sharpe) and 4–7 pp for the stricter ones (half the drawdown). The premium is paid in every V-shaped recovery and earned back only in 2020/2022-type episodes. "Both" on raw return therefore needs a return source other than protection — a universe or selection edge of more than the premium — and the only basket showing one is hindsight-picked. What is achievable and testable: **≈ SPY − 1.5 pp/yr with a third less drawdown and a higher Sharpe**, or SPY's return with SPY's drawdown. Today's signal state (2026-10-12): SPY above SMA100 and SMA200, 73% of the 15 names above SMA200, **sector breadth 45% (below the 0.5 line)** — the two-signal rule would still be fully invested; a breadth-only rule would already be de-risked.
 
+**(g) The trader's instinct, tested: "buy low" instead of "sell the dip" (operator: good traders spot opportunity when something is low; why can't we?).** Decade test 2016-01 → 2026-10: default 100% SPY; when a name closes ≥ *dip* below its 60-day high (optionally only if above its SMA200), move a 20% slot from SPY into it at the **next** close; return the slot to SPY at +*gain*, at −*stop*, or after *hold* days; 0.05% cost per side.
+
+| Basket | dip / gain / hold / stop / trend | CAGR | max DD | Sharpe | trades | win | avg/trade |
+|---|---|---|---|---|---|---|---|
+| SPY buy-and-hold | — | 15.2% | −33.8% | 0.90 | | | |
+| 11 sector ETFs (hindsight-free) | 12% / +10% / 40 d / −12% / above SMA200 | **16.4%** | −33.9% | 0.95 | 20 | 85% | +5.9% |
+| 11 sector ETFs | 10% / hold 60 d / above SMA200 | **16.3%** | −33.0% | 0.94 | 31 | 81% | +7.6% |
+| 11 sector ETFs | 8% / +8% / 30 d / −10% / above SMA200 | 15.3% | −35.4% | 0.89 | 120 | 67% | +1.9% |
+| 11 sector ETFs | 5% / +5% / 20 d / −8% / above SMA200 | 14.6% | −34.8% | 0.88 | 347 | 62% | +0.9% |
+| 15 names (hindsight) | 8% / +8% / 30 d / −10% / above SMA200 | 26.5% | −38.4% | 1.17 | 489 | 63% | +2.3% |
+| 15 names (hindsight) | 10% / hold 120 d / no trend filter | 32.5% | −39.9% | 1.22 | 99 | 68% | +17.8% |
+
+Reading: on a hindsight-free universe, buying a ≥ 10% dip in a name that is still above its 200-day average and holding 40–60 days beat SPY by about 1 pp/yr with the same drawdown, on 20–31 trades with 81–85% wins; shallower dips (5–8%) traded more and added nothing. Small, parameter-sensitive, but it is the first rule in the whole audit that adds *return* on a hindsight-free basket — and it is the exact inverse of what the live system does (the sentry and the −5% rule sell those dips). It is a return edge, not insurance: the drawdown stays SPY's. Combining it with the cheap portfolio-level insurance of (f) is the natural next test. Caveats: the 60-day-high/SMA200 parameters were not walk-forward selected; 20–31 trades is a thin sample; sector ETFs are the easy case (no single-name blow-ups).
+
 **Recommendation recorded (not decided):**
 1. Retire the sentry's exit authority (both the −5% reference rule and the LLM override) and the price-check abort; the resting stop + 3×ATR trail becomes the only exit. Keep Gemini only as a fact flag (earnings/binary events in the next N days → no new entry) and the market-stress input to the core hedge. Highest confidence, largest measured leak.
 2. Retire the weekly analyst's selection, direction and confidence roles: hold every universe name that passes the mechanical gates, sized by ATR, no confidence scaling. Then test its one surviving job — the initial stop level — against k×ATR on the two-year backtest; if mechanical ≈ analyst, the weekly LLM leaves the trading loop.
