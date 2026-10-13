@@ -29,3 +29,5 @@ Thumbs.db
 
 # Decision 062 parameter-search data (downloaded histories)
 data/param_search/
+data/historical_long/
+state/archive/
