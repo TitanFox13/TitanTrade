@@ -11,7 +11,10 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import anthropic
+
 from titantrade.config import STATE_DIR, Config
+from titantrade.cost_logger import log_cost
 from titantrade.logger import get_logger
 from titantrade.trade_state import _load
 
@@ -19,6 +22,51 @@ log = get_logger("curator")
 
 PROPOSAL_FILE = "universe_proposal.json"
 POST_MORTEM_FILE = "post_mortem.json"
+
+
+def _call_claude(system: str, user: str, cfg: Config, cost_label: str = "") -> str:
+    """Make a Claude API call, log token usage, and return the raw response text."""
+    client = anthropic.Anthropic(api_key=cfg.claude.key)
+
+    # Opus 4.8: adaptive thinking; no temperature (removed on Opus 4.8 → 400).
+    message = client.messages.create(
+        model=cfg.claude.model,
+        max_tokens=cfg.claude.max_tokens,
+        thinking={"type": "adaptive"},
+        system=system,
+        messages=[{"role": "user", "content": user}],
+    )
+
+    # Log token usage and estimated cost
+    usage = message.usage
+    log_cost(
+        service="claude",
+        model=cfg.claude.model,
+        description=cost_label or "Claude API call",
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        run_type="curator",
+    )
+
+    # A safety classifier can decline a request (stop_reason="refusal") with no
+    # text block — surface it rather than IndexError. And with adaptive thinking
+    # the response may lead with thinking block(s), so content[0] is not
+    # necessarily the answer: pull the first text block explicitly.
+    if message.stop_reason == "refusal":
+        raise RuntimeError(
+            f"Claude refused the request ({cost_label or 'curator'}): "
+            f"{getattr(message, 'stop_details', None)}"
+        )
+    text = next(
+        (b.text for b in message.content if getattr(b, "type", None) == "text"),
+        None,
+    )
+    if text is None:
+        raise RuntimeError(
+            f"Claude returned no text block ({cost_label or 'curator'}); "
+            f"stop_reason={message.stop_reason}"
+        )
+    return text
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -32,18 +80,27 @@ def _extract_json(text: str) -> dict[str, Any]:
         return {}
 
 
-def _stock_brief(ticker: str, stock: dict[str, Any]) -> dict[str, Any]:
-    tech = (stock.get("technical_indicators") or {}).get("price_vs_sma", {}) or {}
-    rs = stock.get("relative_strength_vs_spy") or {}
-    return {
+def _stock_brief(ticker: str, stock: dict[str, Any], cfg: Config | None = None) -> dict[str, Any]:
+    """Price context from the bundle plus, when a config is given, the news
+    headlines and analyst mix the curator fetches for itself (monthly, so the
+    daily bundle no longer carries them)."""
+    inputs = stock.get("signal_inputs") or {}
+    close, high, trend = inputs.get("close"), inputs.get("high_lookback"), inputs.get("sma_trend")
+    brief: dict[str, Any] = {
         "ticker": ticker,
-        "pct_from_sma_200": tech.get("pct_from_sma_200"),
-        "pct_from_sma_50": tech.get("pct_from_sma_50"),
-        "relative_strength_vs_spy": rs if isinstance(rs, (int, float)) else rs.get("rs_60d", rs) if isinstance(rs, dict) else rs,
-        "analyst_ratings": stock.get("analyst_ratings"),
+        "sector": stock.get("sector"),
+        "pct_below_high": round((high - close) / high * 100, 1) if close and high else None,
+        "pct_vs_trend_sma": round((close - trend) / trend * 100, 1) if close and trend else None,
         "earnings_days_away": (stock.get("earnings") or {}).get("days_until_earnings"),
-        "headlines": [n.get("title", "") for n in (stock.get("news") or [])[:3]],
     }
+    if cfg is not None:
+        from titantrade import market_data
+        try:
+            brief["headlines"] = [n.get("title", "") for n in market_data.get_news(ticker, cfg, limit=10)[:5]]
+            brief["analyst_ratings"] = market_data.get_analyst_ratings(ticker, cfg)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"Curator enrichment failed for {ticker}: {exc}")
+    return brief
 
 
 def _trade_stats(trades: list[dict[str, Any]], days: int = 90) -> dict[str, dict[str, int]]:
@@ -57,7 +114,7 @@ def _trade_stats(trades: list[dict[str, Any]], days: int = 90) -> dict[str, dict
     return stats
 
 
-def build_universe_prompt(cfg: Config, bundle: dict[str, Any], trades: list[dict[str, Any]]) -> tuple[str, str]:
+def build_universe_prompt(cfg: Config, bundle: dict[str, Any], trades: list[dict[str, Any]], *, enrich: bool = False) -> tuple[str, str]:
     system = (
         "You curate the stock universe for a mechanical, rules-based strategy. The rules are fixed and you "
         "do not trade: the system buys a name when it closes at least "
@@ -71,10 +128,11 @@ def build_universe_prompt(cfg: Config, bundle: dict[str, Any], trades: list[dict
         "answer. Reply with JSON only: {\"remove\": [{\"ticker\": str, \"reason\": str}], "
         "\"add\": [{\"ticker\": str, \"sector\": str, \"reason\": str}], \"notes\": str}."
     )
-    briefs = [_stock_brief(t, bundle.get("stocks", {}).get(t, {}) or {}) for t in cfg.trading.watchlist]
+    briefs = [_stock_brief(t, bundle.get("stocks", {}).get(t, {}) or {}, cfg if enrich else None) for t in cfg.trading.watchlist]
     user = json.dumps({
         "as_of": bundle.get("generated_at"),
-        "market_regime": (bundle.get("market_context") or {}).get("market_regime"),
+        "spy": (bundle.get("market_context") or {}).get("spy"),
+        "breadth": {k: v for k, v in ((bundle.get("market_context") or {}).get("breadth") or {}).items() if k != "flags"},
         "watchlist": briefs,
         "trades_last_90_days": _trade_stats(trades),
     }, indent=1, default=str)
@@ -103,10 +161,8 @@ def _trades() -> list[dict[str, Any]]:
 
 
 def run_universe_review(cfg: Config) -> dict[str, Any]:
-    from titantrade.weekly_analyst import _call_claude
-
     bundle = _load("data_bundle.json")
-    system, user = build_universe_prompt(cfg, bundle, _trades())
+    system, user = build_universe_prompt(cfg, bundle, _trades(), enrich=True)
     text = _call_claude(system, user, cfg, cost_label="Universe review (monthly)")
     proposal = _extract_json(text)
     doc = {
@@ -136,8 +192,6 @@ def run_universe_review(cfg: Config) -> dict[str, Any]:
 
 
 def run_post_mortem(cfg: Config) -> dict[str, Any]:
-    from titantrade.weekly_analyst import _call_claude
-
     system, user = build_post_mortem_prompt(cfg, _trades())
     text = _call_claude(system, user, cfg, cost_label="Post-mortem (monthly)")
     review = _extract_json(text)

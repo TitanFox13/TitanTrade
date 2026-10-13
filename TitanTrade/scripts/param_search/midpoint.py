@@ -1,4 +1,5 @@
-import json, statistics
+import json
+import statistics
 import analyze1_lib as al
 S = al.S
 CANDS = {

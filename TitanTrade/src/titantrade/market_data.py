@@ -1,14 +1,6 @@
-"""Market-data facade — dispatches to the configured data provider.
+"""Market-data facade over the native provider (Alpaca + FRED + Finnhub, ADR 040).
 
-All consumers (data_fetcher, market_context, earnings, daily_sentry, backtest)
-call these functions and never import a provider directly. The active provider
-is chosen by ``cfg.data_provider`` (env ``DATA_PROVIDER``):
-
-  - ``native`` (default) — Alpaca + FRED + Finnhub (free; ADR 040).
-  - ``fmp``              — legacy Financial Modeling Prep (retained; set
-                           ``DATA_PROVIDER=fmp`` + a valid ``FMP_KEY``).
-
-See ``titantrade.data_providers`` for the interface contract.
+All consumers call these functions and never import the provider directly.
 """
 
 from __future__ import annotations
@@ -16,22 +8,13 @@ from __future__ import annotations
 from typing import Any
 
 from titantrade.config import Config
-from titantrade.data_providers import fmp, native
+from titantrade.data_providers import native
 from titantrade.logger import get_logger
 
 log = get_logger("market_data")
 
-_PROVIDERS = {"native": native, "fmp": fmp}
-
-
 def _provider(cfg: Config):
-    """Resolve the active provider module from config (default ``native``)."""
-    name = (getattr(cfg, "data_provider", None) or "native").lower()
-    provider = _PROVIDERS.get(name)
-    if provider is None:
-        log.warning(f"Unknown data_provider {name!r}; falling back to 'native'")
-        return native
-    return provider
+    return native
 
 
 # --- Prices / quotes / news -------------------------------------------------

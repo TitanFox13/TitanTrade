@@ -1,6 +1,6 @@
 services:
 
-  # Always-on HTTP API server — serves state files to the Flutter app.
+  # Always-on HTTP API server — hosts the scheduler and serves the state files.
   # Exposed via Cloudflare tunnel at trade.praguefun.cz.
   api:
     build: .
@@ -23,7 +23,7 @@ services:
     depends_on:
       - api
 
-  # CLI runner — used for cron jobs (fetch, analyze, sentry, execute).
+  # CLI runner — one-off commands (fetch, signals, execute, curate, backtest-mech).
   # Usage: docker compose run --rm titantrade <command>
   titantrade:
     build: .

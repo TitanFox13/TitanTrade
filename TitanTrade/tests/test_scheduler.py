@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -18,8 +18,6 @@ from titantrade.scheduler import (
     start_scheduler,
     stop_scheduler,
     trigger_job,
-    _job_config,
-    _job_history,
 )
 
 
@@ -51,7 +49,7 @@ def _write_schedule(path: Path, jobs: list[dict]) -> None:
 class TestLoadSchedule:
     def test_loads_jobs(self, schedule_dir: Path):
         _write_schedule(schedule_dir, [
-            {"id": "test1", "name": "Test", "command": "pricecheck", "cron": {"hour": 10}, "enabled": True},
+            {"id": "test1", "name": "Test", "command": "gapcheck", "cron": {"hour": 10}, "enabled": True},
         ])
         jobs = _load_schedule()
         assert len(jobs) == 1
@@ -69,7 +67,7 @@ class TestTimezone:
     def _write_tz_schedule(self, path: Path, tz: str) -> None:
         with open(path / "schedule.json", "w") as f:
             json.dump({"timezone": tz, "jobs": [
-                {"id": "preclose", "name": "Pre-Close", "command": "sentry_execute",
+                {"id": "preclose", "name": "Pre-Close", "command": "execute",
                  "cron": {"day_of_week": "mon-fri", "hour": 15, "minute": 30}, "enabled": True},
             ]}, f)
 
@@ -100,7 +98,7 @@ class TestTimezone:
     def test_missing_timezone_defaults_utc(self, schedule_dir: Path):
         with open(schedule_dir / "schedule.json", "w") as f:
             json.dump({"jobs": [
-                {"id": "j", "name": "J", "command": "pricecheck",
+                {"id": "j", "name": "J", "command": "gapcheck",
                  "cron": {"hour": 10}, "enabled": True},
             ]}, f)
         start_scheduler()
@@ -126,7 +124,7 @@ class TestCommandRegistry:
             assert callable(fn), f"Command {name} is not callable"
 
     def test_expected_commands_exist(self):
-        expected = {"full", "fetch", "sentry", "execute", "sentry_execute", "signals", "curate", "pricecheck", "gapcheck", "resubmit", "daily_summary"}
+        expected = {"full", "fetch", "signals", "execute", "gapcheck", "resubmit", "daily_summary", "curate"}
         assert set(COMMANDS.keys()) == expected
 
     def test_fetch_command_registered(self):
@@ -167,7 +165,7 @@ class TestExecuteJob:
 class TestStartStopScheduler:
     def test_start_and_stop(self, schedule_dir: Path):
         _write_schedule(schedule_dir, [
-            {"id": "t1", "name": "T1", "command": "pricecheck", "cron": {"hour": 10}, "enabled": True},
+            {"id": "t1", "name": "T1", "command": "gapcheck", "cron": {"hour": 10}, "enabled": True},
             {"id": "t2", "name": "T2", "command": "gapcheck", "cron": {"hour": 12}, "enabled": False},
         ])
         start_scheduler()
@@ -192,7 +190,7 @@ class TestStartStopScheduler:
 class TestTriggerJob:
     def test_trigger_known_job(self, schedule_dir: Path):
         _write_schedule(schedule_dir, [
-            {"id": "j1", "name": "J1", "command": "pricecheck", "cron": {"hour": 10}, "enabled": True},
+            {"id": "j1", "name": "J1", "command": "gapcheck", "cron": {"hour": 10}, "enabled": True},
         ])
         start_scheduler()
         assert trigger_job("j1") is True
@@ -208,7 +206,7 @@ class TestTriggerJob:
 class TestSetJobEnabled:
     def test_disable_and_enable(self, schedule_dir: Path):
         _write_schedule(schedule_dir, [
-            {"id": "toggle", "name": "Toggle", "command": "pricecheck", "cron": {"hour": 10}, "enabled": True},
+            {"id": "toggle", "name": "Toggle", "command": "gapcheck", "cron": {"hour": 10}, "enabled": True},
         ])
         start_scheduler()
 
@@ -226,7 +224,7 @@ class TestSetJobEnabled:
 
     def test_persists_to_file(self, schedule_dir: Path):
         _write_schedule(schedule_dir, [
-            {"id": "persist", "name": "P", "command": "pricecheck", "cron": {"hour": 10}, "enabled": True},
+            {"id": "persist", "name": "P", "command": "gapcheck", "cron": {"hour": 10}, "enabled": True},
         ])
         start_scheduler()
         set_job_enabled("persist", False)
@@ -252,7 +250,7 @@ class TestSchedulerApiEndpoints:
         # Also patch DATA_DIR in api module
         monkeypatch.setattr("titantrade.api.DATA_DIR", schedule_dir)
         _write_schedule(schedule_dir, [
-            {"id": "api_test", "name": "API Test", "command": "pricecheck", "cron": {"hour": 10}, "enabled": True},
+            {"id": "api_test", "name": "API Test", "command": "gapcheck", "cron": {"hour": 10}, "enabled": True},
         ])
 
         from fastapi.testclient import TestClient

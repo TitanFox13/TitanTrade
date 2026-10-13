@@ -1,7 +1,4 @@
-"""Append-only trade log + near-miss store, state loader, trade-record builders.
-
-Extracted from executor.py (behavior-preserving).
-"""
+"""Append-only trade log + near-miss store, state loader, trade-record builders."""
 
 from __future__ import annotations
 
@@ -28,45 +25,15 @@ def _load(filename: str) -> dict[str, Any]:
         return json.load(f)
 
 
-def position_opened_after(ticker: str, generated_at: str | None) -> bool:
-    """True when the ticker's current position was opened AFTER ``generated_at``
-    (a thesis/review timestamp).
-
-    Used by the ADJUST flow (ADR 056): the weekly review's stop/TP levels were
-    computed for the position the analyst saw on Sunday. If the ticker exited
-    and was RE-ENTERED since then, those levels belong to a position that no
-    longer exists — production DVN was stopped out at the Aug 4 open,
-    re-entered 42 minutes later at $43.65, and the stale ADJUST stop ($43.50,
-    set for the old basis) was re-applied 0.34% below the fresh entry and
-    tagged it out the next morning.
-
-    "Opened" means the most recent entry-type BUY (weekly_thesis /
-    bracket_resubmission). Pyramid ADDs enlarge an existing position — they
-    must not mark it as newer than the review. Fails open (False → ADJUST
-    applies as before) on missing/damaged data, since applying the analyst's
-    levels is the long-standing default behavior.
-    """
-    if not generated_at:
-        return False
-    try:
-        gen_ts = datetime.fromisoformat(generated_at)
-    except (ValueError, TypeError):
-        return False
-    opened_at = position_opened_at(ticker)
-    if opened_at is None:
-        return False
-    try:
-        buy_ts = datetime.fromisoformat(opened_at)
-        return buy_ts > gen_ts
-    except (ValueError, TypeError):
-        # Malformed or naive-vs-aware mismatch — can't compare safely.
-        return False
+def _save(filename: str, data: dict[str, Any]) -> None:
+    with open(STATE_DIR / filename, "w") as f:
+        json.dump(data, f, indent=2)
 
 
 def _opening_buy(ticker: str) -> dict[str, Any] | None:
     """Trade-log record of the BUY that opened the ticker's current position.
 
-    "Opened" means the most recent entry-type BUY (weekly_thesis /
+    "Opened" means the most recent entry-type BUY (entry /
     bracket_resubmission); pyramid ADDs enlarge an existing position and are
     skipped. The log records submissions, so a bracket that expired and was
     resubmitted resolves to the resubmission that filled — accurate to the
@@ -108,7 +75,7 @@ def position_entry_stop(ticker: str) -> float | None:
     if not rec:
         return None
     try:
-        stop = float(rec.get("stop_loss_price") or 0)
+        stop = float(rec.get("stop_price") or rec.get("stop_loss_price") or 0)
     except (TypeError, ValueError):
         return None
     return stop if stop > 0 else None
@@ -176,40 +143,20 @@ def _append_near_miss(record: dict[str, Any]) -> None:
     _archive_overflow("near_misses.json", "near_misses", MAX_LIVE_NEAR_MISSES)
 
 
-def _build_trade_context(
-    ticker: str,
-    data_bundle: dict[str, Any],
-    sentry: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """Extract a snapshot of market/technical context at trade time."""
-    stock_data = data_bundle.get("stocks", {}).get(ticker, {})
-    market = data_bundle.get("market_context", {})
-    technicals = stock_data.get("technical_indicators", {})
-    earnings = stock_data.get("earnings", {})
-    price_vs_sma = technicals.get("price_vs_sma", {})
-    macd = technicals.get("macd", {})
-    spy = market.get("spy", {})
-
-    news = stock_data.get("news", [])
-    recent_headlines = [n.get("title", "") for n in news[:3]]
-
+def _build_trade_context(ticker: str, data_bundle: dict[str, Any]) -> dict[str, Any]:
+    """Snapshot of the inputs at trade time (for the trade log / near-misses)."""
+    stock = data_bundle.get("stocks", {}).get(ticker, {}) or {}
+    inputs = stock.get("signal_inputs", {}) or {}
+    market = data_bundle.get("market_context", {}) or {}
     return {
-        "market_regime": market.get("market_regime"),
-        "vix_level": market.get("vix", {}).get("level"),
-        "vix_classification": market.get("vix", {}).get("classification"),
-        "spy_return_1d": spy.get("return_1d"),
-        "technicals": {
-            "rsi_14": technicals.get("rsi_14"),
-            "macd_histogram": macd.get("histogram"),
-            "atr_14": stock_data.get("atr_14"),
-            "price_vs_sma_50": "above" if price_vs_sma.get("above_sma_50") else "below",
-            "price_vs_sma_200": "above" if price_vs_sma.get("above_sma_200") else "below",
-        },
-        "sentry_signal": sentry.get("signal") if sentry else None,
-        "sentry_reasoning": sentry.get("reasoning") if sentry else None,
-        "recent_news": recent_headlines,
-        "earnings_days_away": earnings.get("days_until_earnings"),
-        "sector": stock_data.get("sector") or technicals.get("sector"),
+        "close": inputs.get("close"),
+        "high_lookback": inputs.get("high_lookback"),
+        "sma_trend": inputs.get("sma_trend"),
+        "atr_14": stock.get("atr_14"),
+        "earnings_days_away": (stock.get("earnings") or {}).get("days_until_earnings"),
+        "sector": stock.get("sector"),
+        "spy_return_5d": (market.get("spy") or {}).get("return_5d"),
+        "sector_breadth": (market.get("breadth") or {}).get("pct"),
     }
 
 
@@ -237,28 +184,21 @@ def _trade_record(
 
 
 def _build_near_miss_record(
-    ticker: str,
-    thesis: dict[str, Any],
-    entry_price: float | None,
-    stop_price: float | None,
-    take_profit_price: float | None,
+    item: dict[str, Any],
     failed_gates: list[str],
     gate_results: dict[str, Any],
     context: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build a near-miss record (a blocked/declined entry worth surfacing on the
-    dashboard). Shared by the downtrend and multi-gate block paths in
-    ``_handle_bullish_entry``."""
+    """A blocked entry worth surfacing (≤ 2 failing gates)."""
     return {
         "id": f"nm_{uuid.uuid4().hex[:8]}",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "ticker": ticker,
-        "confidence": thesis.get("confidence", 0),
-        "thesis": thesis.get("thesis", ""),
-        "target_entry_price": entry_price,
-        "stop_loss_price": stop_price,
-        "take_profit_price": take_profit_price,
-        "reasoning": thesis.get("reasoning", ""),
+        "ticker": item.get("ticker"),
+        "dip_pct": item.get("dip_pct"),
+        "entry_price": item.get("entry_price"),
+        "stop_price": item.get("stop_price"),
+        "target_price": item.get("target_price"),
+        "reason": item.get("reason", ""),
         "failed_gates": failed_gates,
         "gate_results": gate_results,
         "total_gates_failed": len(failed_gates),

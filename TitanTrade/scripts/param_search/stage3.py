@@ -3,9 +3,13 @@ For each (train, test) window: run the stage-1 grid on the train window only, se
 plateau full-period excess subject to DD not worse than 1.15× SPY's and >=3 trades/yr,
 then run the selected config fresh on the test window. Also reports the live default and
 the stage-1 consensus centre on every test window."""
-import itertools, json, sys, time, statistics
+import json
+import sys
+import time
 from multiprocessing import Pool
-import fastbt, search, analyze1_lib as al
+import fastbt
+import search
+import analyze1_lib as al
 S = search.S
 WINDOWS = {
     "A_alpaca_names_2016":   [("2016-01-04","2021-12-31","2022-01-01","2026-10-12")],

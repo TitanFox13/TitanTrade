@@ -17,8 +17,6 @@ from titantrade.config import (
     AlpacaConfig,
     ClaudeConfig,
     Config,
-    FMPConfig,
-    GeminiConfig,
     TradingSettings,
 )
 
@@ -54,15 +52,10 @@ def fake_config() -> Config:
     """A Config with dummy API keys — never hits real services."""
     return Config(
         alpaca=AlpacaConfig(key="test-key", secret="test-secret", base_url="https://paper-api.alpaca.markets"),
-        fmp=FMPConfig(key="test-fmp-key"),
         claude=ClaudeConfig(key="test-claude-key", model="claude-sonnet-4-6-20250514"),
-        gemini=GeminiConfig(key="test-gemini-key", model="gemini-2.0-flash"),
         trading=TradingSettings(
             watchlist=["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"],
-            risk_per_trade=0.10,
             trading_mode="paper",
-            stop_loss_pct=0.05,
-            strategy="llm",   # legacy pipeline; mechanical tests build their own config
         ),
     )
 
@@ -82,7 +75,7 @@ def tmp_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # were extracted into trade_state/cooldown/trailing_state/alerts).
     for mod in (
         "titantrade.config", "titantrade.risk_manager", "titantrade.executor",
-        "titantrade.daily_sentry", "titantrade.cooldown", "titantrade.trailing_state",
+        "titantrade.cooldown",
         "titantrade.mechanical", "titantrade.curator",
         "titantrade.trade_state", "titantrade.alerts", "titantrade.benchmark",
     ):

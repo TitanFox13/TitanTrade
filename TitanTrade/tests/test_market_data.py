@@ -1,9 +1,9 @@
-"""Tests for the market-data layer (FMP replacement + provider abstraction,
+"""Tests for the market-data layer (native provider + facade,
 ADR 040).
 
 Provider HTTP is mocked via the provider module's ``fetch_with_retry`` — zero
 real calls. Covers: the native (Alpaca+FRED+Finnhub) parsing + fail-open paths,
-the retained FMP provider, and the facade dispatch.
+and the facade.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 from titantrade.config import FREDConfig, FinnhubConfig
 from titantrade import market_data
-from titantrade.data_providers import native, fmp
+from titantrade.data_providers import native
 
 
 def _resp(payload):
@@ -189,53 +189,10 @@ class TestFinnhub:
         assert market_data.get_sector("AAPL", fake_config) == "Unknown"
 
 
-# --- Provider dispatch + retained FMP provider ------------------------------
+# --- Facade dispatch ---------------------------------------------------------
 
 class TestProviderDispatch:
-    def test_default_is_native(self, fake_config):
-        with patch("titantrade.data_providers.native.get_latest_price", return_value=1.0) as n, \
-             patch("titantrade.data_providers.fmp.get_latest_price", return_value=2.0) as f:
-            assert market_data.get_latest_price("AAPL", fake_config) == 1.0
-            n.assert_called_once()
-            f.assert_not_called()
-
-    def test_fmp_selected_by_config(self, fake_config):
-        cfg = dataclasses.replace(fake_config, data_provider="fmp")
-        with patch("titantrade.data_providers.native.get_latest_price", return_value=1.0) as n, \
-             patch("titantrade.data_providers.fmp.get_latest_price", return_value=2.0) as f:
-            assert market_data.get_latest_price("AAPL", cfg) == 2.0
-            f.assert_called_once()
-            n.assert_not_called()
-
-    def test_unknown_provider_falls_back_to_native(self, fake_config):
-        cfg = dataclasses.replace(fake_config, data_provider="bogus")
-        with patch("titantrade.data_providers.native.get_vix", return_value=9.9):
-            assert market_data.get_vix(cfg) == 9.9
-
-
-class TestFmpProvider:
-    """The legacy FMP provider is retained and still parses correctly."""
-
-    @patch("titantrade.data_providers.fmp.fetch_with_retry")
-    def test_fmp_ohlcv_reverses_to_oldest_first(self, mock_fetch, fake_config):
-        # FMP returns newest-first
-        mock_fetch.return_value = _resp([
-            {"date": "2026-05-02", "open": 2, "high": 2, "low": 2, "close": 2, "volume": 2},
-            {"date": "2026-05-01", "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
-        ])
-        bars = fmp.get_ohlcv("SPY", fake_config)
-        assert [b["date"] for b in bars] == ["2026-05-01", "2026-05-02"]
-
-    @patch("titantrade.data_providers.fmp.fetch_with_retry")
-    def test_fmp_news_shape(self, mock_fetch, fake_config):
-        mock_fetch.return_value = _resp([
-            {"title": "T", "text": "body", "publishedDate": "2026-06-01", "site": "fmp"},
-        ])
-        assert fmp.get_news("AAPL", fake_config) == [
-            {"title": "T", "snippet": "body", "published_at": "2026-06-01", "source": "fmp"},
-        ]
-
-    @patch("titantrade.data_providers.fmp.fetch_with_retry")
-    def test_fmp_vix(self, mock_fetch, fake_config):
-        mock_fetch.return_value = _resp([{"price": 17.2}])
-        assert fmp.get_vix(fake_config) == 17.2
+    def test_facade_uses_native(self, fake_config):
+        with patch("titantrade.data_providers.native.get_latest_price", return_value=1.0) as n:
+            assert market_data.get_latest_price("SPY", fake_config) == 1.0
+        n.assert_called_once()

@@ -1,7 +1,11 @@
 """Stage 2: insurance + sizing grid around entry/exit centres, all datasets."""
-import itertools, json, sys, time, statistics
+import itertools
+import json
+import sys
+import time
 from multiprocessing import Pool
-import fastbt, search
+import fastbt
+import search
 S = search.S
 CENTRES = {
     "c1_consensus":  dict(dip_pct=0.08, dip_lookback_days=120, trend_sma_days=150, max_hold_days=60, tp_pct=0.20, stop_pct=0.10),

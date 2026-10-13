@@ -1,25 +1,24 @@
-"""Mechanical strategy driver (Decision 061).
+"""Mechanical strategy driver (Decisions 061/062/063): data bundle → plan.
 
-Replaces the weekly LLM analyst and the daily LLM sentry in the trading loop.
-Turns the data bundle into the two state files the executor already consumes
-(``weekly_thesis.json`` with the same schema, ``sentry_signals.json`` with
-CONTINUE for every name and the insurance state as ``market_health``), so the
-bracket/gate/coverage/orphan machinery runs unchanged.
+``state/plan.json`` is the executor's only strategy input:
 
-What the executor then does with it:
-  entries   dip-in-uptrend names (ranked deepest first, up to the free slots)
-            get a BULLISH / NEW / selected thesis at the last close with a
-            -stop_pct stop and a +tp_pct target → bracket via the 9 gates
-  held      mechanical positions get a CONTINUE thesis carrying their
-            entry-time stop/target (trade log) → stop coverage stays consistent
-  legacy    positions opened before the strategy started are left out of the
-            thesis → the executor's orphan close sells them at the open
-  core      SPY is the residual: exposure_scale × (1 − cash reserve) − overlay
+  items   NEW  — a dip-in-uptrend signal that fits a free slot, with the entry
+                 at the last close and the configured stop/target (the
+                 executor re-anchors all three to the live price at order time)
+          HOLD — a position opened under this strategy, carrying the stop and
+                 target its opening bracket used, so stop coverage stays
+                 consistent across runs
+  watch   every other watchlist name with the reason it has no signal
+  plus the insurance state, the ranked candidates, the free slots and the
+  legacy positions awaiting close — the dashboard summary.
+
+Positions opened before ``state/strategy.json``'s ``started_at`` are legacy:
+they get no item, and the executor's orphan close sells them at the open.
 """
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from titantrade.broker import get_open_orders, get_positions
@@ -33,8 +32,8 @@ from titantrade.trade_state import _load, _opening_buy, position_opened_at
 
 log = get_logger("mechanical")
 
+PLAN_FILE = "plan.json"
 STRATEGY_FILE = "strategy.json"
-MECHANICAL_CONFIDENCE = 0.80   # ≥ 0.80 → near-market entry (pricing._choose_entry_price)
 
 
 def strategy_started_at() -> str | None:
@@ -62,73 +61,56 @@ def is_mechanical_position(ticker: str, started_at: str | None) -> bool:
     return bool(started_at and opened and opened >= started_at)
 
 
-def _held_thesis(ticker: str, position: dict[str, Any], cfg: Config, sector: str) -> dict[str, Any]:
-    """CONTINUE thesis for a held mechanical position, carrying the levels its
-    opening bracket used so stop coverage and resubmission stay consistent."""
+def _hold_item(ticker: str, position: dict[str, Any], cfg: Config) -> dict[str, Any]:
+    """HOLD item carrying the levels the opening bracket used."""
     rec = _opening_buy(ticker) or {}
     avg = float(position.get("avg_entry_price") or 0) or float(rec.get("price") or 0)
-    stop = float(rec.get("stop_loss_price") or 0) or round(avg * (1 - cfg.trading.stop_pct), 2)
-    tp = float(rec.get("take_profit_price") or 0) or round(avg * (1 + cfg.trading.tp_pct), 2)
+    stop = float(rec.get("stop_price") or rec.get("stop_loss_price") or 0) or round(avg * (1 - cfg.trading.stop_pct), 2)
+    target = float(rec.get("target_price") or rec.get("take_profit_price") or 0) or round(avg * (1 + cfg.trading.tp_pct), 2)
     return {
         "ticker": ticker,
-        "sector": sector,
-        "thesis": "BULLISH",
-        "confidence": MECHANICAL_CONFIDENCE,
-        "target_entry_price": avg or None,
-        "stop_loss_price": stop or None,
-        "take_profit_price": tp or None,
-        "hold_horizon": f"{cfg.trading.max_hold_days} trading days",
-        "selected_for_trading": True,
-        "review_action": "CONTINUE",
-        "reasoning": "Mechanical strategy (Decision 061): held dip position — exit at "
-                     f"+{cfg.trading.tp_pct:.0%}, -{cfg.trading.stop_pct:.0%} stop, "
-                     f"or after {cfg.trading.max_hold_days} trading days.",
-        "thesis_breach_condition": "n/a — mechanical exits only",
+        "action": "HOLD",
+        "sector": get_stock_sector(ticker),
+        "entry_price": avg or None,
+        "stop_price": stop or None,
+        "target_price": target or None,
         "opened_at": position_opened_at(ticker),
+        "reason": (
+            f"held — exit at +{cfg.trading.tp_pct:.0%}, the -{cfg.trading.stop_pct:.0%} stop, "
+            f"or after {cfg.trading.max_hold_days} trading days"
+        ),
     }
 
 
-def _candidate_thesis(ticker: str, state: dict[str, Any], cfg: Config, sector: str) -> dict[str, Any]:
+def _new_item(ticker: str, state: dict[str, Any], cfg: Config) -> dict[str, Any]:
     close = float(state["close"])
     return {
         "ticker": ticker,
-        "sector": sector,
-        "thesis": "BULLISH",
-        "confidence": MECHANICAL_CONFIDENCE,
-        "target_entry_price": round(close, 2),
-        "stop_loss_price": round(close * (1 - cfg.trading.stop_pct), 2),
-        "take_profit_price": round(close * (1 + cfg.trading.tp_pct), 2),
-        "hold_horizon": f"{cfg.trading.max_hold_days} trading days",
-        "selected_for_trading": True,
-        "review_action": "NEW",
-        "reasoning": (
-            f"Mechanical strategy (Decision 061): {state['dip_pct']:.1%} below its "
-            f"{cfg.trading.dip_lookback_days}-day high (${state['high']:.2f}) and above "
-            f"its {cfg.trading.trend_sma_days}-day SMA (${state['sma_trend']:.2f})."
-        ),
-        "thesis_breach_condition": "n/a — mechanical exits only",
+        "action": "NEW",
+        "sector": get_stock_sector(ticker),
+        "entry_price": round(close, 2),
+        "stop_price": round(close * (1 - cfg.trading.stop_pct), 2),
+        "target_price": round(close * (1 + cfg.trading.tp_pct), 2),
         "dip_pct": state["dip_pct"],
+        "reason": (
+            f"{state['dip_pct']:.1%} below its {cfg.trading.dip_lookback_days}-day high "
+            f"(${state['high']:.2f}), above its {cfg.trading.trend_sma_days}-day SMA "
+            f"(${state['sma_trend']:.2f})"
+        ),
     }
 
 
-def _neutral_thesis(ticker: str, state: dict[str, Any] | None, cfg: Config, sector: str, why: str) -> dict[str, Any]:
+def _watch_entry(ticker: str, state: dict[str, Any], why: str) -> dict[str, Any]:
     return {
         "ticker": ticker,
-        "sector": sector,
-        "thesis": "NEUTRAL",
-        "confidence": 0.0,
-        "target_entry_price": None,
-        "stop_loss_price": None,
-        "take_profit_price": None,
-        "hold_horizon": None,
-        "selected_for_trading": False,
-        "review_action": "NEW",
-        "reasoning": f"Mechanical strategy (Decision 061): {why}",
-        "dip_pct": (state or {}).get("dip_pct"),
+        "sector": get_stock_sector(ticker),
+        "dip_pct": state.get("dip_pct"),
+        "above_trend": state.get("above_trend"),
+        "reason": why,
     }
 
 
-def build_theses(
+def build_plan(
     cfg: Config,
     bundle: dict[str, Any],
     positions: list[dict[str, Any]],
@@ -136,8 +118,8 @@ def build_theses(
     *,
     started_at: str,
     now: datetime | None = None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Mechanical thesis list for the watchlist plus a signal summary."""
+) -> dict[str, Any]:
+    """The plan for the next executor runs, from the data bundle and the book."""
     stocks = bundle.get("stocks", {}) or {}
     breadth_ctx = (bundle.get("market_context", {}) or {}).get("breadth", {}) or {}
     insurance = insurance_state(
@@ -148,8 +130,9 @@ def build_theses(
     # The bundle bakes the lookback/SMA lengths into signal_inputs at fetch
     # time; after a parameter change the inputs are stale until the next fetch.
     sample = next((v.get("signal_inputs") for v in stocks.values() if v.get("signal_inputs")), None)
-    if sample and (sample.get("lookback_days") != cfg.trading.dip_lookback_days
-                   or sample.get("trend_sma_days") != cfg.trading.trend_sma_days):
+    stale = bool(sample and (sample.get("lookback_days") != cfg.trading.dip_lookback_days
+                             or sample.get("trend_sma_days") != cfg.trading.trend_sma_days))
+    if stale:
         log.warning(
             f"signal_inputs were computed for {sample.get('lookback_days')}d/"
             f"{sample.get('trend_sma_days')}d but settings say "
@@ -158,37 +141,35 @@ def build_theses(
         )
 
     held = {p.get("symbol", ""): p for p in positions if float(p.get("qty") or 0) > 0}
-    theses: list[dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
+    watch: list[dict[str, Any]] = []
     states: dict[str, dict[str, Any]] = {}
     held_mech: list[str] = []
     legacy: list[str] = []
 
     for ticker in cfg.trading.watchlist:
-        sector = get_stock_sector(ticker)
         inputs = (stocks.get(ticker, {}) or {}).get("signal_inputs", {}) or {}
-        state = evaluate_dip(
+        states[ticker] = evaluate_dip(
             inputs.get("close"), inputs.get("high_lookback"), inputs.get("sma_trend"),
             dip_pct=cfg.trading.dip_pct,
         )
-        states[ticker] = state
         pos = held.get(ticker)
         if pos and not _is_core_ticker(ticker, cfg):
             if is_mechanical_position(ticker, started_at):
-                theses.append(_held_thesis(ticker, pos, cfg, sector))
+                items.append(_hold_item(ticker, pos, cfg))
                 held_mech.append(ticker)
             else:
-                legacy.append(ticker)   # no thesis → orphan close at the open
-    # Held names outside the watchlist (removed from it) are left to orphan close too.
+                legacy.append(ticker)
     for ticker in held:
         if ticker not in cfg.trading.watchlist and not _is_core_ticker(ticker, cfg):
-            legacy.append(ticker)
+            legacy.append(ticker)   # removed from the watchlist → orphan close
 
     occupied = len(held_mech) + len({t for t in pending_buy_tickers if t not in held_mech})
     free_slots = max(0, cfg.trading.max_slots - occupied)
     ranked = [t for t in rank_dips(states) if t not in held and t not in pending_buy_tickers]
-    chosen: list[str] = []
     if insurance["risk_off"]:
-        why_blocked = "insurance is risk-off (SPY below SMA and sector breadth below threshold) — no new entries"
+        chosen: list[str] = []
+        why_blocked = "insurance is risk-off (SPY below its SMA and sector breadth below threshold) — no new entries"
     else:
         chosen = ranked[:free_slots]
         why_blocked = "no free slot — the deeper dips took the slot(s)"
@@ -197,40 +178,25 @@ def build_theses(
         if ticker in held_mech or ticker in legacy:
             continue
         state = states[ticker]
-        if ticker in chosen:
-            theses.append(_candidate_thesis(ticker, state, cfg, get_stock_sector(ticker)))
-        elif ticker in pending_buy_tickers:
-            # Keep the bracket's thesis alive so resubmission can adapt it.
-            theses.append(_candidate_thesis(ticker, state, cfg, get_stock_sector(ticker)))
+        if ticker in chosen or ticker in pending_buy_tickers:
+            # A pending bracket keeps its item so resubmission can re-anchor it.
+            items.append(_new_item(ticker, state, cfg))
         elif state.get("signal"):
-            theses.append(_neutral_thesis(ticker, state, cfg, get_stock_sector(ticker), why_blocked))
+            watch.append(_watch_entry(ticker, state, why_blocked))
         elif state.get("close") is None:
-            theses.append(_neutral_thesis(ticker, state, cfg, get_stock_sector(ticker), "no signal inputs in the data bundle"))
+            watch.append(_watch_entry(ticker, state, "no signal inputs in the data bundle"))
         else:
             dip = state.get("dip_pct")
-            why = (
-                f"{dip:.1%} below the {cfg.trading.dip_lookback_days}-day high — no dip signal"
-                if dip is not None else "no dip signal"
-            )
+            why = (f"{dip:.1%} below the {cfg.trading.dip_lookback_days}-day high — no signal"
+                   if dip is not None else "no signal")
             if state.get("above_trend") is False:
                 why += f"; below its {cfg.trading.trend_sma_days}-day SMA"
-            theses.append(_neutral_thesis(ticker, state, cfg, get_stock_sector(ticker), why))
+            watch.append(_watch_entry(ticker, state, why))
 
-    summary = {
+    return {
         "generated_at": (now or datetime.now(timezone.utc)).isoformat(),
         "strategy": "mechanical",
         "started_at": started_at,
-        "insurance": insurance,
-        "breadth": {k: v for k, v in breadth_ctx.items() if k != "flags"},
-        "candidates": [
-            {"ticker": t, "dip_pct": states[t].get("dip_pct"), "chosen": t in chosen}
-            for t in ranked
-        ],
-        "held_mechanical": held_mech,
-        "legacy_to_close": legacy,
-        "pending_buys": sorted(pending_buy_tickers),
-        "free_slots": free_slots,
-        "new_signals": len(chosen),
         "params": {
             "dip_pct": cfg.trading.dip_pct, "dip_lookback_days": cfg.trading.dip_lookback_days,
             "trend_sma_days": cfg.trading.trend_sma_days, "slot_pct": cfg.trading.slot_pct,
@@ -240,8 +206,20 @@ def build_theses(
             "insurance_breadth": cfg.trading.insurance_breadth,
             "insurance_scale": cfg.trading.insurance_scale,
         },
+        "stale_inputs": stale,
+        "insurance": insurance,
+        "breadth": {k: v for k, v in breadth_ctx.items() if k != "flags"},
+        "items": items,
+        "watch": watch,
+        "candidates": [
+            {"ticker": t, "dip_pct": states[t].get("dip_pct"), "chosen": t in chosen} for t in ranked
+        ],
+        "held": held_mech,
+        "legacy_to_close": legacy,
+        "pending_buys": sorted(pending_buy_tickers),
+        "free_slots": free_slots,
+        "new_signals": len(chosen),
     }
-    return theses, summary
 
 
 def core_target_pct(
@@ -282,82 +260,42 @@ def _pending_buy_tickers(cfg: Config) -> set[str]:
         return set()
 
 
-def refresh_mechanical_signals(cfg: Config) -> dict[str, Any]:
-    """Compute signals from the data bundle and write the executor's inputs.
-
-    Writes ``weekly_thesis.json``, ``sentry_signals.json`` and ``signals.json``
-    (the dashboard summary). Returns the summary.
-    """
+def refresh_plan(cfg: Config) -> dict[str, Any]:
+    """Compute the plan from the data bundle and the book; write ``plan.json``."""
     now = datetime.now(timezone.utc)
     started_at = _ensure_strategy_started(now)
     bundle = _load("data_bundle.json")
     if not bundle.get("stocks"):
-        log.error("No data bundle — run `titantrade fetch` first; leaving thesis untouched")
-        return {"error": "no data bundle", "new_signals": 0, "risk_off": False}
+        log.error("No data bundle — run `titantrade fetch` first; plan left untouched")
+        return {"error": "no data bundle", "items": [], "new_signals": 0, "insurance": {"risk_off": False}}
 
-    positions = get_positions(cfg)
-    pending = _pending_buy_tickers(cfg)
-    theses, summary = build_theses(cfg, bundle, positions, pending, started_at=started_at, now=now)
+    plan = build_plan(cfg, bundle, get_positions(cfg), _pending_buy_tickers(cfg), started_at=started_at, now=now)
+    with open(STATE_DIR / PLAN_FILE, "w") as f:
+        json.dump(plan, f, indent=2)
 
-    thesis_doc = {
-        "generated_at": now.isoformat(),
-        "next_review_at": (now + timedelta(days=2)).isoformat(),
-        "strategy": "mechanical",
-        "market_regime": (bundle.get("market_context", {}) or {}).get("market_regime"),
-        "insurance": summary["insurance"],
-        "ranking": [c["ticker"] for c in summary["candidates"]],
-        "theses": theses,
-    }
-    sentry_doc = {
-        "generated_at": now.isoformat(),
-        "run_type": "mechanical",
-        "market_health": {
-            "market_stress": False,            # no hedge swap in the mechanical strategy
-            "risk_off": summary["insurance"]["risk_off"],
-            "exposure_scale": summary["insurance"]["exposure_scale"],
-            "spy_above_sma": summary["insurance"]["spy_above_sma"],
-            "sector_breadth": summary["insurance"]["sector_breadth"],
-        },
-        "signals": [
-            {
-                "ticker": t["ticker"],
-                "signal": "CONTINUE",
-                "price_concern": False,
-                "news_concern": False,
-                "reasoning": "Mechanical strategy (Decision 061): no sentry exits — the stop, the target and the holding period are the only exits.",
-            }
-            for t in theses if t.get("selected_for_trading")
-        ],
-        "failures": {"fallback_count": 0, "checks_run": 0, "fallback_ratio": 0.0},
-    }
-    for name, doc in (("weekly_thesis.json", thesis_doc), ("sentry_signals.json", sentry_doc), ("signals.json", summary)):
-        with open(STATE_DIR / name, "w") as f:
-            json.dump(doc, f, indent=2)
-
-    ins = summary["insurance"]
+    ins = plan["insurance"]
     log.info(
-        f"Mechanical signals: {summary['new_signals']} new entry signal(s) "
-        f"{[c['ticker'] for c in summary['candidates'] if c['chosen']]}, "
-        f"{len(summary['held_mechanical'])} held, {summary['free_slots']} free slot(s), "
-        f"legacy to close {summary['legacy_to_close']} | insurance "
+        f"Plan: {plan['new_signals']} new entry signal(s) "
+        f"{[c['ticker'] for c in plan['candidates'] if c['chosen']]}, "
+        f"{len(plan['held'])} held, {plan['free_slots']} free slot(s), "
+        f"legacy to close {plan['legacy_to_close']} | insurance "
         f"{'RISK-OFF' if ins['risk_off'] else 'on'} (SPY above SMA: {ins['spy_above_sma']}, "
         f"breadth {ins['sector_breadth']})"
     )
-    summary["risk_off"] = ins["risk_off"]
-    return summary
+    return plan
 
 
 def main() -> None:
     from titantrade.config import load_config
 
-    summary = refresh_mechanical_signals(load_config())
-    if summary.get("error"):
-        print(f"Signals: {summary['error']}")
+    plan = refresh_plan(load_config())
+    if plan.get("error"):
+        print(f"Plan: {plan['error']}")
         return
-    ins = summary["insurance"]
+    ins = plan["insurance"]
     print(f"Insurance: {'RISK-OFF' if ins['risk_off'] else 'on'} | SPY above SMA: {ins['spy_above_sma']} | sector breadth: {ins['sector_breadth']}")
-    print(f"Held (mechanical): {summary['held_mechanical']} | legacy to close: {summary['legacy_to_close']} | free slots: {summary['free_slots']}")
-    for c in summary["candidates"]:
+    print(f"Held: {plan['held']} | legacy to close: {plan['legacy_to_close']} | free slots: {plan['free_slots']}")
+    for c in plan["candidates"]:
         print(f"  {'BUY ' if c['chosen'] else '    '} {c['ticker']:6} dip {c['dip_pct']:.1%}")
 
 

@@ -128,10 +128,8 @@ class TestLoadConfigCredentialSelection:
         monkeypatch.setattr("titantrade.config.DATA_DIR", tmp_path)
         monkeypatch.delenv("TRADING_MODE", raising=False)
         monkeypatch.delenv("ALPACA_BASE_URL", raising=False)
-        # Required non-Alpaca keys
-        monkeypatch.setenv("FMP_KEY", "fmp")
+        # Required non-Alpaca key
         monkeypatch.setenv("CLAUDE_KEY", "claude")
-        monkeypatch.setenv("GEMINI_KEY", "gemini")
         # Paper keys
         monkeypatch.setenv("ALPACA_PAPER_KEY", "paper-k")
         monkeypatch.setenv("ALPACA_PAPER_SECRET", "paper-s")

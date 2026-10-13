@@ -151,32 +151,20 @@ class TestDailySummary:
             assert "Portfolio Value" in field_names
             assert any("Positions" in n for n in field_names)
 
-    def test_sends_summary_with_sentry_signals(self, state_dir: Path):
-        (state_dir / "portfolio.json").write_text(json.dumps({
-            "portfolio_value": 50000,
-            "cash": 10000,
-            "positions": [],
+    def test_sends_summary_with_plan(self, state_dir: Path):
+        (state_dir / "portfolio.json").write_text(json.dumps({"portfolio_value": 50000, "cash": 10000, "positions": []}))
+        (state_dir / "plan.json").write_text(json.dumps({
+            "insurance": {"risk_off": False, "spy_above_sma": True, "sector_breadth": 0.45},
+            "held": ["DASH", "JPM"], "free_slots": 1,
+            "candidates": [{"ticker": "URI", "dip_pct": 0.09, "chosen": True}],
         }))
-        (state_dir / "sentry_signals.json").write_text(json.dumps({
-            "signals": [
-                {"ticker": "CRWD", "signal": "CONTINUE"},
-                {"ticker": "LLY", "signal": "CONTINUE"},
-                {"ticker": "DVN", "signal": "ABORT"},
-            ],
-        }))
-
         with patch("titantrade.notifier.httpx.post") as mock_post:
             mock_post.return_value = MagicMock(status_code=200)
             send_daily_summary()
-
             payload = mock_post.call_args.kwargs["json"]
-            sentry_field = next(
-                f for f in payload["embeds"][0]["fields"]
-                if f["name"] == "Sentry Signals"
-            )
-            assert "CONTINUE x2" in sentry_field["value"]
-            assert "ABORT x1" in sentry_field["value"]
-            assert "DVN" in sentry_field["value"]
+            plan_field = next(f for f in payload["embeds"][0]["fields"] if f["name"] == "Plan")
+            assert "insurance on" in plan_field["value"]
+            assert "DASH, JPM" in plan_field["value"] and "URI" in plan_field["value"]
 
     def test_handles_missing_state_files(self, state_dir: Path):
         """Summary still sends even with no state files (just shows mode)."""
@@ -185,27 +173,6 @@ class TestDailySummary:
             result = send_daily_summary()
 
             assert result == "daily summary sent"
-
-    def test_trailing_stops_included(self, state_dir: Path):
-        (state_dir / "portfolio.json").write_text(json.dumps({
-            "portfolio_value": 50000,
-            "cash": 10000,
-            "positions": [],
-        }))
-        (state_dir / "trailing_stops.json").write_text(json.dumps({
-            "CRWD": {"ticker": "CRWD", "active": True, "trail_price": 182.50},
-            "LLY": {"ticker": "LLY", "active": False, "trail_price": 0},
-        }))
-
-        with patch("titantrade.notifier.httpx.post") as mock_post:
-            mock_post.return_value = MagicMock(status_code=200)
-            send_daily_summary()
-
-            payload = mock_post.call_args.kwargs["json"]
-            field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
-            trailing_field = next(f for f in payload["embeds"][0]["fields"] if "Trailing" in f["name"])
-            assert "CRWD" in trailing_field["value"]
-            assert "$182.50" in trailing_field["value"]
 
     def test_notification_failure_does_not_crash(self, state_dir: Path):
         (state_dir / "portfolio.json").write_text(json.dumps({

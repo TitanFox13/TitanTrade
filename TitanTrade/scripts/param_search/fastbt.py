@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import math
 import statistics
-from functools import lru_cache
 from pathlib import Path
 
 import numpy as np

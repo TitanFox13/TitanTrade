@@ -1,5 +1,7 @@
 """Trade-for-trade validation of fastbt against the shipped backtester."""
-import json, sys, time
+import json
+import sys
+import time
 from pathlib import Path
 sys.path.insert(0, "src")
 from titantrade.backtest.mechanical import run_mechanical_backtest

@@ -17,10 +17,7 @@
     "EQIX"
   ],
   "settings": {
-    "risk_per_trade": 0.1,
     "trading_mode": "paper",
-    "stop_loss_pct": 0.05,
-    "strategy": "mechanical",
     "mechanical": {
       "dip_pct": 0.08,
       "dip_lookback_days": 90,

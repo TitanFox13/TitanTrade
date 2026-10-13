@@ -1,7 +1,4 @@
-"""Re-entry ABORT cooldown state + override policy.
-
-Extracted from executor.py (behavior-preserving).
-"""
+"""Re-entry cooldown after a protective exit (Decisions 056/059/063)."""
 
 from __future__ import annotations
 
@@ -19,11 +16,9 @@ log = get_logger("cooldown")
 # Re-entry cooldown (prevents whipsaw after ABORT)
 # ---------------------------------------------------------------------------
 
-# After we ABORT a ticker (sentry, price-check, or thesis-flip exit) we lock
-# new entries on that ticker for this many hours. Without this, the executor
-# would re-buy on the next run because Claude's weekly thesis is still
-# BULLISH — producing the documented "sell low, buy higher" cycles (LLY and
-# FCX each round-tripped 3+ times in a single week in prod logs).
+# After a protective exit (a stop-out) we lock new entries on that ticker for
+# this many hours; the dip signal usually persists right after a stop-out and
+# the system would otherwise re-buy the same name on the next run.
 REENTRY_COOLDOWN_HOURS = 72
 
 
@@ -141,64 +136,30 @@ def _record_stop_out_cooldown(
     return True
 
 
-# Minimum hours after ABORT before sentry-confirmed override can re-enter.
-# A 24h buffer prevents same-day whipsaw round-trips (the GS case) while
-# still allowing the recovery leg after a one-day shakeout.
+# Minimum hours after the exit before the override can re-enter. A 24h buffer
+# prevents same-day whipsaw round-trips while still allowing the recovery
+# leg after a one-day shakeout.
 COOLDOWN_OVERRIDE_MIN_HOURS = 24
 
 # "Recovered" means the price is back at least this far ABOVE THE PRICE WE
-# EXITED AT (Decision 059). Measured against the thesis stop alone, the test
-# was satisfied by nearly every exit (a 3–5% abort or a stop-out both leave
-# the price above the stop), so the 72h cooldown was effectively 24h and the
-# system re-bought the same names at the same price a day later. Over the
-# 23 override-population re-entries Jul 8 → Sep 28 2026, the 10 that came in
-# less than 1% above the exit all lost (−$767 combined); the 13 that came in
-# ≥1% above kept every winner (+$2,250).
+# EXITED AT (Decision 059): a re-buy at the price we just sold at is the
+# whipsaw the cooldown exists to stop. Over the 23 override re-entries Jul 8 →
+# Sep 28 2026, the 10 that came in less than 1% above the exit all lost
+# (−$767); the 13 that came in ≥1% above kept every winner (+$2,250).
 COOLDOWN_RECOVERY_PCT = 1.0
 
 
 def cooldown_override_allowed(
-    ticker: str,
-    thesis: dict[str, Any],
-    sentry: dict[str, Any] | None,
-    hours_since_abort: float,
+    hours_since_exit: float,
     current_price: float | None,
-    exit_price: float | None = None,
+    exit_price: float | None,
 ) -> bool:
-    """Decide whether the daily sentry confirms it's safe to re-enter a
-    ticker that's still in the 72h ABORT cooldown.
-
-    Override only when ALL of these hold:
-      - At least ``COOLDOWN_OVERRIDE_MIN_HOURS`` (24) have passed
-      - The current weekly thesis is still BULLISH and selected for trading
-      - The latest sentry signal is CONTINUE (not ABORT)
-      - The current price has recovered above the thesis stop (price action
-        confirms the thesis hasn't been invalidated)
-      - When the cooldown record carries the exit price: the current price is
-        at least ``COOLDOWN_RECOVERY_PCT`` above it (Decision 059) — a re-buy
-        at the price we just sold at is the whipsaw the cooldown exists to
-        stop, not a recovery. Records without an exit price (pre-059) keep
-        the thesis-stop test only.
-
-    Without this override, a single intraday whipsaw locks the ticker out
-    for 72 hours — the GS case from production. With it, we re-enter on
-    confirmed recovery; without all conditions we still respect the full
-    cooldown.
-    """
-    if hours_since_abort < COOLDOWN_OVERRIDE_MIN_HOURS:
+    """Re-enter inside the 72h cooldown only when at least
+    ``COOLDOWN_OVERRIDE_MIN_HOURS`` have passed AND the price is at least
+    ``COOLDOWN_RECOVERY_PCT`` above the recorded exit. Without a known exit
+    price or a live price the full cooldown applies."""
+    if hours_since_exit < COOLDOWN_OVERRIDE_MIN_HOURS:
         return False
-    if thesis.get("thesis") != "BULLISH" or not thesis.get("selected_for_trading"):
+    if not current_price or not exit_price or exit_price <= 0:
         return False
-    if not sentry or sentry.get("signal") != "CONTINUE":
-        return False
-    stop = thesis.get("stop_loss_price")
-    if not stop or not current_price:
-        return False
-    # Price must be at least 1% above the stop to qualify as "recovered"
-    if current_price < stop * 1.01:
-        return False
-    # Decision 059: ...and at least COOLDOWN_RECOVERY_PCT above the exit.
-    if exit_price and exit_price > 0:
-        if current_price < exit_price * (1 + COOLDOWN_RECOVERY_PCT / 100):
-            return False
-    return True
+    return current_price >= exit_price * (1 + COOLDOWN_RECOVERY_PCT / 100)

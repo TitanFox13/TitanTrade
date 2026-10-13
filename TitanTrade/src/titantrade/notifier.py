@@ -19,7 +19,7 @@ log = logging.getLogger("titantrade.notifier")
 COLOR_SUCCESS = 0x2ECC71  # green
 COLOR_FAILURE = 0xE74C3C  # red
 COLOR_SUMMARY = 0x3498DB  # blue
-COLOR_STRATEGY = 0xF39C12  # orange — v2-strategy events (pyramid, tp1, core, override)
+COLOR_STRATEGY = 0xF39C12  # orange — strategy events (core rebalance, cooldown override)
 
 # Decision 058: one Discord POST is a single point of failure for the
 # operator's only push channel — production lost a job notification to a
@@ -209,31 +209,6 @@ def notify_split_suspected(
     )
 
 
-def notify_sentry_degraded(fallback_count: int, total: int, run_type: str) -> None:
-    """Alert when Gemini is down and the sentry's news-based layer is offline.
-
-    ``fallback_count`` is the number of tickers whose sentry check threw an
-    exception and defaulted to a heuristic CONTINUE/ABORT. When this ratio is
-    high the operator should know — otherwise a bad-news event could slip past
-    the sentry unnoticed.
-    """
-    ratio = (fallback_count / total) if total else 0.0
-    send_discord(
-        title="Sentry degraded — news-based layer offline",
-        description=(
-            f"{fallback_count}/{total} sentry checks fell back to heuristic "
-            f"defaults ({ratio:.0%}). Gemini may be rate-limited or down. "
-            f"Price-based ABORT protection still active."
-        ),
-        color=COLOR_FAILURE,
-        fields=[
-            {"name": "Run", "value": run_type, "inline": True},
-            {"name": "Failed / Total", "value": f"{fallback_count} / {total}", "inline": True},
-            {"name": "Fallback rate", "value": f"{ratio:.0%}", "inline": True},
-        ],
-    )
-
-
 def _load_state(filename: str) -> Any:
     """Load a state JSON file, returning None if missing."""
     path = STATE_DIR / filename
@@ -293,38 +268,22 @@ def send_daily_summary() -> str:
             "inline": False,
         })
 
-    # --- Trailing stops ---
-    trailing = _load_state("trailing_stops.json")
-    if trailing:
-        active = [t for t in trailing.values() if isinstance(t, dict) and t.get("active")]
-        if active:
-            ts_lines = []
-            for t in active[:5]:
-                ticker = t.get("ticker", "?")
-                trail = t.get("trail_price")
-                ts_lines.append(f"{ticker} (trail ${trail:,.2f})" if trail else ticker)
-            fields.append({
-                "name": f"Trailing Stops ({len(active)})",
-                "value": ", ".join(ts_lines),
-                "inline": False,
-            })
-
-    # --- Today's sentry signals ---
-    sentry = _load_state("sentry_signals.json")
-    if sentry:
-        signals = sentry.get("signals", [])
-        if signals:
-            continue_count = sum(1 for s in signals if s.get("signal") == "CONTINUE")
-            abort_count = sum(1 for s in signals if s.get("signal") == "ABORT")
-            abort_tickers = [s.get("ticker", "?") for s in signals if s.get("signal") == "ABORT"]
-            sig_text = f"CONTINUE x{continue_count}"
-            if abort_count:
-                sig_text += f", ABORT x{abort_count} ({', '.join(abort_tickers)})"
-            fields.append({
-                "name": "Sentry Signals",
-                "value": sig_text,
-                "inline": False,
-            })
+    # --- The plan: insurance, slots, candidates ---
+    plan = _load_state("plan.json")
+    if plan:
+        ins = plan.get("insurance", {}) or {}
+        held = plan.get("held", []) or []
+        chosen = [c.get("ticker") for c in plan.get("candidates", []) if c.get("chosen")]
+        fields.append({
+            "name": "Plan",
+            "value": (
+                f"insurance {'RISK-OFF' if ins.get('risk_off') else 'on'} "
+                f"(SPY above SMA: {ins.get('spy_above_sma')}, breadth {ins.get('sector_breadth')}) | "
+                f"held {', '.join(held) or 'none'} | free slots {plan.get('free_slots', '?')} | "
+                f"signals {', '.join(chosen) or 'none'}"
+            ),
+            "inline": False,
+        })
 
     # --- Today's trades ---
     trade_log = _load_state("trade_log.json")
@@ -385,74 +344,18 @@ def send_daily_summary() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Strategy v2 events — pyramid, TP1, core rebalance, cooldown override
+# Strategy events — core rebalance, cooldown override
 # ---------------------------------------------------------------------------
-
-def notify_pyramid_added(
-    ticker: str, add_shares: int, add_price: float,
-    existing_shares: int, gain_pct: float,
-) -> None:
-    """Pyramid fired: added to a winning position.
-
-    Important enough to see in real time — pyramids concentrate capital
-    in a working trade and are by design more aggressive than the initial
-    bracket. Operator should know each time.
-    """
-    send_discord(
-        title=f"Pyramid ▲ {ticker} — adding to winner",
-        description=(
-            f"Position is +{gain_pct:.1%} and the trailing stop is active. "
-            f"Adding {add_shares} shares (~50% of original notional) on top of "
-            f"the existing {existing_shares}. Stop remains the safety net; "
-            f"downside is bounded at breakeven or better."
-        ),
-        color=COLOR_STRATEGY,
-        fields=[
-            {"name": "Ticker", "value": ticker, "inline": True},
-            {"name": "Added", "value": f"{add_shares} @ ${add_price:.2f}", "inline": True},
-            {"name": "Gain", "value": f"+{gain_pct:.1%}", "inline": True},
-        ],
-    )
-
-
-def notify_tp1_partial(
-    ticker: str, sold_shares: int, sold_price: float,
-    remaining_shares: int, gain_pct: float,
-) -> None:
-    """TP1 partial sell fired: 1/3 of position taken at 50% of upside-to-TP,
-    stop raised to breakeven on the rest.
-    """
-    send_discord(
-        title=f"TP1 partial — {ticker} de-risked",
-        description=(
-            f"Sold {sold_shares} shares of {ticker} at ${sold_price:.2f} "
-            f"(+{gain_pct:.1%} on those shares). Remaining {remaining_shares} "
-            f"shares are now protected by a breakeven stop — runs free toward "
-            f"the full take-profit target."
-        ),
-        color=COLOR_STRATEGY,
-        fields=[
-            {"name": "Ticker", "value": ticker, "inline": True},
-            {"name": "Sold", "value": f"{sold_shares} @ ${sold_price:.2f}", "inline": True},
-            {"name": "Remaining", "value": str(remaining_shares), "inline": True},
-        ],
-    )
-
 
 def notify_core_rebalance(
     action: str, ticker: str, shares: int, price: float,
-    target_value: float, current_value: float, stress: bool,
+    target_value: float, current_value: float,
 ) -> None:
-    """Core SPY/SH allocation was rebalanced. Includes the stress-swap case
-    when we flip between SPY and SH (inverse).
-    """
+    """The SPY core was rebalanced toward its residual target."""
     direction = "▲ BUY" if action == "BUY" else "▼ SELL"
     send_discord(
         title=f"Core rebalance — {direction} {ticker}",
-        description=(
-            f"Maintaining always-on baseline allocation. "
-            f"{'Market stress detected — holding hedge ETF.' if stress else 'Normal regime — holding index ETF.'}"
-        ),
+        description="SPY is the residual of the book: it sells to fund entries and buys back after exits.",
         color=COLOR_STRATEGY,
         fields=[
             {"name": "Action", "value": f"{direction} {shares} {ticker}", "inline": True},
@@ -463,30 +366,19 @@ def notify_core_rebalance(
 
 
 def notify_cooldown_override(
-    ticker: str, hours_since_abort: float, current_price: float, stop_price: float,
-    exit_price: float | None = None,
+    ticker: str, hours_since_exit: float, current_price: float, exit_price: float | None,
 ) -> None:
-    """The 72h ABORT cooldown was overridden because sentry CONTINUE + price
-    recovered above stop (and, when the record knows it, ≥1% above the exit
-    price — Decision 059). Rare event, important to log on Discord so the
-    operator knows we're re-entering a recently-stopped ticker.
-    """
-    recovery = f"${current_price:.2f} vs stop ${stop_price:.2f}"
-    if exit_price:
-        recovery += f", exit ${exit_price:.2f}"
+    """The 72h cooldown was overridden: ≥ 24h since the exit and the price is
+    at least 1% above it (Decision 059)."""
     send_discord(
         title=f"Cooldown override — re-entering {ticker}",
         description=(
-            f"This ticker ABORTed {hours_since_abort:.0f}h ago, but: sentry "
-            f"says CONTINUE, thesis still BULLISH, and price has recovered "
-            f"to ${current_price:.2f} (>1% above stop ${stop_price:.2f}"
-            f"{f' and ≥1% above the ${exit_price:.2f} exit' if exit_price else ''}). "
-            f"Re-entering — the original whipsaw lockout has been bypassed."
+            f"This ticker was stopped out {hours_since_exit:.0f}h ago; the price has recovered to "
+            f"${current_price:.2f}{f' (≥1% above the ${exit_price:.2f} exit)' if exit_price else ''}. Re-entering."
         ),
         color=COLOR_STRATEGY,
         fields=[
             {"name": "Ticker", "value": ticker, "inline": True},
-            {"name": "Hours since ABORT", "value": f"{hours_since_abort:.0f}h", "inline": True},
-            {"name": "Recovery", "value": recovery, "inline": True},
+            {"name": "Hours since exit", "value": f"{hours_since_exit:.0f}h", "inline": True},
         ],
     )

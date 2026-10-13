@@ -1,5 +1,7 @@
 """Stage-1 analysis: plateau scoring, marginal effects, cross-dataset robustness."""
-import json, sys, statistics, itertools
+import json
+import sys
+import statistics
 S = "data/param_search"
 GRID = dict(dip_pct=[0.06, 0.08, 0.10, 0.12, 0.15], dip_lookback_days=[40, 60, 90, 120], trend_sma_days=[100, 150, 200],
             max_hold_days=[20, 40, 60, 90], tp_pct=[0.06, 0.08, 0.10, 0.15, 0.20], stop_pct=[0.08, 0.10, 0.12, 0.15, 0.20])

@@ -11,7 +11,7 @@ from titantrade.executor import check_gap_down_protection
 
 
 class TestGapDownDetection:
-    @patch("titantrade.daily_sentry._fetch_current_price", return_value=169.0)
+    @patch("titantrade.protection.get_latest_price", return_value=169.0)
     @patch("titantrade.protection._append_trade")
     @patch("titantrade.protection.place_market_sell", return_value={"id": "sell_1"})
     @patch("titantrade.protection._wait_for_order_canceled", return_value="canceled")
@@ -150,7 +150,7 @@ class TestGapDownLiveQuoteCrossCheck:
         "stop_price": "661.00", "limit_price": "654.39",
     }
 
-    @patch("titantrade.daily_sentry._fetch_current_price", return_value=772.6)
+    @patch("titantrade.protection.get_latest_price", return_value=772.6)
     @patch("titantrade.protection._append_trade")
     @patch("titantrade.protection.place_market_sell")
     @patch("titantrade.protection.cancel_order")
@@ -170,7 +170,7 @@ class TestGapDownLiveQuoteCrossCheck:
         mock_cancel.assert_not_called()
         mock_sell.assert_not_called()
 
-    @patch("titantrade.daily_sentry._fetch_current_price", return_value=610.0)
+    @patch("titantrade.protection.get_latest_price", return_value=610.0)
     @patch("titantrade.protection._append_trade")
     @patch("titantrade.protection.place_market_sell", return_value={"id": "s1"})
     @patch("titantrade.protection._wait_for_order_canceled", return_value="canceled")
@@ -191,7 +191,7 @@ class TestGapDownLiveQuoteCrossCheck:
         assert result[0]["trigger"] == "gap_down_protection"
         mock_sell.assert_called_once_with("CRWD", 15, fake_config)
 
-    @patch("titantrade.daily_sentry._fetch_current_price", return_value=None)
+    @patch("titantrade.protection.get_latest_price", return_value=None)
     @patch("titantrade.protection._append_trade")
     @patch("titantrade.protection.place_market_sell", return_value={"id": "s1"})
     @patch("titantrade.protection._wait_for_order_canceled", return_value="canceled")
@@ -236,7 +236,7 @@ class TestGapDownSplitGuard:
     }
 
     @patch("titantrade.protection.get_recent_split_announcements")
-    @patch("titantrade.daily_sentry._fetch_current_price", return_value=192.67)
+    @patch("titantrade.protection.get_latest_price", return_value=192.67)
     @patch("titantrade.protection._append_trade")
     @patch("titantrade.protection.place_market_sell")
     @patch("titantrade.protection.cancel_order")
@@ -260,7 +260,7 @@ class TestGapDownSplitGuard:
         mock_splits.assert_called_once_with("CRWD", fake_config)
 
     @patch("titantrade.protection.get_recent_split_announcements", return_value=[])
-    @patch("titantrade.daily_sentry._fetch_current_price", return_value=192.67)
+    @patch("titantrade.protection.get_latest_price", return_value=192.67)
     @patch("titantrade.protection._append_trade")
     @patch("titantrade.protection.place_market_sell", return_value={"id": "s1"})
     @patch("titantrade.protection._wait_for_order_canceled", return_value="canceled")
@@ -284,7 +284,7 @@ class TestGapDownSplitGuard:
         "titantrade.protection.get_recent_split_announcements",
         side_effect=RuntimeError("announcements feed down"),
     )
-    @patch("titantrade.daily_sentry._fetch_current_price", return_value=192.67)
+    @patch("titantrade.protection.get_latest_price", return_value=192.67)
     @patch("titantrade.protection._append_trade")
     @patch("titantrade.protection.place_market_sell", return_value={"id": "s1"})
     @patch("titantrade.protection._wait_for_order_canceled", return_value="canceled")
@@ -305,7 +305,7 @@ class TestGapDownSplitGuard:
         mock_sell.assert_called_once_with("CRWD", 15, fake_config)
 
     @patch("titantrade.protection.get_recent_split_announcements")
-    @patch("titantrade.daily_sentry._fetch_current_price", return_value=610.0)
+    @patch("titantrade.protection.get_latest_price", return_value=610.0)
     @patch("titantrade.protection._append_trade")
     @patch("titantrade.protection.place_market_sell", return_value={"id": "s1"})
     @patch("titantrade.protection._wait_for_order_canceled", return_value="canceled")
@@ -328,7 +328,7 @@ class TestGapDownSplitGuard:
         mock_sell.assert_called_once_with("CRWD", 15, fake_config)
 
     @patch("titantrade.protection.get_recent_split_announcements")
-    @patch("titantrade.daily_sentry._fetch_current_price", return_value=None)
+    @patch("titantrade.protection.get_latest_price", return_value=None)
     @patch("titantrade.protection._append_trade")
     @patch("titantrade.protection.place_market_sell")
     @patch("titantrade.protection.cancel_order")

@@ -1,7 +1,4 @@
-"""Pre-flight position safety: orphan close + gap-down protection.
-
-Extracted from executor.py (behavior-preserving).
-"""
+"""Pre-flight position safety: orphan close + gap-down protection (Decisions 037/054/063)."""
 
 from __future__ import annotations
 
@@ -11,13 +8,12 @@ from titantrade.config import Config
 from titantrade.logger import get_logger, log_decision
 from titantrade.retry import HTTPError
 from titantrade.broker import (
-    get_positions, get_open_orders, cancel_order,
-    cancel_all_orders_for_ticker, close_position_at_market,
-    place_market_sell, _wait_for_order_canceled,
-    get_recent_split_announcements,
+    get_positions, get_position, get_open_orders, cancel_order,
+    close_position_at_market, place_market_sell, place_native_stop_loss,
+    _wait_for_order_canceled, get_recent_split_announcements,
 )
+from titantrade.market_data import get_latest_price
 from titantrade.trade_state import _append_trade, _load, _trade_record
-from titantrade.trailing_state import _cleanup_trailing_state
 from titantrade.core_allocation import _is_core_ticker
 
 log = get_logger("protection")
@@ -32,119 +28,88 @@ SPLIT_SUSPECT_GAP_PCT = 0.30
 
 
 # ---------------------------------------------------------------------------
-# Thesis expiry: close orphaned positions
+# Settled close — the one way a position is sold at market
+# ---------------------------------------------------------------------------
+
+def close_position_settled(ticker: str, cfg: Config, *, trigger: str, reason: str) -> dict[str, Any] | None:
+    """Cancel resting orders, wait for each to settle, market-sell, record.
+
+    The protective stop holds the shares, so a close fired right after the
+    cancel 403s with "insufficient qty available" (ADR 037/042; production
+    2026-10-13: three orphan closes failed exactly this way and left the
+    positions without stops). On a failed close the stop is restored so the
+    position is never left naked. Returns the trade record, or None.
+    """
+    open_orders = get_open_orders(ticker, cfg)
+    for order in open_orders:
+        try:
+            cancel_order(order["id"], cfg)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"{trigger} {ticker}: cancel {order.get('id')} failed: {exc}")
+    for order in open_orders:
+        _wait_for_order_canceled(order["id"], cfg)
+    position = get_position(ticker, cfg)
+    if not position:
+        return None
+    qty = float(position.get("qty") or 0)
+    if qty <= 0:
+        return None
+    try:
+        close_position_at_market(ticker, cfg)
+    except Exception as exc:  # noqa: BLE001
+        log.error(f"{trigger} close failed for {ticker}: {exc} — restoring stop")
+        stop = next(
+            (float(o.get("stop_price") or 0) for o in open_orders
+             if o.get("type") in ("stop", "stop_limit") and o.get("side") == "sell"),
+            0.0,
+        )
+        if stop > 0:
+            try:
+                place_native_stop_loss(ticker, qty, stop, cfg)
+            except Exception as rexc:  # noqa: BLE001
+                log.error(f"CRITICAL: {ticker} is naked — stop restore failed: {rexc}")
+        return None
+    trade = _trade_record(
+        ticker=ticker, action="SELL", shares=qty,
+        price=float(position.get("current_price") or 0),
+        trigger=trigger, reasoning=reason,
+    )
+    _append_trade(trade)
+    log_decision(log, "executor", ticker, f"SELL ({trigger})", reason)
+    return trade
+
+
+# ---------------------------------------------------------------------------
+# Orphan close: a held overlay name without a plan item
 # ---------------------------------------------------------------------------
 
 def close_orphaned_positions(cfg: Config) -> list[dict[str, Any]]:
-    """Close positions that have no active thesis. Weekly-review CLOSE actions
-    on **losing** positions are downgraded to TIGHTEN_STOP — the analyst can
-    only tighten the leash on a losing position, never preempt it. Stops are
-    sacred; if the analyst wants out badly enough, they can tighten the stop
-    so close to market that the next normal day will trigger it.
-
-    Cases handled here:
-    1. A held ticker has no entry in weekly_thesis.json (orphaned) → CLOSE
-    2. review_action == "CLOSE" AND position is **in profit** → CLOSE
-       (taking profit on a flipped thesis is legitimate)
-    3. review_action == "CLOSE" AND position is **at a loss** → SKIP
-       (would crystallize a loss the programmatic stop hasn't hit yet —
-        production showed HCA closed at -1.6% via this path while its stop
-        was still 4% away; let the stop do its job)
-
-    Independently of this function, the ADJUST path (executor section 4a)
-    will handle the stop-tightening when review_action=CLOSE on a loser —
-    it sees the (tighter) stop_loss_price the analyst sets and replaces.
-    """
-    thesis_doc = _load("weekly_thesis.json")
+    """Market-sell every held overlay position that has no item in the plan:
+    positions opened before the mechanical strategy started, names removed
+    from the watchlist, or anything else the plan does not own. The core ETF
+    is never an orphan. Returns the trade records."""
+    plan = _load("plan.json")
     positions = get_positions(cfg)
-
     if not positions:
         return []
-
-    # Index theses by ticker
-    theses_by_ticker = {
-        t["ticker"]: t for t in thesis_doc.get("theses", [])
-    }
-
+    planned = {i.get("ticker") for i in plan.get("items", []) if i.get("ticker")}
     closed: list[dict[str, Any]] = []
-
     for pos in positions:
         ticker = pos.get("symbol", "")
-        qty = float(pos.get("qty", 0))
-        if qty <= 0:
+        if float(pos.get("qty", 0)) <= 0 or _is_core_ticker(ticker, cfg) or ticker in planned:
             continue
-
-        # Core-allocation tickers (SPY, hedge ETFs) are managed by
-        # manage_core_position, not by the AI thesis path. They have no
-        # weekly thesis entry — but they're not "orphans" we should sell.
-        if _is_core_ticker(ticker, cfg):
-            continue
-
-        thesis = theses_by_ticker.get(ticker)
-
-        # Case 1: Position is covered by an active thesis that isn't CLOSE
-        if thesis and thesis.get("review_action") != "CLOSE":
-            continue
-
-        # Case 2: Explicit CLOSE action — gate on profit/loss
-        if thesis and thesis.get("review_action") == "CLOSE":
-            unrealized_pl_pct = float(pos.get("unrealized_plpc", 0)) * 100
-            if unrealized_pl_pct < 0:
-                # CLOSE on a loser is downgraded to "let the stop work".
-                # The analyst's stop_loss_price (typically tightened in the
-                # CLOSE thesis) will be applied by the ADJUST path. No
-                # discretionary market-sell.
-                log.info(
-                    f"Weekly CLOSE for {ticker} downgraded — position at "
-                    f"{unrealized_pl_pct:+.1f}% (loss). Stops are sacred; "
-                    f"deferring to programmatic stop. Original reasoning: "
-                    f"{thesis.get('reasoning', '')[:200]}"
-                )
-                continue
-            reason = (
-                f"Weekly review: CLOSE — {thesis.get('reasoning', 'Thesis invalidated')} "
-                f"(taking profit at {unrealized_pl_pct:+.1f}%)"
-            )
-        else:
-            reason = f"No thesis entry for {ticker} in current weekly analysis"
-
+        reason = f"No plan item for {ticker} — not a position of the mechanical strategy"
         log.warning(f"ORPHAN CLOSE: {ticker} — {reason}")
         try:
-            cancel_all_orders_for_ticker(ticker, cfg)
-            close_position_at_market(ticker, cfg)
-            trade = _trade_record(
-                ticker=ticker,
-                action="SELL",
-                shares=qty,
-                price=float(pos.get("current_price", 0)),
-                trigger="thesis_expired",
-                reasoning=reason,
-            )
-            _append_trade(trade)
-            closed.append(trade)
-            log_decision(log, "executor", ticker, "SELL (ORPHAN)", reason)
+            trade = close_position_settled(ticker, cfg, trigger="orphan_close", reason=reason)
         except HTTPError as exc:
-            # Surface broker diagnostics (e.g. Alpaca error code + message)
-            # so the root cause is visible in logs — the next executor run
-            # will retry this orphan close automatically.
-            log.error(
-                f"Failed to close orphaned position {ticker}: "
-                f"HTTP {exc.status_code} code={exc.error_code} "
-                f"msg={exc.error_message or exc.body[:200]} "
-                f"— will retry on next run"
-            )
-        except Exception as exc:
-            log.error(
-                f"Failed to close orphaned position {ticker}: {exc} "
-                f"— will retry on next run"
-            )
-
-    if closed:
-        # Clean up trailing state for closed tickers
-        _cleanup_trailing_state(
-            {p["symbol"] for p in get_positions(cfg)}
-        )
-
+            log.error(f"Failed to close orphaned position {ticker}: HTTP {exc.status_code} code={exc.error_code} msg={exc.error_message or exc.body[:200]} — will retry on next run")
+            continue
+        except Exception as exc:  # noqa: BLE001
+            log.error(f"Failed to close orphaned position {ticker}: {exc} — will retry on next run")
+            continue
+        if trade:
+            closed.append(trade)
     return closed
 
 
@@ -196,8 +161,7 @@ def check_gap_down_protection(cfg: Config) -> list[dict[str, Any]]:
                 # A missing/failed quote falls through to the sell — never weaken
                 # protection when we can't confirm (the FCX bare-position case).
                 try:
-                    from titantrade.daily_sentry import _fetch_current_price
-                    market_price = _fetch_current_price(ticker, cfg)
+                    market_price = get_latest_price(ticker, cfg)
                 except Exception:  # noqa: BLE001
                     market_price = None
                 if market_price and market_price >= stop_price:

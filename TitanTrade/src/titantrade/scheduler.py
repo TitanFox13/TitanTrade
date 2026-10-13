@@ -35,41 +35,15 @@ MAX_HISTORY = 20
 
 def _run_full() -> str:
     from .config import load_config
+    from .data_fetcher import main as fetch_main
     from .executor import execute_trades
+    from .mechanical import refresh_plan
 
     cfg = load_config()
-    if cfg.trading.strategy == "mechanical":
-        # Decision 061: fetch → mechanical signals → execute (no LLM in the loop)
-        from .data_fetcher import main as fetch_main
-        from .mechanical import refresh_mechanical_signals
-
-        fetch_main()
-        refresh_mechanical_signals(cfg)
-    else:
-        from .weekly_analyst import run_weekly_analysis
-        from .daily_sentry import run_daily_sentry
-
-        run_weekly_analysis(cfg)
-        run_daily_sentry(cfg)
+    fetch_main()
+    refresh_plan(cfg)
     trades = execute_trades(cfg)
     return f"{len(trades)} trades executed"
-
-
-def _run_signals() -> str:
-    from .config import load_config
-    from .mechanical import refresh_mechanical_signals
-
-    s = refresh_mechanical_signals(load_config())
-    if s.get("error"):
-        return f"signals: {s['error']}"
-    return f"{s['new_signals']} new signal(s), insurance {'RISK-OFF' if s['risk_off'] else 'on'}"
-
-
-def _run_curate() -> str:
-    from .config import load_config
-    from .curator import run_monthly_curation
-
-    return run_monthly_curation(load_config())
 
 
 def _run_fetch() -> str:
@@ -78,44 +52,34 @@ def _run_fetch() -> str:
     return "data bundle refreshed"
 
 
-def _run_sentry() -> str:
-    from .daily_sentry import main as sentry_main
-    sentry_main()
-    return "sentry complete"
+def _run_signals() -> str:
+    from .config import load_config
+    from .mechanical import refresh_plan
+
+    plan = refresh_plan(load_config())
+    if plan.get("error"):
+        return f"plan: {plan['error']}"
+    ins = plan.get("insurance", {})
+    return f"{plan['new_signals']} new signal(s), insurance {'RISK-OFF' if ins.get('risk_off') else 'on'}"
 
 
 def _run_execute() -> str:
+    """The plan is recomputed from the bundle before every run."""
     from .config import load_config
-
-    cfg = load_config()
-    if cfg.trading.strategy == "mechanical":
-        # Decision 061: signals are recomputed from the bundle before every run
-        from .mechanical import refresh_mechanical_signals
-        from .executor import execute_trades
-
-        refresh_mechanical_signals(cfg)
-        trades = execute_trades(cfg)
-        return f"{len(trades)} trades executed"
-    from .executor import main as executor_main
-    executor_main()
-    return "executor complete"
-
-
-def _run_sentry_execute() -> str:
-    from .config import load_config
-    from .daily_sentry import run_daily_sentry
     from .executor import execute_trades
+    from .mechanical import refresh_plan
 
     cfg = load_config()
-    run_daily_sentry(cfg)
+    refresh_plan(cfg)
     trades = execute_trades(cfg)
-    return f"sentry + {len(trades)} trades"
+    return f"{len(trades)} trades executed"
 
 
-def _run_pricecheck() -> str:
-    from .price_check import main as pc_main
-    pc_main()
-    return "pricecheck complete"
+def _run_curate() -> str:
+    from .config import load_config
+    from .curator import run_monthly_curation
+
+    return run_monthly_curation(load_config())
 
 
 def _run_gapcheck() -> str:
@@ -129,25 +93,16 @@ def _run_gapcheck() -> str:
 
 
 def _run_resubmit() -> str:
-    from .config import STATE_DIR, load_config
-    from .executor import get_positions, resubmit_expired_brackets
+    from .config import load_config
+    from .entries import resubmit_expired_brackets
+    from .executor import get_positions
+    from .trade_state import _load
 
     cfg = load_config()
-    thesis_path = STATE_DIR / "weekly_thesis.json"
-    bundle_path = STATE_DIR / "data_bundle.json"
-
-    if not thesis_path.exists():
-        return "no thesis found"
-
-    with open(thesis_path) as f:
-        thesis_doc = json.load(f)
-    data_bundle = {}
-    if bundle_path.exists():
-        with open(bundle_path) as f:
-            data_bundle = json.load(f)
-
-    positions = get_positions(cfg)
-    trades = resubmit_expired_brackets(cfg, thesis_doc, positions, data_bundle)
+    plan = _load("plan.json")
+    if not plan.get("items"):
+        return "no plan found"
+    trades = resubmit_expired_brackets(cfg, plan, get_positions(cfg), _load("data_bundle.json"))
     return f"{len(trades)} brackets resubmitted"
 
 
@@ -170,15 +125,12 @@ def _run_daily_summary() -> str:
 COMMANDS: dict[str, callable] = {
     "full": _run_full,
     "fetch": _run_fetch,
-    "sentry": _run_sentry,
-    "execute": _run_execute,
-    "sentry_execute": _run_sentry_execute,
     "signals": _run_signals,
-    "curate": _run_curate,
-    "pricecheck": _run_pricecheck,
+    "execute": _run_execute,
     "gapcheck": _run_gapcheck,
     "resubmit": _run_resubmit,
     "daily_summary": _run_daily_summary,
+    "curate": _run_curate,
 }
 
 

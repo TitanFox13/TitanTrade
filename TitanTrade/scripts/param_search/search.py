@@ -1,7 +1,10 @@
 """Stage 1: entry/exit grid, insurance off, slot 20% × 3. Four datasets. Plateau-scored."""
-import itertools, json, sys, time, statistics, datetime
+import itertools
+import json
+import sys
+import time
+import datetime
 from multiprocessing import Pool
-import numpy as np
 import fastbt
 S = "data/param_search"
 NAMES = ["CRWD","ANET","LLY","DXCM","HCA","JPM","GS","DVN","WMT","URI","GE","DASH","DECK","FCX","EQIX"]

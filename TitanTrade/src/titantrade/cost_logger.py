@@ -57,7 +57,7 @@ def log_cost(
         description: Human-readable label (e.g., "Weekly Pass 1: AAPL")
         input_tokens: Prompt/input token count
         output_tokens: Completion/output token count
-        run_type: "weekly_analyst" or "daily_sentry"
+        run_type: "curator" (or any job label)
     """
     path = STATE_DIR / "costs.json"
 

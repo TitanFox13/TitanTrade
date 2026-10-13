@@ -25,242 +25,149 @@ class AlpacaConfig:
     key: str = ""
     secret: str = ""
     base_url: str = "https://paper-api.alpaca.markets"
-    # Market-data API is a different host from the trading API. Same keys.
-    # Free plan serves the IEX feed, which is all we need for daily bars,
-    # latest trades, and news.
+    # Market-data host and feed. IEX is free and fine for live quotes; SIP is
+    # used where full history or the just-closed session is needed (Decisions
+    # 058/061) — a SIP query must end >= 15 minutes in the past.
     data_base_url: str = "https://data.alpaca.markets"
     data_feed: str = "iex"
 
 
 @dataclass(frozen=True)
-class FMPConfig:
-    # Retained only so legacy code / test fixtures that reference cfg.fmp keep
-    # working. FMP was fully replaced by Alpaca + FRED + Yahoo (see ADR 040);
-    # the key is no longer required.
-    key: str = ""
-    base_url: str = "https://financialmodelingprep.com/api/v3"
-
-
-@dataclass(frozen=True)
 class FREDConfig:
-    """St. Louis Fed (FRED) — free, official source for VIX, treasury yields,
-    and the economic-release calendar. Key is optional: without it those
-    macro inputs are simply absent (the macro-blackout gate fails open)."""
+    """St. Louis Fed (FRED) — the economic-release calendar behind the
+    macro-blackout gate. Key is optional: without it the gate fails open."""
     key: str = ""
     base_url: str = "https://api.stlouisfed.org/fred"
 
 
 @dataclass(frozen=True)
 class FinnhubConfig:
-    """Finnhub (free tier) — per-ticker earnings dates, analyst recommendation
-    trends, and sector/industry. Key is optional: without it those per-ticker
-    enrichments are absent (earnings-blackout gate fails open; Claude simply
-    sees no analyst block)."""
+    """Finnhub (free tier) — earnings dates (earnings-blackout gate), sector
+    (sector-exposure gate) and analyst recommendations (monthly curator).
+    Key is optional: without it those inputs are absent and the gates fail
+    open."""
     key: str = ""
     base_url: str = "https://finnhub.io/api/v1"
 
 
 @dataclass(frozen=True)
 class ClaudeConfig:
+    """Anthropic Claude — used only by the monthly curator (universe proposal,
+    post-mortem). Never in the trading loop (Decision 061)."""
     key: str = ""
-    # The weekly analyst is the strategy's alpha source — run the most capable
-    # model (ADR 050). Previous default claude-sonnet-4-20250514 was RETIRED
-    # (404) on 2026-06-15; it had to move off it. Opus 4.8 uses adaptive
-    # thinking (see weekly_analyst._call_claude).
     model: str = "claude-opus-4-8"
-    # Retained for the legacy Sonnet path; NOT sent to Opus 4.8/4.7 — sampling
-    # params are removed there and return 400. Opus steers via adaptive
-    # thinking + the (detailed) prompt instead.
-    temperature: float = 0.3
-    # Headroom for adaptive-thinking tokens + JSON output; kept <=16K so the
-    # SDK doesn't require streaming for the non-streaming analyst call.
     max_tokens: int = 16000
 
 
 @dataclass(frozen=True)
-class GeminiConfig:
-    key: str = ""
-    # Primary: gemini-3.1-flash-lite — current-gen, cheaper than 2.5-flash
-    # ($0.25/$1.50 vs $0.30/$2.50 per 1M in/out) and ample for the binary
-    # CONTINUE/ABORT classification. Verified it accepts our structured-output
-    # + thinkingBudget=0 request.
-    model: str = "gemini-3.1-flash-lite"
-    temperature: float = 0.1
-    max_tokens: int = 2048
-    # On a persistent 503 ("model overloaded" — a Google-side capacity issue,
-    # not quota), fall back to these models in order. They span model
-    # generations and are separate capacity pools, so a different model
-    # usually answers immediately. "*-latest" also future-proofs against
-    # version retirement (gemini-2.0-flash was removed and now 404s). Each
-    # model gets `per_model_retries` attempts before moving on, so the whole
-    # chain stays time-bounded.
-    fallback_models: tuple[str, ...] = (
-        "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest",
-    )
-    per_model_retries: int = 2
-
-
-@dataclass(frozen=True)
 class TradingSettings:
-    # 15 names across 9 sectors. FANG dropped (0.86 corr with DVN — redundant
-    # oil & gas E&P, one bet in two slots); WMT added as a true defensive
-    # (Consumer Staples, beta ~0.46, ~0.17 avg corr to the rest) so the overlay
-    # has something to rotate INTO in a risk-off, not just cash (ADR 049).
+    """Watchlist + the mechanical strategy's parameters (Decisions 061/062).
+
+    Everything here can be changed in ``data/watchlist.json`` without a
+    deploy; the executor reads it at every run.
+    """
     watchlist: list[str] = field(default_factory=lambda: [
         "CRWD", "ANET", "LLY", "DXCM", "HCA",
         "JPM", "GS", "DVN", "WMT", "URI",
         "GE", "DASH", "DECK", "FCX", "EQIX",
     ])
-    risk_per_trade: float = 0.10
     trading_mode: str = "paper"
-    stop_loss_pct: float = 0.05
-    trailing_trigger_pct: float = 0.05   # Activate trailing stop after 5% gain
-    # ATR-based trailing distance below HWM — gives volatility room so we don't
-    # crystallize winners on noise. A 3% fixed trail (the original default)
-    # stopped a 25% URI winner on first dip in production. Falls back to
-    # ``trailing_distance_pct`` only when ATR isn't available.
-    #
-    # Widened 2.5 -> 3.0 (ADR 048): a regime-segmented backtest over a full
-    # 2021-2026 cycle — including the real 2022 bear (SPY -25%) — showed wider
-    # trailing lets winners run (bull capture up materially) with NO downside
-    # cost: in the bear the trailing isn't the binding exit (the initial stop +
-    # defensive thesis are), so the 2022 result was flat-to-better and max
-    # drawdown never rose. 3.0 is a conservative step; 3.5 backtested better
-    # still but looked like a path-dependent peak (4.5 reverted), so not chased.
-    trailing_atr_multiplier: float = 3.0
-    trailing_distance_pct: float = 0.05  # Fallback %-trail if ATR missing (was 3%, now 5%)
-    # Take-profit tranche: at this fraction of the entry→TP distance, sell
-    # ``tp1_fraction`` of the position and raise the stop to breakeven.
-    # The remainder runs with the trailing stop. De-risks while keeping
-    # the runway open for outsized winners.
-    tp1_trigger_fraction: float = 0.5  # Trigger at 50% of upside-to-TP
-    tp1_fraction: float = 0.333         # Sell 1/3 at TP1
 
-    # Pyramid: add to a winning position when it's working. Aligned with the
-    # "ride the wave" mandate — current behavior caps at one entry per
-    # ticker and just trails. Adds happen exactly once per position, at
-    # ``pyramid_trigger_pct`` gain, sizing ``pyramid_size_fraction`` of the
-    # original position's notional (so the average entry walks up but the
-    # position doesn't blow past concentration caps).
-    pyramid_enabled: bool = True
-    pyramid_trigger_pct: float = 0.05      # Add when gain >= 5%
-    pyramid_size_fraction: float = 0.5     # Add 50% of original notional
-    pyramid_max_total_pct: float = 0.30    # Hard cap on total position size
-    hedge_instruments: list[str] = field(default_factory=lambda: [
-        "SH",    # Inverse S&P 500 (1x)
-        "PSQ",   # Inverse Nasdaq 100 (1x)
-        "SDS",   # Inverse S&P 500 (2x) — more aggressive
-    ])
-    # --- Core/hedge allocation (Phase 3: "always deployed") ---
-    # The core position is a baseline market exposure that's always on,
-    # independent of the AI thesis. AI-picks are *overlays* on top of this.
-    # When sentry detects market stress, the core ticker is swapped for a
-    # hedge ticker (inverse ETF). Cash is transit, never a destination.
-    core_ticker: str = "SPY"        # Default-on market exposure
-    core_hedge_ticker: str = "SH"   # Inverse swap when market stress fires
-    core_allocation_pct: float = 0.30  # Target 30% of portfolio in the core
-    core_rebalance_band_pct: float = 0.05  # Rebalance if drift exceeds 5%pts
-
-    # --- Decision 061: mechanical strategy (default). "llm" = legacy pipeline ---
-    strategy: str = "mechanical"
-    dip_pct: float = 0.10            # entry: close >= 10% below the lookback high...
-    dip_lookback_days: int = 60      # ...of the last 60 sessions...
-    trend_sma_days: int = 200        # ...while above its 200-day SMA
-    slot_pct: float = 0.20           # each overlay position = 20% of equity, swapped out of SPY
+    # Entry: close >= dip_pct below the dip_lookback_days high, above the trend SMA
+    dip_pct: float = 0.08
+    dip_lookback_days: int = 90
+    trend_sma_days: int = 150
+    # Sizing: flat slots swapped out of the SPY core
+    slot_pct: float = 0.25
     max_slots: int = 3
-    tp_pct: float = 0.10             # exit at +10% (checked at each executor run)
-    stop_pct: float = 0.12           # broker stop-limit at -12%
-    max_hold_days: int = 40          # trading days, then exit back to SPY
-    insurance_sma_days: int = 200    # de-risk only if SPY < SMA AND sector breadth < threshold
+    # Exits: broker stop, target and holding limit (trading days)
+    tp_pct: float = 0.20
+    stop_pct: float = 0.12
+    max_hold_days: int = 60
+    # Insurance: exposure × insurance_scale while SPY < its SMA AND sector
+    # breadth < insurance_breadth (two-signal confirmation)
+    insurance_sma_days: int = 200
     insurance_breadth: float = 0.5
-    insurance_scale: float = 0.5     # exposure multiplier while risk-off
+    insurance_scale: float = 0.5
     sector_etfs: list[str] = field(default_factory=lambda: [
         "XLK", "XLV", "XLF", "XLE", "XLI", "XLY", "XLB", "XLRE", "XLP", "XLU", "XLC",
     ])
+
+    # Core: SPY is the residual of the book; rebalance when drift exceeds the band
+    core_ticker: str = "SPY"
+    core_rebalance_band_pct: float = 0.05
 
 
 @dataclass(frozen=True)
 class Config:
     alpaca: AlpacaConfig
-    fmp: FMPConfig
     claude: ClaudeConfig
-    gemini: GeminiConfig
     trading: TradingSettings
     fred: FREDConfig = field(default_factory=FREDConfig)
     finnhub: FinnhubConfig = field(default_factory=FinnhubConfig)
-    # Active market-data provider: "native" (Alpaca+FRED+Finnhub, default) or
-    # "fmp" (legacy, retained). Switch via the DATA_PROVIDER env var.
-    data_provider: str = "native"
+
+
+MECHANICAL_FIELDS = {
+    "dip_pct", "dip_lookback_days", "trend_sma_days", "slot_pct", "max_slots",
+    "tp_pct", "stop_pct", "max_hold_days", "insurance_sma_days",
+    "insurance_breadth", "insurance_scale", "sector_etfs",
+}
 
 
 def load_watchlist() -> TradingSettings:
-    """Load watchlist.json, falling back to defaults."""
+    """Load watchlist.json, falling back to defaults.
+
+    ``settings.trading_mode`` (env ``TRADING_MODE`` overrides) and
+    ``settings.mechanical`` (any of ``MECHANICAL_FIELDS``) are honoured.
+    """
     path = DATA_DIR / "watchlist.json"
     if not path.exists():
         return TradingSettings()
     with open(path) as f:
         data = json.load(f)
-    settings = data.get("settings", {})
+    settings = data.get("settings", {}) or {}
     mode = os.environ.get("TRADING_MODE", settings.get("trading_mode", "paper"))
-    # Decision 061: strategy selection + mechanical parameters live under
-    # settings.strategy / settings.mechanical so the watchlist editor and the
-    # parameter search can change them without a code deploy.
     mech = settings.get("mechanical", {}) or {}
-    mech_fields = {
-        "dip_pct", "dip_lookback_days", "trend_sma_days", "slot_pct", "max_slots",
-        "tp_pct", "stop_pct", "max_hold_days", "insurance_sma_days",
-        "insurance_breadth", "insurance_scale", "sector_etfs",
-    }
-    overrides = {k: v for k, v in mech.items() if k in mech_fields}
+    overrides = {k: v for k, v in mech.items() if k in MECHANICAL_FIELDS}
     return TradingSettings(
         watchlist=data.get("watchlist", TradingSettings().watchlist),
-        risk_per_trade=settings.get("risk_per_trade", 0.10),
         trading_mode=mode,
-        stop_loss_pct=settings.get("stop_loss_pct", 0.05),
-        strategy=settings.get("strategy", TradingSettings().strategy),
         **overrides,
     )
+
+
+def _read_watchlist_file() -> dict:
+    path = DATA_DIR / "watchlist.json"
+    if path.exists():
+        with open(path) as f:
+            return json.load(f)
+    return {"watchlist": TradingSettings().watchlist, "settings": {"trading_mode": "paper"}}
 
 
 def save_trading_mode(mode: str) -> None:
     """Update the trading_mode in watchlist.json, preserving everything else."""
     if mode not in ("paper", "live"):
         raise ValueError(f"Invalid trading mode: {mode!r} (must be 'paper' or 'live')")
-    path = DATA_DIR / "watchlist.json"
-    if path.exists():
-        with open(path) as f:
-            data = json.load(f)
-    else:
-        data = {"watchlist": TradingSettings().watchlist, "settings": {}}
+    data = _read_watchlist_file()
     data.setdefault("settings", {})["trading_mode"] = mode
-    with open(path, "w") as f:
+    with open(DATA_DIR / "watchlist.json", "w") as f:
         json.dump(data, f, indent=2)
 
 
 def save_watchlist(tickers: list[str]) -> None:
     """Update the watchlist tickers in watchlist.json, preserving settings."""
-    path = DATA_DIR / "watchlist.json"
-    if path.exists():
-        with open(path) as f:
-            data = json.load(f)
-    else:
-        data = {"settings": {"risk_per_trade": 0.10, "trading_mode": "paper", "stop_loss_pct": 0.05}}
+    data = _read_watchlist_file()
     data["watchlist"] = tickers
-    with open(path, "w") as f:
+    with open(DATA_DIR / "watchlist.json", "w") as f:
         json.dump(data, f, indent=2)
 
 
 REQUIRED_KEYS = {
-    "CLAUDE_KEY": "Anthropic Claude (weekly analysis)",
-    "GEMINI_KEY": "Google Gemini (daily sentry)",
+    "CLAUDE_KEY": "Anthropic Claude (monthly curator)",
 }
 
 # Optional keys — absent ones degrade gracefully rather than failing startup.
-#   FMP_KEY  — legacy; FMP was fully replaced (ADR 040), no longer used.
-#   FRED_KEY — St. Louis Fed: VIX, treasury, economic calendar. Without it
-#              those macro inputs are absent and the macro-blackout gate
-#              fails open (its existing behaviour on a data error).
-OPTIONAL_KEYS = ("FMP_KEY", "FRED_KEY", "FINNHUB_KEY")
+OPTIONAL_KEYS = ("FRED_KEY", "FINNHUB_KEY")
 
 
 def _resolve_alpaca_keys() -> dict[str, str]:
@@ -322,11 +229,9 @@ def validate_api_keys() -> dict[str, str]:
             + "\n\nCopy .env.example to .env and fill in your keys."
         )
 
-    # Optional keys: included if present, never block startup.
     for key_name in OPTIONAL_KEYS:
         keys[key_name] = os.environ.get(key_name, "").strip()
 
-    # Merge in Alpaca keys (has its own validation)
     keys.update(_resolve_alpaca_keys())
     return keys
 
@@ -334,8 +239,8 @@ def validate_api_keys() -> dict[str, str]:
 def load_config() -> Config:
     """Build the full configuration from env vars and watchlist.json.
 
-    Validates all API keys are present before returning.
-    Selects paper or live Alpaca credentials based on trading_mode.
+    Validates the API keys and selects paper or live Alpaca credentials from
+    ``trading_mode``.
     """
     keys = validate_api_keys()
     trading = load_watchlist()
@@ -361,28 +266,12 @@ def load_config() -> Config:
         )
 
     return Config(
-        alpaca=AlpacaConfig(
-            key=alpaca_key,
-            secret=alpaca_secret,
-            base_url=base_url,
-        ),
-        fmp=FMPConfig(
-            key=keys.get("FMP_KEY", ""),
-        ),
-        fred=FREDConfig(
-            key=keys.get("FRED_KEY", ""),
-        ),
-        finnhub=FinnhubConfig(
-            key=keys.get("FINNHUB_KEY", ""),
-        ),
-        data_provider=os.environ.get("DATA_PROVIDER", "native").strip() or "native",
+        alpaca=AlpacaConfig(key=alpaca_key, secret=alpaca_secret, base_url=base_url),
+        fred=FREDConfig(key=keys.get("FRED_KEY", "")),
+        finnhub=FinnhubConfig(key=keys.get("FINNHUB_KEY", "")),
         claude=ClaudeConfig(
             key=keys["CLAUDE_KEY"],
             model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-8"),
-        ),
-        gemini=GeminiConfig(
-            key=keys["GEMINI_KEY"],
-            model=os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite"),
         ),
         trading=trading,
     )

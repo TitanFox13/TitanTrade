@@ -1,14 +1,8 @@
 """Pluggable market-data providers.
 
-Each provider module implements the same interface so the system can switch
-data sources without touching any consumer. Selection is by
-``cfg.data_provider`` (env ``DATA_PROVIDER``); ``titantrade.market_data`` is
-the facade that dispatches to the chosen one.
-
-Providers:
-  - ``native`` — Alpaca + FRED + Finnhub (default; free; ADR 040).
-  - ``fmp``    — legacy Financial Modeling Prep (retained, switchable via
-                 ``DATA_PROVIDER=fmp`` + a valid ``FMP_KEY``).
+``native`` (Alpaca + FRED + Finnhub, ADR 040) is the one provider;
+``titantrade.market_data`` is the facade consumers call. The retired FMP
+provider lives in ``legacy/``.
 
 Interface (all take/return the shapes the connectors expect):
   get_ohlcv(ticker, cfg, days=250) -> [{date, open, high, low, close, volume}]
