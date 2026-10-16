@@ -12,7 +12,7 @@ The system's job is to not lose money, and secondarily to make money. Missed opp
 
 ## The Eight Gates (`risk_manager.pre_trade_check`)
 
-Evaluated in order for every NEW item and every bracket resubmission; a failure of ≤ 2 gates is recorded as a near miss.
+Evaluated in order for every NEW item (an entry that expired unfilled is simply a NEW item again at the next run); a failure of ≤ 2 gates is recorded as a near miss.
 
 1. **Earnings blackout** — no entry within 2 calendar days of earnings (Finnhub; `earnings.DEFAULT_BLOCK_DAYS`). Binary risk that cannot be hedged.
 2. **Drawdown circuit breaker** — all entries halt while equity is ≥ 8% below the recorded peak (`state/peak_portfolio.json`). **Suspect-value guard** (054): a value more than ±50% off the peak is broker data corruption, not a drawdown — entries pause for the run, the block is labelled "suspect broker data" and alerted, and `update_peak_value` refuses the spike so a glitch never trips the breaker permanently.
@@ -33,7 +33,7 @@ Evaluated in order for every NEW item and every bracket resubmission; a failure 
 - **Stop placement race** (`broker.place_native_stop_loss`): on 40310000 the blocking order from `related_orders` is polled to a terminal state and the stop re-sent; with no blocking order it clamps to the broker-reported available qty.
 - **Gap-down protection** (035/053/054): an unfilled stop-limit after an overnight gap → cancel, settle, market sell. The live quote is cross-checked first; a gap > 30% below the stop checks the corporate-actions feed and skips + alerts on a recent split.
 - **Stop-out cooldown** (056/059): a filled sell stop starts a 72 h re-entry cooldown stamped at the fill time with the fill price (`record_stop_out_cooldowns`, idempotent). Re-entry before 72 h needs ≥ 24 h *and* a current price ≥ 1% above that exit (`cooldown_override_allowed`): of 23 early re-entries Jul–Sep 2026, the 10 that came in flat all lost, the 13 that came in ≥ 1% above kept every winner. Records without an exit price get the full 72 h.
-- **Expired-bracket resubmission** (`entries.resubmit_expired_brackets`): once per ticker per run, up to `MAX_BRACKET_ATTEMPTS` (20), through `handle_entry` again — fresh price, levels and gates; skipped while held, pending, or without a NEW item.
+- **Expired entries** (Decision 064): a bracket that does not fill by the close expires; the ticker keeps its NEW item while the dip signal holds and the next run places a fresh near-market bracket through the same gates. No separate resubmission scan and no attempt cap — the mechanical entry is a near-market limit that fills the same session almost always.
 - **Orphan close** (`protection.close_orphaned_positions`): any non-core position without a plan item is sold at the first market-open run (legacy positions after the conversion, or a name removed from the watchlist).
 - **Never bare**: every failure path that cancels a stop restores one.
 
@@ -58,7 +58,6 @@ Evaluated in order for every NEW item and every bracket resubmission; a failure 
 | `NEAR_MARKET_BUFFER` | 0.003 | pricing.py |
 | `MIN_STOP_DISTANCE_PCT` | 1.5 | pricing.py |
 | `REENTRY_COOLDOWN_HOURS` / `COOLDOWN_OVERRIDE_MIN_HOURS` / `COOLDOWN_RECOVERY_PCT` | 72 / 24 / 1.0 | cooldown.py |
-| `MAX_BRACKET_ATTEMPTS` | 20 | entries.py |
 
 ## What This Prevents
 

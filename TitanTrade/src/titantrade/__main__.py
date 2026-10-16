@@ -27,7 +27,6 @@ Commands:
   execute          Execute the plan via Alpaca (the scheduler runs signals first)
   full             fetch -> signals -> execute
   gapcheck         Gap-down protection + place missing stops
-  resubmit         Resubmit expired entry brackets
   curate           Monthly LLM universe proposal + post-mortem (advisory, no orders)
   benchmark [days] Performance vs SPY: beta, alpha, Sharpe (--since YYYY-MM-DD)
   backtest-mech [dir] [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--split YYYY-MM-DD] [--grid]
@@ -76,21 +75,6 @@ def main() -> None:
         print(f"Stop coverage: {ensure_stop_coverage(cfg)} missing stop(s) placed")
         return
 
-    if command == "resubmit":
-        from titantrade.config import load_config
-        from titantrade.entries import resubmit_expired_brackets
-        from titantrade.executor import get_positions
-        from titantrade.trade_state import _load
-
-        cfg = load_config()
-        plan = _load("plan.json")
-        if not plan.get("items"):
-            print("No plan found — run `signals` first")
-            return
-        trades = resubmit_expired_brackets(cfg, plan, get_positions(cfg), _load("data_bundle.json"))
-        print(f"Resubmitted {len(trades)} bracket(s)")
-        return
-
     if command == "download-history":
         from titantrade.backtest.data_loader import download_historical_data
         from titantrade.config import load_config
@@ -111,7 +95,7 @@ def main() -> None:
 
     if command not in COMMANDS:
         print(f"Unknown command: {command}")
-        print(f"Available: {', '.join(COMMANDS)}, full, gapcheck, resubmit, backtest-mech, download-history")
+        print(f"Available: {', '.join(COMMANDS)}, full, gapcheck, backtest-mech, download-history")
         sys.exit(1)
 
     import importlib

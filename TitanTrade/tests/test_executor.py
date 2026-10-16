@@ -97,7 +97,6 @@ class TestExecuteTradesEndToEnd:
     @patch("titantrade.entries.place_bracket_order", return_value={"id": "b1"})
     @patch("titantrade.entries.get_open_orders", return_value=[])
     @patch("titantrade.executor.record_stop_out_cooldowns", return_value=0)
-    @patch("titantrade.executor.resubmit_expired_brackets", return_value=[])
     @patch("titantrade.executor.check_gap_down_protection", return_value=[])
     @patch("titantrade.executor.close_orphaned_positions", return_value=[])
     @patch("titantrade.executor.manage_core_position", return_value=None)
@@ -108,7 +107,7 @@ class TestExecuteTradesEndToEnd:
     @patch("titantrade.executor.is_market_open", return_value=True)
     def test_new_item_becomes_a_slot_bracket_and_core_gets_the_residual(
         self, mock_open, mock_account, mock_positions, mock_oo, mock_sec, mock_core, mock_orphan, mock_gap,
-        mock_resub, mock_cooldown, mock_entry_oo, mock_bracket, mock_price, fake_config, tmp_state_dir, monkeypatch,
+        mock_cooldown, mock_entry_oo, mock_bracket, mock_price, fake_config, tmp_state_dir, monkeypatch,
     ):
         monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: "ETF" if t == "SPY" else "Technology")
         cfg = replace(fake_config, trading=replace(fake_config.trading, watchlist=["AAA"]))

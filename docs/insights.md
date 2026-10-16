@@ -6,7 +6,7 @@
 A stop checked by a cron job fires twice a day. Overnight a stock can drop 15–20% on earnings or macro news, and by the morning run the "stop" fires far below the intended level. Alpaca's native `stop_limit` orders live on the broker's servers and trigger the moment price touches them, whether or not the bot is running. Every held position carries one.
 
 ### Bracket Order Nuance
-Alpaca brackets are DAY orders: an entry that does not fill by the close expires with its legs, and after a fill the exit legs expire at 20:00 UTC too. The stop leg also sits in `held` while the take-profit leg is live, so it is invisible to the open-orders query. Hence two mechanisms: expired brackets are resubmitted the next morning at a fresh price, and a filled bracket gets its own GTC stop (the TP leg is cancelled, which takes the held stop with it, and a GTC stop is placed at the bracket's level).
+Alpaca brackets are DAY orders: an entry that does not fill by the close expires with its legs, and after a fill the exit legs expire at 20:00 UTC too. The stop leg also sits in `held` while the take-profit leg is live, so it is invisible to the open-orders query. Hence: a ticker whose entry expired keeps its plan item and gets a fresh bracket at the next run, and a filled bracket gets its own GTC stop (the TP leg is cancelled, which takes the held stop with it, and a GTC stop is placed at the bracket's level).
 
 ### JSON as a "Poor Man's Database"
 A 15-name watchlist with a few runs a day fits in a handful of JSON files under 100 KB. No database, no migrations, no connection pooling; jobs run sequentially inside one scheduler so there are no concurrent writes. Append-only files archive themselves past a size cap.

@@ -5,10 +5,9 @@
   2. plan + data bundle
   3. core — SPY to its residual target, freeing the cash this run's entries need
   4. stop-out cooldown scan
-  5. expired-bracket resubmission
-  6. NEW items → entries through the gates; HOLD items → stop coverage,
+  5. NEW items → entries through the gates; HOLD items → stop coverage,
      then the target or the holding limit closes the position
-  7. observability alerts
+  6. observability alerts
 
 Broker calls go through ``broker``; the names re-exported below are what
 tests patch (``titantrade.executor.<name>``).
@@ -34,7 +33,7 @@ from titantrade.broker import (  # re-exported: patch targets
 )
 from titantrade.market_context import load_stock_sectors
 from titantrade.protection import check_gap_down_protection, close_orphaned_positions, close_position_settled
-from titantrade.entries import handle_entry, record_stop_out_cooldowns, resubmit_expired_brackets
+from titantrade.entries import handle_entry, record_stop_out_cooldowns
 from titantrade.core_allocation import _is_core_ticker, manage_core_position
 from titantrade.mechanical import core_target_pct
 from titantrade.signals import trading_days_between
@@ -45,7 +44,7 @@ log = get_logger("executor")
 
 __all__ = [
     "execute_trades", "ensure_stop_coverage", "check_gap_down_protection",
-    "close_orphaned_positions", "resubmit_expired_brackets", "get_positions",
+    "close_orphaned_positions", "get_positions",
     "get_account", "is_market_open", "cancel_all_orders_for_ticker",
 ]
 
@@ -296,18 +295,6 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
         record_stop_out_cooldowns(cfg)
     except Exception as exc:  # noqa: BLE001
         log.warning(f"Stop-out cooldown scan failed: {exc}")
-
-    # --- Expired brackets ---
-    try:
-        resubs = resubmit_expired_brackets(cfg, plan, positions, data_bundle)
-        executed.extend(resubs)
-        if resubs:
-            positions = get_positions(cfg)
-            account = get_account(cfg)
-            portfolio_value = float(account.get("portfolio_value", portfolio_value))
-            cash_balance = float(account.get("cash", cash_balance))
-    except Exception as exc:  # noqa: BLE001
-        log.error(f"Bracket resubmission failed: {exc}")
 
     held_tickers = {p["symbol"] for p in positions}
 

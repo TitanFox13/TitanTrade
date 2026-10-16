@@ -25,10 +25,9 @@ The backend has two faces: a CLI (one-off commands via `docker compose run`) and
 2. Load the plan and the bundle; read the account and positions
 3. **Core**: `mechanical.core_target_pct` = exposure scale × (1 − cash reserve) − (held overlay + planned NEW slots) / equity → `core_allocation.manage_core_position(target_pct)`; the account is re-read after the core trade
 4. **Stop-out cooldowns**: `entries.record_stop_out_cooldowns` scans filled sell stops and stamps the 72 h cooldown with the fill price
-5. **Expired brackets**: `entries.resubmit_expired_brackets` (once per ticker, ≤ 20 attempts, through `handle_entry`)
-6. **NEW items**: `entries.handle_entry` — live price → cooldown check → `pricing.entry_levels` (entry = price × 1.003, stop, target) → sanity checks → committed cash → `risk_manager.pre_trade_check` (8 gates, slot sizing) → near miss or one bracket → `_ensure_gtc_stop_on_fill`; account re-read after each entry
-7. **HOLD items**: `executor._manage_held` — stop coverage at the item's stop; exit when `unrealized_plpc ≥ tp_pct` (trigger `target`) or trading days held ≥ `max_hold_days` (trigger `holding_limit`), both via `close_position_settled`
-8. Observability alerts (stuck in cash, ticker churn)
+5. **NEW items**: `entries.handle_entry` — live price → cooldown check → `pricing.entry_levels` (entry = price × 1.003, stop, target) → sanity checks → committed cash → `risk_manager.pre_trade_check` (8 gates, slot sizing) → near miss or one bracket → `_ensure_gtc_stop_on_fill`; account re-read after each entry
+6. **HOLD items**: `executor._manage_held` — stop coverage at the item's stop; exit when `unrealized_plpc ≥ tp_pct` (trigger `target`) or trading days held ≥ `max_hold_days` (trigger `holding_limit`), both via `close_position_settled`
+7. Observability alerts (stuck in cash, ticker churn)
 
 ### 4. Gapcheck (09:35 ET weekdays)
 `protection.check_gap_down_protection` then `executor.ensure_stop_coverage` (a GTC stop for any whole-share HOLD position without one).
@@ -56,7 +55,7 @@ config.py, logger.py, retry.py
 ├── alerts.py            <- stuck-in-cash / churn alerts (uses trade_state, notifier)
 ├── core_allocation.py   <- SPY core rebalance (uses broker, trade_state)
 ├── protection.py        <- settled close, orphan close, gap-down (uses broker, trade_state)
-├── entries.py           <- handle_entry, resubmission, stop-out scan (uses broker, pricing, cooldown, risk_manager, trade_state)
+├── entries.py           <- handle_entry, stop-out scan (uses broker, pricing, cooldown, risk_manager, trade_state)
 ├── mechanical.py        <- plan builder + core target (uses signals, broker, trade_state, market_context, risk_manager)
 ├── executor.py          <- execute_trades orchestrator, stop coverage, held exits (uses all of the above)
 ├── curator.py           <- Claude universe proposal + post-mortem (uses market_data, cost_logger, notifier)

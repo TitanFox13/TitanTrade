@@ -33,7 +33,7 @@ All market-data functions fail open (`[]` / `None` / `{}`) on a missing key or e
 | `/v2/positions/{symbol}` | DELETE | Close at market (settled close) |
 | `/v2/orders` | POST | Bracket entries, GTC stop-limits, market core trades |
 | `/v2/orders?status=open` | GET | Open orders (the held stop leg of a bracket is **not** returned) |
-| `/v2/orders?status=closed` | GET | Expired brackets, filled stops (cooldown scan) |
+| `/v2/orders?status=closed` | GET | Filled stops (cooldown scan) |
 | `/v2/orders/{id}` | GET / DELETE | Poll a cancel to a terminal state; cancel |
 | `/v2/clock` | GET | Market open check |
 | `/v2/account/portfolio/history` | GET | Benchmark equity series (1D + 15Min) |

@@ -1,5 +1,15 @@
 # Important Decisions Log
 
+## Decision 064: Expired-bracket resubmission removed — the plan already re-enters
+**Date**: 2026-10-16
+**Decision**: `entries.resubmit_expired_brackets`, `entries.get_expired_brackets`, `MAX_BRACKET_ATTEMPTS`, the `resubmit` CLI and scheduler command, and the `trigger` parameter of `handle_entry` are deleted (entries.py 420 → 331 lines, executor.py 393 → 379).
+
+Found at the 2026-10-16 post-deploy check: the scan read the last 500 closed orders with no time bound, so every run re-evaluated 30 LLM-era expired brackets across 12 tickers (FANG left the watchlist in June) and logged 13 "no NEW item in the plan" lines; its 20-attempt price-chase cap counted expirations over the whole account history instead of per thesis cycle, because the weekly refresh that used to reset it no longer exists. Under the plan the step was redundant: a bracket that expires at the close is no longer an open order, the ticker keeps its NEW item while the dip signal holds, and the executor's NEW-item path places a fresh bracket at the live price at the next run — the same action resubmission took, through the same `handle_entry`, under the same eight gates. The chase cap guarded against chasing an analyst's entry level for weeks; the mechanical entry is a near-market limit (live × 1.003) that fills the same session almost always, and a dip signal that persists is by definition still a signal.
+
+**Behaviour change**: none on fills. Trade records no longer carry the `bracket_resubmission` trigger (older records keep it; `trade_state._opening_buy` still reads both). The 13 noise lines per run are gone. **Tests**: 233 (the three resubmission tests removed; the end-to-end executor test no longer stubs the step); ruff clean. **Docs**: CLAUDE.md, features, both architecture docs, risk_management, data_schemas, api_reference, insights, todo.
+
+**Deployed**: __DEPLOY_NOTE__
+
 ## Decision 063: Cleanup after the conversion — the LLM pipeline frozen under `legacy/`, a plan schema, the Flutter app deleted, one settled close for every exit
 **Date**: 2026-10-13
 **Decision**: the operator asked for "a larger cleanup — redundant code and docs, perhaps even the architecture" after Decisions 061/062, and chose: move the old LLM code to a legacy folder rather than delete it, delete the Flutter app (unused), and rename the thesis / sentry schemas to a plain plan. The live tree now contains only what the schedule runs.

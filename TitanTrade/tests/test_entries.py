@@ -1,5 +1,5 @@
 """Entries: near-market bracket through the gates, cooldown, committed cash,
-expired-bracket resubmission, stop-out cooldown scan, fill reconcile.
+stop-out cooldown scan, fill reconcile.
 All broker calls mocked."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import pytest
 
 from titantrade.entries import (
     _ensure_gtc_stop_on_fill, handle_entry, open_buy_commitment,
-    record_stop_out_cooldowns, resubmit_expired_brackets,
+    record_stop_out_cooldowns,
 )
 
 
@@ -100,38 +100,6 @@ class TestOpenBuyCommitment:
         ]
         assert open_buy_commitment(fake_config) == pytest.approx(31 * 318.0 + 155 * 65.0)
         assert open_buy_commitment(fake_config, exclude_ticker="GE") == pytest.approx(155 * 65.0)
-
-
-class TestResubmitExpiredBrackets:
-    def _expired(self, *symbols):
-        return [{"symbol": s, "status": "expired", "order_class": "bracket", "side": "buy"} for s in symbols]
-
-    @patch("titantrade.entries.handle_entry", return_value={"ticker": "AAA", "action": "BUY"})
-    @patch("titantrade.entries.get_account", return_value={"portfolio_value": "100000", "cash": "60000"})
-    @patch("titantrade.entries.get_positions", return_value=[])
-    @patch("titantrade.entries.get_open_orders", return_value=[])
-    @patch("titantrade.entries.get_expired_brackets")
-    def test_resubmits_once_per_ticker_through_handle_entry(self, mock_exp, mock_oo, mock_pos, mock_acct, mock_entry, fake_config):
-        mock_exp.return_value = self._expired("AAA", "AAA", "BBB")
-        plan = {"items": [_item("AAA"), {"ticker": "BBB", "action": "HOLD"}]}
-        out = resubmit_expired_brackets(fake_config, plan, [], {})
-        assert len(out) == 1 and mock_entry.call_count == 1
-        assert mock_entry.call_args.kwargs["trigger"] == "bracket_resubmission"
-
-    @patch("titantrade.entries.handle_entry")
-    @patch("titantrade.entries.get_account", return_value={"portfolio_value": "100000", "cash": "60000"})
-    @patch("titantrade.entries.get_open_orders", return_value=[])
-    @patch("titantrade.entries.get_expired_brackets")
-    def test_skips_held_pending_and_chased_tickers(self, mock_exp, mock_oo, mock_acct, mock_entry, fake_config):
-        from titantrade.entries import MAX_BRACKET_ATTEMPTS
-        mock_exp.return_value = self._expired("HELD") + self._expired(*["CHASE"] * (MAX_BRACKET_ATTEMPTS + 1))
-        plan = {"items": [_item("HELD"), _item("CHASE")]}
-        assert resubmit_expired_brackets(fake_config, plan, [{"symbol": "HELD"}], {}) == []
-        mock_entry.assert_not_called()
-
-    @patch("titantrade.entries.get_expired_brackets", return_value=[])
-    def test_nothing_expired(self, mock_exp, fake_config):
-        assert resubmit_expired_brackets(fake_config, {"items": []}, [], {}) == []
 
 
 class TestStopOutCooldownScan:

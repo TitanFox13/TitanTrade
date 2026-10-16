@@ -21,7 +21,6 @@ uv run python -m titantrade signals      # Build state/plan.json from the bundle
 uv run python -m titantrade execute      # Execute the plan via Alpaca (the scheduler runs signals first)
 uv run python -m titantrade full         # fetch → signals → execute
 uv run python -m titantrade gapcheck     # Gap-down protection + stop coverage for bare plan positions
-uv run python -m titantrade resubmit     # Resubmit expired entry brackets
 uv run python -m titantrade curate       # Monthly Claude universe proposal + post-mortem (advisory, no orders)
 uv run python -m titantrade benchmark [days] [--since YYYY-MM-DD]   # Beta / alpha / Sharpe / capture vs SPY
 uv run python -m titantrade backtest-mech [dir] [--start] [--end] [--split] [--grid]   # Same rule code on daily closes
@@ -52,7 +51,7 @@ Deploy = `git pull && docker compose build api titantrade && docker compose up -
 - **Data** (`data_fetcher.py`, `market_context.py`): 250-day Alpaca bars per name → `signal_inputs` (close, lookback high, trend SMA), ATR-14, 60-day correlations; SPY returns + sector breadth; Finnhub earnings; FRED macro calendar → `state/data_bundle.json`.
 - **Signals** (`signals.py` pure rules; `mechanical.py` builds the plan): dip-in-uptrend entries ranked deepest first into free slots, two-signal insurance, held positions with their stop and target → `state/plan.json`.
 - **Risk Manager** (`risk_manager.py`): 8 programmatic gates between the plan and the broker; flat slot sizing trimmed by cash and the overlay cap.
-- **Executor** (`executor.py` with `entries.py`, `protection.py`, `core_allocation.py`): orphan close → gap check → residual SPY core → stop-out cooldowns → bracket resubmission → NEW entries (one near-market bracket, GTC stop on fill) → HOLD management (stop coverage, +target / holding-limit exits through a cancel-settle-close).
+- **Executor** (`executor.py` with `entries.py`, `protection.py`, `core_allocation.py`): orphan close → gap check → residual SPY core → stop-out cooldowns → NEW entries (one near-market bracket, GTC stop on fill) → HOLD management (stop coverage, +target / holding-limit exits through a cancel-settle-close).
 - **Curator** (`curator.py`, Claude, monthly): universe proposal + post-mortem, advisory only.
 - **API + scheduler** (`api.py`, `scheduler.py`): FastAPI serving the state files at trade.praguefun.cz (Cloudflare tunnel); APScheduler jobs from `data/schedule.json` run inside the API container.
 - **Benchmark** (`benchmark.py`): beta / alpha / Sharpe / capture vs SPY, refreshed by the daily summary.
@@ -64,7 +63,7 @@ Deploy = `git pull && docker compose build api titantrade && docker compose up -
 | `src/titantrade/signals.py` | Pure rules shared by live and backtest: dip state, SMA, breadth, insurance, ranking, trading-day count |
 | `src/titantrade/mechanical.py` | `build_plan` / `refresh_plan` (plan.json), `core_target_pct`, strategy start + legacy-position detection |
 | `src/titantrade/executor.py` | `execute_trades` orchestrator, stop coverage (`_ensure_coverage`, `ensure_stop_coverage`), held-position exits |
-| `src/titantrade/entries.py` | `handle_entry` (gates → one bracket → GTC stop on fill), `resubmit_expired_brackets`, stop-out cooldown scan |
+| `src/titantrade/entries.py` | `handle_entry` (gates → one bracket → GTC stop on fill), stop-out cooldown scan |
 | `src/titantrade/risk_manager.py` | The 8 gates (`pre_trade_check`), drawdown breaker + suspect-value guard, overlay headroom |
 | `src/titantrade/protection.py` | `close_position_settled` (cancel → settle → sell → restore stop on failure), plan-based orphan close, gap-down protection |
 | `src/titantrade/core_allocation.py` | SPY core rebalance to a target share of equity |

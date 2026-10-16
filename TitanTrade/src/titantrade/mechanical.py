@@ -179,7 +179,7 @@ def build_plan(
             continue
         state = states[ticker]
         if ticker in chosen or ticker in pending_buy_tickers:
-            # A pending bracket keeps its item so resubmission can re-anchor it.
+            # A pending bracket keeps its item so the next run can re-anchor it.
             items.append(_new_item(ticker, state, cfg))
         elif state.get("signal"):
             watch.append(_watch_entry(ticker, state, why_blocked))

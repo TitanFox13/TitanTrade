@@ -41,7 +41,7 @@ Operator: "larger cleanup — redundant code and docs, perhaps even the architec
 - [ ] **Still to see live**: the first target / holding-limit / orphan exit through `close_position_settled` (no exit has happened yet).
 - [x] **Unread state files archived 2026-10-16**: `weekly_thesis.json`, `sentry_signals.json`, `signals.json`, `trailing_stops.json`, `pricecheck_signals.json`, `thesis_history.json`, `cik_cache.json`, `backtest_results.json` moved to `state/archive/legacy_2026-10-13/` (1.3 MB; the thesis history stays available for audits). `state/` now holds only the Decision 063 files.
 - [x] **titanserver disk cleanup 2026-10-16** (operator's go): 6 anonymous dangling Postgres 15 volumes (resevolve orphans, 501 MB) removed after a PG_VERSION check, build cache pruned (6.8 GB), no dangling images; named resevolve volumes and both TitanTrade images untouched, all 16 containers up, API healthy. Disk 60% → 43%.
-- [ ] **Expired-bracket scan is unbounded and redundant** (found 2026-10-16): `get_expired_brackets` reads 500 closed orders with no `after`, re-evaluating 30 LLM-era brackets every run (13 log lines); the plan's NEW item already re-enters after an expiry. Drop `resubmit_expired_brackets` + the `resubmit` command, or bound by `strategy.json → started_at`. Cosmetic until a ticker accumulates > 20 historical expirations.
+- [x] **Expired-bracket scan removed (Decision 064, 2026-10-16)**: `resubmit_expired_brackets`, `get_expired_brackets`, `MAX_BRACKET_ATTEMPTS`, the `resubmit` CLI / scheduler command and `handle_entry`'s `trigger` parameter deleted — the NEW-item path already re-enters after an expiry. 233 tests.
 - [ ] **Technical debt left on purpose**: `scripts/param_search/` is research code (ruff E70x style only); `broker.py` (570 lines) and `benchmark.py` are unchanged from the LLM era and could lose a few unused helpers at the next pass.
 
 ## Phase 1.36: September 29 checkup — exit-anchored cooldown override, closed-session benchmark equity, ATR floor rejected (2026-09-29) — Decision 059
@@ -466,7 +466,7 @@ From a 14-day paper-log review (see Decision 035). All six found bugs fixed:
 - [ ] Export trade history to CSV
 
 ## Known Limitations
-- Alpaca bracket orders are DAY-only (no GTC bracket): expired entries are resubmitted the next morning, and a filled bracket needs its own GTC stop (placed on fill and by the 09:35 ET coverage job)
+- Alpaca bracket orders are DAY-only (no GTC bracket): an expired entry is placed again at the next run while the signal holds, and a filled bracket needs its own GTC stop (placed on fill and by the 09:35 ET coverage job)
 - Whole shares only: a 25% slot below one share is skipped (irrelevant above ~$5k equity at current prices)
 - Positions are evaluated at two run times a day (10:15 / 15:30 ET); the stop is the only intraday protection, by design
 - The strategy's edge on a hindsight-free universe is small (+0.5 to +1 pp/yr before insurance, Decision 062) and period-dependent; it loses to SPY in low-volatility bulls

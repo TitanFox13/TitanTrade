@@ -21,7 +21,7 @@
 
 ## 2. Schedule (`data/schedule.json`)
 
-`{"timezone": "America/New_York", "jobs": [{"id", "name", "command", "cron": {day_of_week?, day?, hour, minute}, "enabled"}]}`. Commands: `full`, `fetch`, `signals`, `execute`, `gapcheck`, `resubmit`, `daily_summary`, `curate`.
+`{"timezone": "America/New_York", "jobs": [{"id", "name", "command", "cron": {day_of_week?, day?, hour, minute}, "enabled"}]}`. Commands: `full`, `fetch`, `signals`, `execute`, `gapcheck`, `daily_summary`, `curate`.
 
 ## 3. Data Bundle (`state/data_bundle.json`)
 
@@ -110,7 +110,7 @@ A stock that failed to fetch carries `"error"` and empty inputs; the plan treats
 
 | `trigger` | Written by |
 |-----------|-----------|
-| `entry`, `bracket_resubmission` | entries (BUY) |
+| `entry` (records before Decision 064 may carry `bracket_resubmission`) | entries (BUY) |
 | `target`, `holding_limit` | executor via the settled close (SELL) |
 | `orphan_close`, `gap_down_protection` | protection (SELL) |
 | `core_rebalance` | core_allocation (BUY / SELL of SPY) |

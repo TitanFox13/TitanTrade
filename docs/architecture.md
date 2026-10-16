@@ -39,9 +39,8 @@ APScheduler (api container, America/New_York)
                             2  gap-down protection
                             3  SPY core → residual target (scale × 95% − overlay − planned slots)
                             4  stop-out cooldown scan (broker stop fills → 72 h cooldown)
-                            5  expired-bracket resubmission
-                            6  NEW items → risk_manager (8 gates) → one near-market bracket → GTC stop on fill
-                            7  HOLD items → stop coverage; +target / holding-limit exits (cancel → settle → sell)
+                            5  NEW items → risk_manager (8 gates) → one near-market bracket → GTC stop on fill
+                            6  HOLD items → stop coverage; +target / holding-limit exits (cancel → settle → sell)
                                           │
                                           ▼
                                   Alpaca (paper / live)

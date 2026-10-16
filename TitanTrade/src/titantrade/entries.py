@@ -1,4 +1,4 @@
-"""New-position entries, expired-bracket resubmission, stop-out cooldowns and
+"""New-position entries, stop-out cooldowns and
 committed-cash accounting (Decisions 055/056/058/059/061/063).
 
 An entry is a single near-market bracket: the limit just above the live mark
@@ -15,7 +15,7 @@ from titantrade.config import Config
 from titantrade.logger import get_logger, log_decision
 from titantrade.retry import fetch_with_retry
 from titantrade.broker import (
-    place_bracket_order, get_open_orders, get_account, get_positions, _headers,
+    place_bracket_order, get_open_orders, _headers,
     _is_fractional, get_order, get_position, cancel_order, _wait_for_order_canceled,
     place_native_stop_loss,
 )
@@ -49,15 +49,6 @@ _ENTRY_FILL_POLL_INTERVAL = 1.0
 _ORDER_TERMINAL = {
     "filled", "canceled", "cancelled", "rejected", "expired", "done_for_day",
 }
-
-# Maximum expired-bracket attempts we'll keep resubmitting before giving up.
-# Raised from 5 to 20 — the prior cap was a workaround for the bigger issue
-# that we were using day-TIF dip-buy limits in a rising market. Now that
-# high-conviction theses fill via near-market entries (see ``_choose_entry``),
-# only genuinely low-conviction ideas hit this cap, and a few extra days
-# of retry isn't expensive.
-MAX_BRACKET_ATTEMPTS = 20
-
 
 def _ensure_gtc_stop_on_fill(
     ticker: str,
@@ -233,29 +224,6 @@ def record_stop_out_cooldowns(cfg: Config) -> int:
     return recorded
 
 
-def get_expired_brackets(cfg: Config) -> list[dict[str, Any]]:
-    """Fetch recently expired bracket/OTO buy orders from Alpaca.
-
-    Bracket orders use time_in_force='day', so unfilled entries expire at
-    market close. This function finds them for resubmission the next morning.
-    """
-    url = f"{cfg.alpaca.base_url}/v2/orders"
-    params = {
-        "status": "closed",
-        "limit": "500",
-        "direction": "desc",
-    }
-    resp = fetch_with_retry("GET", url, headers=_headers(cfg), params=params)
-    orders = resp.json()
-
-    return [
-        o for o in orders
-        if o.get("status") == "expired"
-        and o.get("order_class") in ("bracket", "oto")
-        and o.get("side") == "buy"
-    ]
-
-
 def handle_entry(
     item: dict[str, Any],
     *,
@@ -264,7 +232,6 @@ def handle_entry(
     positions: list[dict[str, Any]],
     data_bundle: dict[str, Any],
     cfg: Config,
-    trigger: str = "entry",
 ) -> dict[str, Any] | None:
     """Place a bracket for a NEW plan item after the cooldown check and all
     eight risk gates. Returns the trade record, or None when skipped."""
@@ -348,7 +315,7 @@ def handle_entry(
 
     trade = _trade_record(
         ticker=ticker, action="BUY", shares=shares, price=entry_price,
-        trigger=trigger, reasoning=item.get("reason", ""),
+        trigger="entry", reasoning=item.get("reason", ""),
         stop_price=stop_price, target_price=target_price, order_type="bracket",
         dip_pct=item.get("dip_pct"), risk_flags=check.get("flags", []),
         gate_results=check.get("gate_results", {}),
@@ -357,64 +324,8 @@ def handle_entry(
     _append_trade(trade)
     log_decision(
         log, "executor", ticker, f"BUY {shares:.0f} shares", item.get("reason", ""),
-        extra={"entry": entry_price, "stop": stop_price, "target": target_price, "trigger": trigger},
+        extra={"entry": entry_price, "stop": stop_price, "target": target_price, "trigger": "entry"},
     )
     return trade
 
 
-def resubmit_expired_brackets(
-    cfg: Config,
-    plan: dict[str, Any],
-    positions: list[dict[str, Any]],
-    data_bundle: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Re-place expired entry brackets (DAY orders) for tickers that still
-    have a NEW item in the plan, through the same path as a first entry.
-
-    Price-chase guard: a ticker with more than ``MAX_BRACKET_ATTEMPTS``
-    expirations in Alpaca's recent order history is running away — stop
-    re-anchoring higher until the plan changes.
-    """
-    expired = get_expired_brackets(cfg)
-    if not expired:
-        return []
-    log.info(f"Found {len(expired)} expired bracket orders to evaluate")
-
-    attempts: dict[str, int] = {}
-    for o in expired:
-        attempts[o.get("symbol", "")] = attempts.get(o.get("symbol", ""), 0) + 1
-    items = {i["ticker"]: i for i in plan.get("items", []) if i.get("action") == "NEW"}
-    held = {p["symbol"] for p in positions}
-    account = get_account(cfg)
-    portfolio_value = float(account.get("portfolio_value", 0))
-    cash_balance = float(account.get("cash", 0))
-
-    resubmitted: list[dict[str, Any]] = []
-    for ticker in dict.fromkeys(o.get("symbol", "") for o in expired):   # once per ticker
-        item = items.get(ticker)
-        if not item:
-            log.info(f"Skipping expired bracket for {ticker}: no NEW item in the plan")
-            continue
-        if ticker in held:
-            log.info(f"Skipping expired bracket for {ticker}: already holding position")
-            continue
-        if attempts.get(ticker, 0) > MAX_BRACKET_ATTEMPTS:
-            log.info(f"Skipping expired bracket for {ticker}: {attempts[ticker]} prior expirations (cap {MAX_BRACKET_ATTEMPTS}) — price chase")
-            continue
-        if get_open_orders(ticker, cfg):
-            log.info(f"Skipping expired bracket for {ticker}: order already pending")
-            continue
-        trade = handle_entry(
-            item, portfolio_value=portfolio_value, cash_balance=cash_balance,
-            positions=positions, data_bundle=data_bundle, cfg=cfg, trigger="bracket_resubmission",
-        )
-        if trade:
-            resubmitted.append(trade)
-            positions = get_positions(cfg)
-            held = {p["symbol"] for p in positions}
-            account = get_account(cfg)
-            portfolio_value = float(account.get("portfolio_value", portfolio_value))
-            cash_balance = float(account.get("cash", cash_balance))
-    if resubmitted:
-        log.info(f"Resubmitted {len(resubmitted)} expired brackets")
-    return resubmitted

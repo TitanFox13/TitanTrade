@@ -92,20 +92,6 @@ def _run_gapcheck() -> str:
     return f"{len(trades)} positions closed, {placed} stops placed"
 
 
-def _run_resubmit() -> str:
-    from .config import load_config
-    from .entries import resubmit_expired_brackets
-    from .executor import get_positions
-    from .trade_state import _load
-
-    cfg = load_config()
-    plan = _load("plan.json")
-    if not plan.get("items"):
-        return "no plan found"
-    trades = resubmit_expired_brackets(cfg, plan, get_positions(cfg), _load("data_bundle.json"))
-    return f"{len(trades)} brackets resubmitted"
-
-
 def _run_daily_summary() -> str:
     # Refresh benchmark metrics (beta/alpha/Sharpe vs SPY) before the summary
     # so the Discord embed reflects today's close. The benchmark call hits
@@ -128,7 +114,6 @@ COMMANDS: dict[str, callable] = {
     "signals": _run_signals,
     "execute": _run_execute,
     "gapcheck": _run_gapcheck,
-    "resubmit": _run_resubmit,
     "daily_summary": _run_daily_summary,
     "curate": _run_curate,
 }

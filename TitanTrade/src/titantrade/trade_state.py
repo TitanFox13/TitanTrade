@@ -33,11 +33,11 @@ def _save(filename: str, data: dict[str, Any]) -> None:
 def _opening_buy(ticker: str) -> dict[str, Any] | None:
     """Trade-log record of the BUY that opened the ticker's current position.
 
-    "Opened" means the most recent entry-type BUY (entry /
-    bracket_resubmission); pyramid ADDs enlarge an existing position and are
-    skipped. The log records submissions, so a bracket that expired and was
-    resubmitted resolves to the resubmission that filled — accurate to the
-    session.
+    "Opened" means the most recent entry-type BUY (``entry``; older records
+    also carry ``bracket_resubmission``); legacy pyramid ADDs enlarged an
+    existing position and are skipped. The log records submissions, so a
+    bracket that expired and was placed again resolves to the one that filled
+    — accurate to the session.
     """
     doc = _load("trade_log.json")
     trades = doc.get("trades", []) if isinstance(doc, dict) else (doc or [])

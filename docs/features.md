@@ -29,12 +29,12 @@ A blocked entry that failed ≤ 2 gates is recorded in `state/near_misses.json` 
 - **Bracket entries** (entry limit + stop-limit + take-profit, atomic); the stop-limit carries a 1% buffer against slippage
 - **GTC stop on fill**: bracket legs are DAY orders and the stop leg sits in `held` while the TP leg is live, so after a fill the TP leg is cancelled and a GTC stop placed at the bracket's level (060)
 - **Stop coverage** (`_ensure_coverage`, 060): one helper puts a GTC stop on any bare whole-share plan position from every path — HOLD management at each execute run and the 09:35 ET gapcheck job (`ensure_stop_coverage`); the level is the plan item's stop (the opening bracket's stop from the trade log)
-- **Minimum stop distance** (055): an entry or resubmission whose stop sits < 1.5% below the entry is refused
+- **Minimum stop distance** (055): an entry whose stop sits < 1.5% below the entry is refused
 - **Settled close** (063): every exit — target, holding limit, orphan close — cancels each resting order, polls the cancel to a terminal state, re-reads the position, sells at market, and restores the stop if the sell fails. Introduced after three of seven legacy orphan closes were rejected with Alpaca 40310000 on 2026-10-13 and left positions bare
 - **Gap-down protection** (gapcheck, 035/053/054): an unfilled stop-limit after an overnight gap → cancel, settle, market-sell; the live quote is cross-checked first, and a gap > 30% below the stop is checked against the corporate-actions feed so a split is never sold as a crash
 - **Stop-out cooldown** (056/059): a broker stop fill starts a 72 h re-entry cooldown stamped at the fill time with the fill price; re-entry before 72 h needs ≥ 24 h *and* a price ≥ 1% above that exit (`cooldown_override_allowed`) — the flat re-buy was the churn
 - **Orphan close**: any non-core position without a plan item is sold at the first market-open run
-- **Expired-bracket resubmission**: at most once per ticker per run, up to 20 attempts, through `handle_entry` again (fresh price, levels and gates); skipped while the ticker is held or has a pending order
+- **Expired entries**: a bracket that does not fill by the close expires with its legs; while the signal holds the ticker keeps its NEW item and the next run places a fresh bracket at the live price through the same gates (Decision 064 removed the separate resubmission scan)
 - **Never bare**: every failure path that cancels a stop restores one
 
 ### Portfolio-Level
@@ -114,7 +114,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 |------|--------|
 | `test_mechanical.py` | signal rules, insurance, plan building (hold / new / watch / legacy / pending / risk-off / stale inputs), `refresh_plan`, residual core target, backtester, curator, API |
 | `test_executor.py` | stop coverage (TP-leg scenario, fractional, off-hours, gapcheck companion), target / holding-limit exits, end-to-end `execute_trades` |
-| `test_entries.py` | `handle_entry` (levels, sizing, near miss, committed cash, cooldown + override), resubmission, stop-out scan, GTC stop on fill |
+| `test_entries.py` | `handle_entry` (levels, sizing, near miss, committed cash, cooldown + override), stop-out scan, GTC stop on fill |
 | `test_risk_manager.py` | each gate, slot sizing, dust, suspect value, macro whitelist, correlation |
 | `test_protection.py`, `test_gap_down.py` | orphan close, settled close with stop restore, gap-down protection |
 | `test_broker.py` | stop placement races, bracket whole-share guard, market hours, cancel polling |
