@@ -8,7 +8,7 @@ Found at the 2026-10-16 post-deploy check: the scan read the last 500 closed ord
 
 **Behaviour change**: none on fills. Trade records no longer carry the `bracket_resubmission` trigger (older records keep it; `trade_state._opening_buy` still reads both). The 13 noise lines per run are gone. **Tests**: 233 (the three resubmission tests removed; the end-to-end executor test no longer stubs the step); ruff clean. **Docs**: CLAUDE.md, features, both architecture docs, risk_management, data_schemas, api_reference, insights, todo.
 
-**Deployed**: __DEPLOY_NOTE__
+**Deployed**: 2026-10-16 09:08 UTC, commit `84b36dd` — both images rebuilt, API restarted, health ok, 7 jobs, scheduler `COMMANDS` = curate / daily_summary / execute / fetch / full / gapcheck / signals, CLI image import-verified without the removed function, 0 warnings after the restart. First runs under it: the 13:35 UTC gapcheck and the 14:15 UTC execute the same day — the execute log should no longer show "Found N expired bracket orders".
 
 ## Decision 063: Cleanup after the conversion — the LLM pipeline frozen under `legacy/`, a plan schema, the Flutter app deleted, one settled close for every exit
 **Date**: 2026-10-13
