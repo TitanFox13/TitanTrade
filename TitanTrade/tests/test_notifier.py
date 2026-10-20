@@ -163,7 +163,7 @@ class TestDailySummary:
             send_daily_summary()
             payload = mock_post.call_args.kwargs["json"]
             plan_field = next(f for f in payload["embeds"][0]["fields"] if f["name"] == "Plan")
-            assert "insurance on" in plan_field["value"]
+            assert "risk-off no" in plan_field["value"]
             assert "DASH, JPM" in plan_field["value"] and "URI" in plan_field["value"]
 
     def test_handles_missing_state_files(self, state_dir: Path):

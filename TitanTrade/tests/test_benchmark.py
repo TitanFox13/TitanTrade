@@ -68,7 +68,7 @@ class TestComputeMetrics:
         assert m["up_days"] == 2
         assert m["down_days"] == 2
         # Positive alpha + higher Sharpe than SPY → "adding value".
-        assert "Adding value" in bm.classify(m)
+        assert "Adding value" in bm.classify({**m, "n_days": 30})   # ratios need ≥ 20 days (Decision 065)
 
     def test_flat_benchmark_beta_undefined(self):
         spy = [100, 100, 100, 100]  # zero variance
@@ -76,7 +76,7 @@ class TestComputeMetrics:
         m = bm.compute_metrics(strat, spy)
         assert m["beta"] is None
         assert m["alpha_annual_pct"] is None
-        assert "Beta undefined" in bm.classify(m)
+        assert "Beta undefined" in bm.classify({**m, "n_days": 30})
 
     def test_insufficient_data(self):
         assert bm.compute_metrics([100.0], [100.0])["insufficient_data"] is True
@@ -362,3 +362,15 @@ class TestAppendClosedSession:
             m = bm.compute_benchmark(fake_config, lookback_days=90)
         assert m["window_end"] == "2026-06-05"
         assert m["n_days"] == 4
+
+
+class TestShortWindowGuard:
+    def test_verdict_and_ratios_withheld_under_min_days(self):
+        m = {"n_days": 4, "beta": 1.57, "alpha_annual_pct": 80.9, "sharpe_strategy": -2.75, "sharpe_spy": -7.01,
+             "total_return_strategy_pct": -1.07, "total_return_spy_pct": -1.48}
+        assert "Too few trading days (4 of 20)" in bm.classify(m)
+        line = bm.format_summary_line(m)
+        assert line == "4d ret -1.1% vs SPY -1.5% (too few days for ratios)"
+        m["n_days"] = bm.MIN_VERDICT_DAYS
+        assert "Adding value" in bm.classify({**m, "n_days": 30})   # ratios need ≥ 20 days (Decision 065)
+        assert "α +80.9%/yr" in bm.format_summary_line(m)

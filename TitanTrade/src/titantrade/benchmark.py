@@ -192,6 +192,11 @@ def compute_metrics(
     }
 
 
+# Below this many daily returns, beta / alpha / Sharpe are noise (a 4-day window
+# once "proved" +80%/yr alpha). The verdict and the ratios are withheld.
+MIN_VERDICT_DAYS = 20
+
+
 def classify(metrics: dict[str, Any]) -> str:
     """One-line plain-English verdict from a metrics dict.
 
@@ -200,6 +205,9 @@ def classify(metrics: dict[str, Any]) -> str:
     """
     if metrics.get("insufficient_data"):
         return "Insufficient data — need at least a few trading days of history."
+    n = metrics.get("n_days")
+    if isinstance(n, int) and n < MIN_VERDICT_DAYS:
+        return f"Too few trading days ({n} of {MIN_VERDICT_DAYS}) for a verdict — the ratios are a sample, not a result."
 
     alpha = metrics.get("alpha_annual_pct")
     sp, sm = metrics.get("sharpe_strategy"), metrics.get("sharpe_spy")
@@ -427,6 +435,10 @@ def format_summary_line(metrics: dict[str, Any] | None) -> str | None:
     sp, sm = metrics.get("sharpe_strategy"), metrics.get("sharpe_spy")
     tp, tm = metrics.get("total_return_strategy_pct"), metrics.get("total_return_spy_pct")
     n = metrics.get("n_days")
+    if isinstance(n, int) and n < MIN_VERDICT_DAYS:
+        if tp is None or tm is None:
+            return None
+        return f"{n}d ret {tp:+.1f}% vs SPY {tm:+.1f}% (too few days for ratios)"
 
     parts: list[str] = []
     if beta is not None:

@@ -82,7 +82,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 ## Discord Notifications
 
 - Per-job completion / failure embeds (duration, result summary, error text); transient webhook failures retried twice (058)
-- Daily summary at 16:30 ET: equity, cash, positions with P&L, the plan (insurance state, held names, free slots, today's signals), trading mode, benchmark line
+- Daily summary at 16:30 ET: equity, cash, positions with P&L, the plan (risk-off yes/no with the SPY-SMA and breadth inputs, held names, free slots, today's signals), trading mode, benchmark line
 - Observability alerts: stuck in cash (≥ 70% for 3+ days), ticker churn (2+ round-trips in 7 days), split-suspected gap, suspect broker data, cooldown override, core rebalance
 - One optional env var, `DISCORD_WEBHOOK_URL`; unset → silently skipped
 
@@ -94,7 +94,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 - Beta, Jensen's alpha (annualized), Sharpe for both series, information ratio, up / down capture, correlation / R², volatility, total and excess return, max drawdown, a one-line verdict
 - Source: Alpaca portfolio-equity history (with the just-closed session appended from the 15Min history, 059) aligned to SPY SIP daily closes (058)
-- CLI `benchmark [days] [--since]`, `GET /api/benchmark`, `GET /api/benchmark/refresh?days=N|since=…`, a line on the daily summary
+- CLI `benchmark [days] [--since]`, `GET /api/benchmark`, `GET /api/benchmark/refresh?days=N|since=…`, a line on the daily summary. The daily refresh anchors at the strategy start (`strategy.json → started_at`, Decision 065) so the window never straddles two strategies; under 20 trading days the verdict and the ratios are withheld and only the returns are shown
 
 ## Backtesting & Parameter Search
 
@@ -108,7 +108,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 ## Test Suite (zero token spend)
 
-233 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
+236 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
 
 | File | Covers |
 |------|--------|

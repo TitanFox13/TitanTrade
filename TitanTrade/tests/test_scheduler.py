@@ -281,3 +281,25 @@ class TestSchedulerApiEndpoints:
         )
         assert resp.status_code == 200
         assert resp.json()["enabled"] is False
+
+
+class TestDailySummaryWindow:
+    def test_benchmark_anchors_at_the_strategy_start(self, tmp_state_dir):
+        import json
+        from unittest.mock import patch
+        from titantrade.scheduler import _run_daily_summary
+        (tmp_state_dir / "strategy.json").write_text(json.dumps({"strategy": "mechanical", "started_at": "2026-10-13T12:43:24+00:00"}))
+        with patch("titantrade.benchmark.compute_benchmark") as bench, \
+             patch("titantrade.notifier.send_daily_summary", return_value="daily summary sent"), \
+             patch("titantrade.config.load_config", return_value=object()):
+            assert _run_daily_summary() == "daily summary sent"
+        assert bench.call_args.kwargs["since"] == "2026-10-13"
+
+    def test_benchmark_falls_back_to_90_days_without_a_strategy_start(self, tmp_state_dir):
+        from unittest.mock import patch
+        from titantrade.scheduler import _run_daily_summary
+        with patch("titantrade.benchmark.compute_benchmark") as bench, \
+             patch("titantrade.notifier.send_daily_summary", return_value="ok"), \
+             patch("titantrade.config.load_config", return_value=object()):
+            _run_daily_summary()
+        assert bench.call_args.kwargs == {"lookback_days": 90, "since": None}

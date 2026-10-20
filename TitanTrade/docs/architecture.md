@@ -33,7 +33,7 @@ The backend has two faces: a CLI (one-off commands via `docker compose run`) and
 `protection.check_gap_down_protection` then `executor.ensure_stop_coverage` (a GTC stop for any whole-share HOLD position without one).
 
 ### 5. Daily summary (16:30 ET weekdays) and curate (first Sunday 15:00 ET)
-Discord summary with the plan section + benchmark refresh; the Claude universe proposal and post-mortem.
+Discord summary with the plan section + benchmark refresh anchored at `strategy.json → started_at` (Decision 065); the Claude universe proposal and post-mortem.
 
 ---
 

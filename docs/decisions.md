@@ -1,5 +1,16 @@
 # Important Decisions Log
 
+## Decision 065: Reporting fixes from the October 20 check — honest benchmark on short windows, risk-off wording, watch-list reasons
+**Date**: 2026-10-20
+**Decision**: three small changes to what the system *says*, none to what it trades, after the operator asked for anything seen in the check to be fixed:
+1. **Benchmark verdict and ratios are withheld under 20 trading days** (`benchmark.MIN_VERDICT_DAYS`). The 4-day window since the conversion printed "Adding value — positive alpha (+80.9%/yr)" on the CLI and would have put "β 1.57 | α +80.9%/yr" on the daily summary; on four daily returns those numbers are noise. `classify` now returns "Too few trading days (N of 20) for a verdict…" and `format_summary_line` shows the returns only ("4d ret −1.1% vs SPY −1.5% (too few days for ratios)").
+2. **The daily benchmark refresh anchors at the strategy start** (`scheduler._run_daily_summary` passes `since = strategy.json → started_at`; 90-day fallback when no strategy start exists). The 90-day trailing window straddled the LLM pipeline and the mechanical strategy for the next three months, so the summary line and `/api/benchmark` would have judged a mix; the clean window of Decision 062 is the strategy's own history, which is also what the go/stop rule (Phase 2.0) is judged on.
+3. **Wording**: the plan log line, the CLI and the Discord plan field say "risk-off no" / "risk-off YES (exposure x0.5)" instead of "insurance on" / "RISK-OFF" — "insurance on" read as if the de-risking were active. The watch-list reason for a signal with no free slot now says "no free slot — 3 of 3 slots held or pending" when the slots are occupied by positions, and "deeper dips took the free slot(s)" only when a free slot was actually taken by a deeper dip this run (CRWD at 18.5% was told the deeper dips took the slots while it was the deepest on the list).
+
+**Tests**: 236 (short-window guard, summary-job anchoring and fallback; two existing classify tests pass a 30-day `n_days`). **Docs**: CLAUDE.md, features, data_schemas, deployment, backend architecture.
+
+**Deployed**: __DEPLOY_NOTE__
+
 ## Decision 064: Expired-bracket resubmission removed — the plan already re-enters
 **Date**: 2026-10-16
 **Decision**: `entries.resubmit_expired_brackets`, `entries.get_expired_brackets`, `MAX_BRACKET_ATTEMPTS`, the `resubmit` CLI and scheduler command, and the `trigger` parameter of `handle_entry` are deleted (entries.py 420 → 331 lines, executor.py 393 → 379).

@@ -89,7 +89,7 @@ A stock that failed to fetch carries `"error"` and empty inputs; the plan treats
 | Field | Meaning |
 |-------|---------|
 | `items[].action` | `NEW` — enter this run (entry = last close; the executor re-prices at the live mark × 1.003 and recomputes stop / target); `HOLD` — held mechanical position (stop / target from the opening BUY in the trade log) |
-| `watch[]` | Names with a dip signal that were not taken (no free slot, risk-off, pending order) and names not in an uptrend, with the reason |
+| `watch[]` | Names with a dip signal that were not taken ("no free slot — N of 3 slots held or pending", "deeper dips took the free slot(s)", risk-off) and names not in an uptrend, each with the reason |
 | `candidates[]` | Every name with a signal, ranked deepest dip first, `chosen` for the ones that became NEW items |
 | `stale_inputs` | True when the bundle's lookback / SMA lengths differ from `params` — re-run `fetch` |
 | `insurance.exposure_scale` | 1.0, or `insurance_scale` while `risk_off` |
@@ -150,7 +150,7 @@ Entries blocked by ≤ 2 gates: `{"near_misses": [{"id": "nm_…", "timestamp", 
 }
 ```
 
-Beta = cov / var of daily returns vs SPY; alpha = Jensen's, annualized; `down_capture < up_capture` is the defensive signature; drawdowns ≤ 0. Equity comes from Alpaca's portfolio history (the just-closed session appended from the 15Min series), SPY from SIP daily closes, aligned by trading date.
+`verdict` reads "Too few trading days (N of 20)…" and the daily-summary line shows returns only while `n_days` < 20 (Decision 065). Beta = cov / var of daily returns vs SPY; alpha = Jensen's, annualized; `down_capture < up_capture` is the defensive signature; drawdowns ≤ 0. Equity comes from Alpaca's portfolio history (the just-closed session appended from the 15Min series), SPY from SIP daily closes, aligned by trading date.
 
 ## 12. Other
 

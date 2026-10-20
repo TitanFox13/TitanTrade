@@ -34,7 +34,7 @@ uv run --with numpy python scripts/param_search/search.py           # Parameter 
 cd TitanTrade && uv run --extra test python -m pytest tests/ -q
 ```
 
-`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 233 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens. Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
+`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 236 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens. Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
 
 ### Docker (production)
 
@@ -54,7 +54,7 @@ Deploy = `git pull && docker compose build api titantrade && docker compose up -
 - **Executor** (`executor.py` with `entries.py`, `protection.py`, `core_allocation.py`): orphan close → gap check → residual SPY core → stop-out cooldowns → NEW entries (one near-market bracket, GTC stop on fill) → HOLD management (stop coverage, +target / holding-limit exits through a cancel-settle-close).
 - **Curator** (`curator.py`, Claude, monthly): universe proposal + post-mortem, advisory only.
 - **API + scheduler** (`api.py`, `scheduler.py`): FastAPI serving the state files at trade.praguefun.cz (Cloudflare tunnel); APScheduler jobs from `data/schedule.json` run inside the API container.
-- **Benchmark** (`benchmark.py`): beta / alpha / Sharpe / capture vs SPY, refreshed by the daily summary.
+- **Benchmark** (`benchmark.py`): beta / alpha / Sharpe / capture vs SPY over the strategy's own window (since `strategy.json → started_at`), refreshed by the daily summary; ratios and the verdict are withheld under 20 trading days.
 
 ## Key Files
 

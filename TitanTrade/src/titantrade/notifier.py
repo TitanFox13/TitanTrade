@@ -277,7 +277,7 @@ def send_daily_summary() -> str:
         fields.append({
             "name": "Plan",
             "value": (
-                f"insurance {'RISK-OFF' if ins.get('risk_off') else 'on'} "
+                f"risk-off {'YES (exposure x' + str(ins.get('exposure_scale')) + ')' if ins.get('risk_off') else 'no'} "
                 f"(SPY above SMA: {ins.get('spy_above_sma')}, breadth {ins.get('sector_breadth')}) | "
                 f"held {', '.join(held) or 'none'} | free slots {plan.get('free_slots', '?')} | "
                 f"signals {', '.join(chosen) or 'none'}"

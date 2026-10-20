@@ -68,7 +68,7 @@ All jobs run inside the `api` container (Decision 028), from `data/schedule.json
 | `weekday_gapcheck` | 09:35 Mon–Fri | gapcheck + stop coverage (060) |
 | `weekday_execute_morning` | 10:15 Mon–Fri | signals + execute |
 | `weekday_execute_preclose` | 15:30 Mon–Fri | signals + execute |
-| `daily_summary` | 16:30 Mon–Fri | Discord summary + benchmark refresh (058/059) |
+| `daily_summary` | 16:30 Mon–Fri | Discord summary + benchmark refresh over the strategy's window (058/059/065) |
 | `sunday_full` | 16:00 Sun | fetch → signals → execute |
 | `monthly_curate` | 15:00 first Sunday | Claude universe proposal + post-mortem (no orders) |
 

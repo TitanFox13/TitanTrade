@@ -172,7 +172,10 @@ def build_plan(
         why_blocked = "insurance is risk-off (SPY below its SMA and sector breadth below threshold) — no new entries"
     else:
         chosen = ranked[:free_slots]
-        why_blocked = "no free slot — the deeper dips took the slot(s)"
+        why_blocked = (
+            f"no free slot — {occupied} of {cfg.trading.max_slots} slots held or pending"
+            if free_slots == 0 else "no free slot — deeper dips took the free slot(s)"
+        )
 
     for ticker in cfg.trading.watchlist:
         if ticker in held_mech or ticker in legacy:
@@ -278,9 +281,9 @@ def refresh_plan(cfg: Config) -> dict[str, Any]:
         f"Plan: {plan['new_signals']} new entry signal(s) "
         f"{[c['ticker'] for c in plan['candidates'] if c['chosen']]}, "
         f"{len(plan['held'])} held, {plan['free_slots']} free slot(s), "
-        f"legacy to close {plan['legacy_to_close']} | insurance "
-        f"{'RISK-OFF' if ins['risk_off'] else 'on'} (SPY above SMA: {ins['spy_above_sma']}, "
-        f"breadth {ins['sector_breadth']})"
+        f"legacy to close {plan['legacy_to_close']} | risk-off "
+        f"{'YES (exposure x' + str(ins['exposure_scale']) + ')' if ins['risk_off'] else 'no'} "
+        f"(SPY above SMA: {ins['spy_above_sma']}, breadth {ins['sector_breadth']})"
     )
     return plan
 
@@ -293,7 +296,7 @@ def main() -> None:
         print(f"Plan: {plan['error']}")
         return
     ins = plan["insurance"]
-    print(f"Insurance: {'RISK-OFF' if ins['risk_off'] else 'on'} | SPY above SMA: {ins['spy_above_sma']} | sector breadth: {ins['sector_breadth']}")
+    print(f"Risk-off: {'YES' if ins['risk_off'] else 'no'} | SPY above SMA: {ins['spy_above_sma']} | sector breadth: {ins['sector_breadth']}")
     print(f"Held: {plan['held']} | legacy to close: {plan['legacy_to_close']} | free slots: {plan['free_slots']}")
     for c in plan["candidates"]:
         print(f"  {'BUY ' if c['chosen'] else '    '} {c['ticker']:6} dip {c['dip_pct']:.1%}")
