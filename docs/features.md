@@ -108,7 +108,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 ## Test Suite (zero token spend)
 
-236 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
+233 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
 
 | File | Covers |
 |------|--------|

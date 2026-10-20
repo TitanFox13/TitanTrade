@@ -10,6 +10,13 @@ Found at the 2026-10-16 post-deploy check: the scan read the last 500 closed ord
 
 **Deployed**: 2026-10-16 09:08 UTC, commit `84b36dd` — both images rebuilt, API restarted, health ok, 7 jobs, scheduler `COMMANDS` = curate / daily_summary / execute / fetch / full / gapcheck / signals, CLI image import-verified without the removed function, 0 warnings after the restart. First runs under it: the 13:35 UTC gapcheck and the 14:15 UTC execute the same day — the execute log should no longer show "Found N expired bracket orders".
 
+### Check 2026-10-20 (Oct 16 09:08 → Oct 20 09:12 UTC)
+Ops: 0 ERROR / 0 tracebacks; 1 WARNING in 4 days — a FRED 502 on attempt 1/5 at the Oct 16 fetch, absorbed by the retry. **Decision 064 verified live**: 0 "expired bracket" lines in 5 execute runs (Oct 16 ×2, the first Sunday `full` on Oct 18, Oct 19 ×2); each run reads plan → portfolio → core target → "Execution complete" in four lines. All 7 jobs `completed` (fetch ×3, gapcheck ×2 "0 closed, 0 placed", daily summary ×2 sent). Book unchanged since Oct 13: DASH 25.2% (+0.6%), URI 24.0% (−3.8%), JPM 17.2% (−0.4%), SPY 27.6% (+1.0%), cash 6.0%; all three overlay positions GTC-stopped at the plan levels; no orders, trades or near misses. Breadth rose 45.5% → 54.5% on Oct 17; SPY above its 200-day SMA; insurance stays off (full exposure). Disk 44%.
+
+Observation, by design: CRWD and ANET have deepened to 18.5% / 18.3% below their 90-day highs (FCX 13.0%) while all three slots are held by shallower entries (JPM was an 8.4% dip). The strategy has no rotation rule — a slot frees only on a stop, a target or the 60-day clock — exactly as backtested (Decision 062). Nothing to change; noted so a later "why didn't it buy the deeper dip" has its answer. First exit through `close_position_settled` still unseen (URI is the closest, −3.8% of a −12% stop; the 60-day clock runs to mid-January).
+
+Benchmark (price return, SPY split-adjusted): new strategy window Oct 13 → Oct 19 (4 td) **−1.07% vs SPY −1.48%** (max DD −1.87% / −1.90%); since Sep 29 (14 td, straddles the conversion) −0.59% vs +0.30%. Both are samples, not verdicts; the go/stop rule (Phase 2.0) needs a quarter.
+
 ## Decision 063: Cleanup after the conversion — the LLM pipeline frozen under `legacy/`, a plan schema, the Flutter app deleted, one settled close for every exit
 **Date**: 2026-10-13
 **Decision**: the operator asked for "a larger cleanup — redundant code and docs, perhaps even the architecture" after Decisions 061/062, and chose: move the old LLM code to a legacy folder rather than delete it, delete the Flutter app (unused), and rename the thesis / sentry schemas to a plain plan. The live tree now contains only what the schedule runs.
