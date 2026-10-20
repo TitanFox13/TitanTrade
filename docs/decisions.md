@@ -9,7 +9,7 @@
 
 **Tests**: 236 (short-window guard, summary-job anchoring and fallback; two existing classify tests pass a 30-day `n_days`). **Docs**: CLAUDE.md, features, data_schemas, deployment, backend architecture.
 
-**Deployed**: __DEPLOY_NOTE__
+**Deployed**: 2026-10-20 09:23 UTC, commit `66b7750` — both images rebuilt and import-verified, API restarted, health ok, 7 jobs, 0 warnings. Verified on the server: a `signals` run writes the watch reason "no free slot — 3 of 3 slots held or pending" for CRWD / ANET / FCX; `benchmark --since 2026-10-13` reads "Too few trading days (4 of 20) for a verdict". The 20:30 UTC daily summary the same day is the first with the strategy-anchored benchmark line.
 
 ## Decision 064: Expired-bracket resubmission removed — the plan already re-enters
 **Date**: 2026-10-16
