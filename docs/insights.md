@@ -58,6 +58,15 @@ better than the median of its family. What held across both eras was a
 useful output of a big search is the marginal-effects table, read before any
 leaderboard; the leaderboard is where overfitting lives.
 
+### The Placebo Is the Benchmark for a Cross Product (Decision 067 addendum)
+Letting ten market types each pick their own strategy gained up to nine
+points a year in-sample, and so did a random labelling with the same block
+structure. Out of sample both gave the gain back. A big search needs a
+null: shuffle the labels, run the same selection, and the "pattern" has to
+beat that, not zero. Also learned: rotation by trailing return is momentum
+under another name, so a rotating sleeve the operator asked for was already
+in the design as the momentum ETF.
+
 ### Inverted Prices Are Not Shorts (Decision 067 addendum)
 Feeding 1/P to a long-only engine looks like a free short simulation and
 reads +4 %/yr on the S&P 500 for the anti-dip mirror; the same trades priced
