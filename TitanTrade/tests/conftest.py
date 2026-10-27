@@ -56,6 +56,7 @@ def fake_config() -> Config:
         trading=TradingSettings(
             watchlist=["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"],
             trading_mode="paper",
+            momentum_weight=0.0,   # the dip-only book the gate / sizing tests were written for; Decision 068 tests set 0.6
         ),
     )
 

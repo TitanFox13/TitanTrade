@@ -11,13 +11,15 @@
       "dip_pct": 0.08, "dip_lookback_days": 90, "trend_sma_days": 150,
       "max_hold_days": 60, "tp_pct": 0.2, "stop_pct": 0.12,
       "slot_pct": 0.25, "max_slots": 3,
-      "insurance_sma_days": 200, "insurance_breadth": 0.5, "insurance_scale": 0.5
+      "insurance_sma_days": 200, "insurance_breadth": 0.5, "insurance_scale": 0.5,
+      "momentum_ticker": "SPMO", "momentum_weight": 0.6,
+      "shock_drop_pct": 0.07, "shock_lookback_days": 10, "shock_hold_days": 20, "shock_scale": 0.5
     }
   }
 }
 ```
 
-`settings.mechanical` may carry any of `config.MECHANICAL_FIELDS` (the keys above plus `sector_etfs`, `core_ticker`, `core_rebalance_band_pct`); missing keys use the `TradingSettings` defaults. `TRADING_MODE` in the environment overrides `trading_mode`. `PUT /api/watchlist` rewrites `watchlist` and keeps `settings`.
+`settings.mechanical` may carry any of `config.MECHANICAL_FIELDS` (the keys above plus `sector_etfs`, `core_ticker`, `core_rebalance_band_pct`); missing keys use the `TradingSettings` defaults. `momentum_weight` sizes the SPMO sleeve and, through `TradingSettings.overlay_slot_pct` = `slot_pct × (1 − momentum_weight)`, the dip slots; `0` is the dip-only book. `TRADING_MODE` in the environment overrides `trading_mode`. `PUT /api/watchlist` rewrites `watchlist` and keeps `settings`.
 
 ## 2. Schedule (`data/schedule.json`)
 
@@ -30,7 +32,7 @@
   "generated_at": "2026-10-13T13:00:12+00:00",
   "market_context": {
     "generated_at": "…",
-    "spy": {"close": 778.1, "return_1d": 0.3, "return_5d": 1.2, "return_20d": 2.8},
+    "spy": {"close": 778.1, "return_1d": 0.3, "return_5d": 1.2, "return_20d": 2.8, "closes": [741.2, "…", 778.1]},
     "breadth": {"sma_days": 200, "sectors_above": 5, "sectors_total": 11, "pct": 0.4545,
                 "flags": {"XLK": true, "XLE": false, "…": null},
                 "spy_close": 778.1, "spy_sma": 741.2, "spy_above_sma": true}
@@ -53,7 +55,7 @@ A stock that failed to fetch carries `"error"` and empty inputs; the plan treats
 
 ## 4. Strategy (`state/strategy.json`)
 
-`{"strategy": "mechanical", "started_at": "2026-10-13T12:43:24+00:00", "decision": "061"}` — written once by the first signals run. A position whose opening BUY predates `started_at` is legacy: no plan item, sold by the orphan close.
+`{"strategy": "mechanical", "started_at": "2026-10-13T12:43:24+00:00", "decision": "061", "window_started_at": "2026-10-28T13:04:00+00:00", "design": "068", "sleeve": {"ticker": "SPMO", "weight": 0.6}}` — `started_at` is written once by the first signals run and never moves: a position whose opening BUY predates it is legacy (no plan item, sold by the orphan close). `window_started_at`, `design` and `sleeve` are stamped once by the first run with `momentum_weight > 0`; `mechanical.benchmark_window_start()` returns it (else `started_at`) as the benchmark's clean window.
 
 ## 5. Plan (`state/plan.json`)
 
@@ -64,9 +66,13 @@ A stock that failed to fetch carries `"error"` and empty inputs; the plan treats
   "started_at": "2026-10-13T12:43:24+00:00",
   "params": {"dip_pct": 0.08, "dip_lookback_days": 90, "trend_sma_days": 150, "slot_pct": 0.25, "max_slots": 3,
              "tp_pct": 0.2, "stop_pct": 0.12, "max_hold_days": 60,
-             "insurance_sma_days": 200, "insurance_breadth": 0.5, "insurance_scale": 0.5},
+             "insurance_sma_days": 200, "insurance_breadth": 0.5, "insurance_scale": 0.5,
+             "momentum_ticker": "SPMO", "momentum_weight": 0.6, "shock_drop_pct": 0.07, "shock_lookback_days": 10, "shock_hold_days": 20, "shock_scale": 0.5},
   "stale_inputs": false,
   "insurance": {"risk_off": false, "spy_above_sma": true, "sector_breadth": 0.4545, "exposure_scale": 1.0},
+  "shock": {"active": false, "sessions_left": 0, "worst_drop": -0.021, "exposure_scale": 1.0, "drop_pct": 0.07, "lookback_days": 10, "hold_days": 20},
+  "exposure_scale": 1.0,
+  "sleeve": {"ticker": "SPMO", "weight": 0.6, "target_pct": 0.57},
   "breadth": {"sma_days": 200, "sectors_above": 5, "sectors_total": 11, "pct": 0.4545, "spy_close": 778.1, "spy_sma": 741.2, "spy_above_sma": true},
   "items": [
     {"ticker": "DASH", "action": "HOLD", "sector": "Communication Services", "entry_price": 192.9,
@@ -93,6 +99,9 @@ A stock that failed to fetch carries `"error"` and empty inputs; the plan treats
 | `candidates[]` | Every name with a signal, ranked deepest dip first, `chosen` for the ones that became NEW items |
 | `stale_inputs` | True when the bundle's lookback / SMA lengths differ from `params` — re-run `fetch` |
 | `insurance.exposure_scale` | 1.0, or `insurance_scale` while `risk_off` |
+| `shock` | `signals.shock_state` over `market_context.spy.closes`: `active` while a −`drop_pct` move over `lookback_days` sessions happened within the last `hold_days`; `sessions_left` until it expires; `worst_drop` the worst such return in the window |
+| `exposure_scale` | `min(insurance.exposure_scale, shock.exposure_scale)` — what both core legs scale by |
+| `sleeve.target_pct` | `exposure_scale × 0.95 × momentum_weight` — the momentum ETF's share of equity this run |
 | `free_slots` | `max_slots − held − pending_buys` |
 
 ## 6. Trade Log (`state/trade_log.json`)

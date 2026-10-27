@@ -21,7 +21,18 @@ def _run(cfg, target, cash, spy_value, spy_qty, price=500.0, market_open=True):
 
 class TestCore:
     def test_is_core_ticker(self, fake_config):
-        assert _is_core_ticker("SPY", fake_config) and not _is_core_ticker("AAA", fake_config)
+        assert _is_core_ticker("SPY", fake_config) and _is_core_ticker("SPMO", fake_config) and not _is_core_ticker("AAA", fake_config)
+
+    def test_momentum_leg_buys_toward_its_target(self, fake_config, tmp_state_dir):
+        with patch("titantrade.core_allocation.is_market_open", return_value=True), \
+             patch("titantrade.core_allocation.get_account", return_value={"portfolio_value": "100000", "cash": "70000"}), \
+             patch("titantrade.core_allocation.get_positions", return_value=[{"symbol": "SPY", "market_value": "30000", "current_price": "500", "qty": "60"}]), \
+             patch("titantrade.core_allocation.get_latest_price", return_value=100.0) as price, \
+             patch("titantrade.core_allocation.place_market_buy") as buy, \
+             patch("titantrade.notifier.send_discord"):
+            trade = manage_core_position(fake_config, target_pct=0.5, ticker="SPMO")
+        price.assert_called_once_with("SPMO", fake_config)
+        assert trade["ticker"] == "SPMO" and trade["action"] == "BUY" and buy.call_args.args[:2] == ("SPMO", 500.0)
 
     def test_buys_toward_target_with_spendable_cash(self, fake_config, tmp_state_dir):
         trade, buy, sell = _run(fake_config, target=0.75, cash=40_000, spy_value=40_000, spy_qty=80)

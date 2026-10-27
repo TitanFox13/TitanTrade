@@ -1,15 +1,17 @@
 # TitanTrade Features
 
-## Strategy (Decisions 061–063)
+## Strategy (Decisions 061–063, 068)
 
 Every trading decision is a rule on prices; parameters are the Decision 062 plateau, read from `data/watchlist.json` → `settings.mechanical` at every run.
 
-- **Entry**: a watchlist name closes ≥ 8% below its 90-day high while above its 150-day SMA. Candidates ranked deepest dip first fill the free slots (3 × 25% of equity, flat sizing; the 70% overlay cap trims the third). One bracket order at the live price + 0.3% with a −12% stop and a +20% target, through the eight gates. Whole shares only — a slot below one share is skipped.
+- **Entry**: a watchlist name closes ≥ 8% below its 90-day high while above its 150-day SMA. Candidates ranked deepest dip first fill the free slots (3 × 10% of equity = 25% of the 40% dip sleeve, flat sizing; `momentum_weight: 0` restores 25% slots). One bracket order at the live price + 0.3% with a −12% stop and a +20% target, through the eight gates. Whole shares only — a slot below one share is skipped.
 - **Exits**: the GTC stop-limit (−12%), the +20% target and the 60-trading-day holding limit; the latter two are evaluated against the broker position at every executor run. Nothing else sells a position.
-- **Core**: SPY is the residual — exposure scale × 95% − overlay − this run's planned slots — rebalanced within a 5% band. The core sells before entries need the cash and buys back after exits.
+- **Core**: SPY is the dip sleeve's residual — exposure scale × 95% × (1 − momentum weight) − overlay − this run's planned slots — rebalanced within a 5% band. The core sells before entries need the cash and buys back after exits.
+- **Momentum sleeve** (068): SPMO held at 60% of the investable book (exposure scale × 95% × 60%), a second core leg rebalanced inside the same band after SPY; never an orphan, no stop, outside the overlay cap and the sector gate. The index does the rotating (semi-annual).
+- **Shock trigger** (068): SPY's 10-session return ≤ −7% on any of the last 20 sessions → exposure × 0.5, re-armed by each such session; stateless from the bundle's last 31 SPY closes. Exposure = min(insurance, shock); both core legs scale, new entries pause while either is on.
 - **Insurance**: two-signal confirmation; exposure halves only while SPY is below its 200-day SMA *and* fewer than half of the 11 sector ETFs are above theirs. New entries pause while risk-off; held positions keep their exits. Unknown inputs fail open.
-- **The plan** (`state/plan.json`, `GET /api/plan`): NEW / HOLD items with entry, stop and target, the watch list with the reason each signal was not taken, ranked candidates, insurance and breadth, free slots, pending buys, legacy positions queued for the orphan close.
-- **Legacy transition**: `state/strategy.json` records the strategy start; a position whose opening BUY predates it gets no item and is sold by the orphan close.
+- **The plan** (`state/plan.json`, `GET /api/plan`): NEW / HOLD items with entry, stop and target, the watch list with the reason each signal was not taken, ranked candidates, insurance and breadth, the shock state, the combined exposure scale, the sleeve target, free slots, pending buys, legacy positions queued for the orphan close.
+- **Legacy transition**: `state/strategy.json` records the strategy start; a position whose opening BUY predates it gets no item and is sold by the orphan close. `window_started_at` (stamped once when the sleeve is on) is the benchmark's clean window; `started_at` never moves.
 
 ## Risk Management
 
@@ -17,9 +19,9 @@ Every trading decision is a rule on prices; parameters are the Decision 062 plat
 1. **Earnings blackout**: no entry within 2 days of earnings (Finnhub calendar)
 2. **Drawdown circuit breaker**: halt at 8% below the portfolio peak. A value ±50% off the peak is treated as broker data corruption (Decision 054): entries pause, Discord alert, the peak file is never written
 3. **Cash reserve**: 5% minimum, net of cash committed to pending buy orders (035); the account is re-read after every executed entry in a run (058)
-4. **Overlay cap**: overlay positions ≤ 70% of equity (protects the SPY core)
-5. **Position size**: the slot (25% of equity), reduced to the cash and overlay headroom; anything below $500 notional is blocked as dust (054)
-6. **Sector exposure**: ≤ 50% of equity in one sector after the trade
+4. **Overlay cap**: overlay positions ≤ 70% of equity (both core legs excluded)
+5. **Position size**: the slot (`slot_pct` × (1 − momentum weight) = 10% of equity), reduced to the cash and overlay headroom; anything below $500 notional is blocked as dust (054)
+6. **Sector exposure**: ≤ 50% of equity in one sector after the trade (core legs excluded)
 7. **Macro blackout**: no entry within 6 h of FOMC / NFP / CPI / core PCE / GDP (046)
 8. **Correlation**: blocked when the average 60-day correlation with held positions exceeds 75%
 
@@ -40,7 +42,7 @@ A blocked entry that failed ≤ 2 gates is recorded in `state/near_misses.json` 
 ### Portfolio-Level
 - Peak tracking for the drawdown breaker (`state/peak_portfolio.json`)
 - Sector and correlation concentration gates; cash reserve net of pending commitments
-- Two-signal insurance scales the core target and pauses entries
+- Two-signal insurance and the shock trigger (min) scale both core legs and pause entries
 - Flat sizing: no ATR, confidence or VIX scaling (Decision 061 — measured as noise)
 
 ## Execution
@@ -82,7 +84,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 ## Discord Notifications
 
 - Per-job completion / failure embeds (duration, result summary, error text); transient webhook failures retried twice (058)
-- Daily summary at 16:30 ET: equity, cash, positions with P&L, the plan (risk-off yes/no with the SPY-SMA and breadth inputs, held names, free slots, today's signals), trading mode, benchmark line
+- Daily summary at 16:30 ET: equity, cash, positions with P&L, the plan (risk-off yes/no with the SPY-SMA and breadth inputs, shock on/off, the sleeve target, held names, free slots, today's signals), trading mode, benchmark line
 - Observability alerts: stuck in cash (≥ 70% for 3+ days), ticker churn (2+ round-trips in 7 days), split-suspected gap, suspect broker data, cooldown override, core rebalance
 - One optional env var, `DISCORD_WEBHOOK_URL`; unset → silently skipped
 
@@ -108,12 +110,12 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 ## Test Suite (zero token spend)
 
-236 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
+243 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
 
 | File | Covers |
 |------|--------|
-| `test_mechanical.py` | signal rules, insurance, plan building (hold / new / watch / legacy / pending / risk-off / stale inputs), `refresh_plan`, residual core target, backtester, curator, API |
-| `test_executor.py` | stop coverage (TP-leg scenario, fractional, off-hours, gapcheck companion), target / holding-limit exits, end-to-end `execute_trades` |
+| `test_mechanical.py` | signal rules, insurance, shock trigger, plan building (hold / new / watch / legacy / pending / risk-off / shock / stale inputs), `refresh_plan` + window stamp, residual core and sleeve targets, backtester, curator, API |
+| `test_executor.py` | stop coverage (TP-leg scenario, fractional, off-hours, gapcheck companion), target / holding-limit exits, end-to-end `execute_trades`, the SPY-then-SPMO core legs |
 | `test_entries.py` | `handle_entry` (levels, sizing, near miss, committed cash, cooldown + override), stop-out scan, GTC stop on fill |
 | `test_risk_manager.py` | each gate, slot sizing, dust, suspect value, macro whitelist, correlation |
 | `test_protection.py`, `test_gap_down.py` | orphan close, settled close with stop restore, gap-down protection |

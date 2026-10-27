@@ -1,6 +1,6 @@
 # TitanTrade
 
-Mechanical equity trading system on Alpaca: an always-on SPY core plus a dip-in-uptrend overlay with broker-side stops, tuned on 10–27 years of history (Decisions 061–063). Paper account; going live is gated (todo Phase 2.0). The only LLM call left is a monthly Claude universe proposal that places no orders.
+Mechanical equity trading system on Alpaca: two sleeves — a dip-in-uptrend overlay with broker-side stops on top of a SPY residual (40%) and a momentum ETF held (SPMO, 60%) — with a two-signal insurance and a shock trigger scaling exposure, tuned on 10–99 years of history (Decisions 061–063, 068). Paper account; going live is gated (todo Phase 2.0). The only LLM call left is a monthly Claude universe proposal that places no orders.
 
 ## Project Structure
 
@@ -34,7 +34,7 @@ uv run --with numpy python scripts/param_search/search.py           # Parameter 
 cd TitanTrade && uv run --extra test python -m pytest tests/ -q
 ```
 
-`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 236 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens. Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
+`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 243 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens. Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
 
 ### Docker (production)
 
@@ -49,12 +49,12 @@ Deploy = `git pull && docker compose build api titantrade && docker compose up -
 ## Architecture
 
 - **Data** (`data_fetcher.py`, `market_context.py`): 250-day Alpaca bars per name → `signal_inputs` (close, lookback high, trend SMA), ATR-14, 60-day correlations; SPY returns + sector breadth; Finnhub earnings; FRED macro calendar → `state/data_bundle.json`.
-- **Signals** (`signals.py` pure rules; `mechanical.py` builds the plan): dip-in-uptrend entries ranked deepest first into free slots, two-signal insurance, held positions with their stop and target → `state/plan.json`.
-- **Risk Manager** (`risk_manager.py`): 8 programmatic gates between the plan and the broker; flat slot sizing trimmed by cash and the overlay cap.
-- **Executor** (`executor.py` with `entries.py`, `protection.py`, `core_allocation.py`): orphan close → gap check → residual SPY core → stop-out cooldowns → NEW entries (one near-market bracket, GTC stop on fill) → HOLD management (stop coverage, +target / holding-limit exits through a cancel-settle-close).
+- **Signals** (`signals.py` pure rules; `mechanical.py` builds the plan): dip-in-uptrend entries ranked deepest first into free slots, two-signal insurance and the shock trigger (exposure = min of both; entries pause while either is on), the sleeve target, held positions with their stop and target → `state/plan.json`.
+- **Risk Manager** (`risk_manager.py`): 8 programmatic gates between the plan and the broker; flat slot sizing (25% of the dip sleeve = 10% of equity) trimmed by cash and the overlay cap; both core legs sit outside the cap and the sector gate.
+- **Executor** (`executor.py` with `entries.py`, `protection.py`, `core_allocation.py`): orphan close → gap check → residual SPY core, then the SPMO sleeve → stop-out cooldowns → NEW entries (one near-market bracket, GTC stop on fill) → HOLD management (stop coverage, +target / holding-limit exits through a cancel-settle-close).
 - **Curator** (`curator.py`, Claude, monthly): universe proposal + post-mortem, advisory only.
 - **API + scheduler** (`api.py`, `scheduler.py`): FastAPI serving the state files at trade.praguefun.cz (Cloudflare tunnel); APScheduler jobs from `data/schedule.json` run inside the API container.
-- **Benchmark** (`benchmark.py`): beta / alpha / Sharpe / capture vs SPY over the strategy's own window (since `strategy.json → started_at`), refreshed by the daily summary; ratios and the verdict are withheld under 20 trading days.
+- **Benchmark** (`benchmark.py`): beta / alpha / Sharpe / capture vs SPY over the clean window (`strategy.json → window_started_at`, else `started_at`), refreshed by the daily summary; ratios and the verdict are withheld under 20 trading days.
 
 ## Key Files
 
@@ -97,7 +97,7 @@ Dependency flow: leaf modules (broker, trade_state, pricing, cooldown, signals, 
 |------|-----------|
 | `data_bundle.json` | fetch |
 | `plan.json` | signals (`mechanical.refresh_plan`, run before every execute) |
-| `strategy.json` | first signals run (`started_at`; positions opened earlier are legacy and get closed) |
+| `strategy.json` | first signals run (`started_at`; positions opened earlier are legacy and get closed); `window_started_at` / `design` stamped once when the momentum sleeve is on (benchmark window) |
 | `trade_log.json`, `near_misses.json` | executor (append-only; overflow archived to `state/archive/`) |
 | `portfolio.json` | executor (equity / cash / positions snapshot at the end of each run; read by the daily summary and the API fallback) |
 | `abort_cooldown.json` | entries (stop-out cooldowns with the exit price) |

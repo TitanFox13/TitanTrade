@@ -99,6 +99,40 @@ def insurance_state(
     }
 
 
+def shock_state(
+    closes: list[float], *, drop_pct: float, lookback: int, hold: int, scale: float,
+) -> dict[str, Any]:
+    """Fast de-risk (Decision 068): the market fell ``drop_pct`` over
+    ``lookback`` sessions on one of the last ``hold`` sessions → exposure ×
+    ``scale`` until ``hold`` sessions after the most recent such drop. Read
+    off the close series each run (no state file). Fails open when the series
+    is too short."""
+    n = len(closes)
+    age: int | None = None
+    worst: float | None = None
+    for k in range(min(hold, n)):
+        i = n - 1 - k
+        if i - lookback < 0:
+            break
+        base = closes[i - lookback]
+        if not base:
+            continue
+        r = closes[i] / base - 1
+        worst = r if worst is None else min(worst, r)
+        if r <= -drop_pct and age is None:
+            age = k
+    active = age is not None
+    return {
+        "active": active,
+        "sessions_left": (hold - age) if active else 0,
+        "worst_drop": round(worst, 4) if worst is not None else None,
+        "exposure_scale": scale if active else 1.0,
+        "drop_pct": drop_pct,
+        "lookback_days": lookback,
+        "hold_days": hold,
+    }
+
+
 def rank_dips(states: dict[str, dict[str, Any]]) -> list[str]:
     """Tickers whose dip signal is on, deepest dip first."""
     on = [(t, s) for t, s in states.items() if s.get("signal")]

@@ -49,7 +49,7 @@ All market-data functions fail open (`[]` / `None` / `{}`) on a missing key or e
 |----------|--------|---------|
 | `/api/health` | GET | `{"status": "ok"}` |
 | `/api/portfolio` | GET | Live account + positions from Alpaca |
-| `/api/plan` | GET | `state/plan.json` — NEW / HOLD items, watch, candidates, insurance, free slots (404 until the first signals run) |
+| `/api/plan` | GET | `state/plan.json` — NEW / HOLD items, watch, candidates, insurance, shock, exposure scale, sleeve target, free slots (404 until the first signals run) |
 | `/api/trades` | GET | `state/trade_log.json` |
 | `/api/near-misses` | GET | `state/near_misses.json` |
 | `/api/costs` | GET | `state/costs.json` |

@@ -417,12 +417,14 @@ def pre_trade_check(
         _pass("cash_reserve", f"${investable:,.2f} available after reserve")
 
     # Gate 4: Overlay cap (core excluded)
-    overlay_headroom = compute_overlay_headroom(positions, portfolio_value, core_tickers=(cfg.trading.core_ticker,))
+    overlay_headroom = compute_overlay_headroom(
+        positions, portfolio_value, core_tickers=(cfg.trading.core_ticker, cfg.trading.momentum_ticker),
+    )
 
     # Gate 5: Position size — a flat slot, reduced by cash and overlay headroom
     shares = 0.0
     if investable > 0 and entry_price > 0:
-        raw = portfolio_value * cfg.trading.slot_pct / entry_price
+        raw = portfolio_value * cfg.trading.overlay_slot_pct / entry_price
         shares = float(int(raw)) if raw >= 1.0 else round(raw, 2)
         position_value = shares * entry_price
         if position_value > investable:
@@ -456,7 +458,7 @@ def pre_trade_check(
 
     # Gate 6: Sector exposure
     if shares > 0:
-        sector_allowed, sector_pct = check_sector_limit(ticker, shares * entry_price, positions, portfolio_value)
+        sector_allowed, sector_pct = check_sector_limit(ticker, shares * entry_price, [p for p in positions if p.get('symbol') not in (cfg.trading.core_ticker, cfg.trading.momentum_ticker)], portfolio_value)   # core legs are not sector exposure
         if not sector_allowed:
             _fail("sector_exposure", f"Sector exposure would exceed {MAX_SECTOR_EXPOSURE_PCT}%")
         else:

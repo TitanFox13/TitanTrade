@@ -125,6 +125,27 @@ class TestExecuteTradesEndToEnd:
         snap = json.loads((tmp_state_dir / "portfolio.json").read_text())
         assert snap["portfolio_value"] == 100000.0 and snap["positions"][0]["symbol"] == "SPY"
 
+    @patch("titantrade.executor.record_stop_out_cooldowns", return_value=0)
+    @patch("titantrade.executor.check_gap_down_protection", return_value=[])
+    @patch("titantrade.executor.close_orphaned_positions", return_value=[])
+    @patch("titantrade.executor.manage_core_position", return_value=None)
+    @patch("titantrade.executor.load_stock_sectors", return_value=None)
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.executor.get_positions", return_value=[{"symbol": "SPY", "qty": "70", "market_value": "60000"}])
+    @patch("titantrade.executor.get_account", return_value={"portfolio_value": "100000", "cash": "40000", "buying_power": "80000"})
+    @patch("titantrade.executor.is_market_open", return_value=True)
+    def test_two_core_legs_spy_first_then_the_momentum_sleeve(
+        self, mock_open, mock_account, mock_positions, mock_oo, mock_sec, mock_core, mock_orphan, mock_gap, mock_cooldown,
+        fake_config, tmp_state_dir,
+    ):
+        cfg = replace(fake_config, trading=replace(fake_config.trading, watchlist=["AAA"], momentum_weight=0.6))
+        _write(tmp_state_dir, "plan.json", {"generated_at": NOW, "insurance": {"exposure_scale": 1.0}, "exposure_scale": 0.5,
+                                            "items": [], "watch": [{"ticker": "AAA", "reason": "no signal"}]})
+        _write(tmp_state_dir, "data_bundle.json", {"generated_at": NOW, "stocks": {}})
+        execute_trades(cfg)
+        calls = [(c.kwargs["ticker"], c.kwargs["target_pct"]) for c in mock_core.call_args_list]
+        assert calls == [("SPY", 0.19), ("SPMO", 0.285)]      # the combined scale 0.5: 0.5 × 0.95 × 0.4 / × 0.6
+
     @patch("titantrade.executor.get_account")
     @patch("titantrade.executor.check_gap_down_protection", return_value=[])
     @patch("titantrade.executor.close_orphaned_positions", return_value=[])

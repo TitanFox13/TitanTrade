@@ -106,6 +106,8 @@ def build_market_context(cfg: Config) -> dict[str, Any]:
             "return_1d": _compute_return(spy_bars, 1),
             "return_5d": _compute_return(spy_bars, 5),
             "return_20d": _compute_return(spy_bars, 20),
+            # the shock trigger's window (Decision 068), read by the plan
+            "closes": [b["close"] for b in spy_bars[-(cfg.trading.shock_lookback_days + cfg.trading.shock_hold_days + 1):]],
         },
     }
     try:

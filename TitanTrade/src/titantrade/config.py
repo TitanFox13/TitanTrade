@@ -97,6 +97,24 @@ class TradingSettings:
     core_ticker: str = "SPY"
     core_rebalance_band_pct: float = 0.05
 
+    # Momentum sleeve (Decision 068): a momentum ETF held at ``momentum_weight``
+    # of the investable book, same rebalance band; the dip overlay's slots are
+    # sized on the remaining (1 − momentum_weight) share. 0 = dip book only.
+    momentum_ticker: str = "SPMO"
+    momentum_weight: float = 0.6
+    # Shock trigger (Decision 068): SPY down ``shock_drop_pct`` over
+    # ``shock_lookback_days`` sessions → exposure × ``shock_scale`` for the next
+    # ``shock_hold_days`` sessions, combined with the insurance by min().
+    shock_drop_pct: float = 0.07
+    shock_lookback_days: int = 10
+    shock_hold_days: int = 20
+    shock_scale: float = 0.5
+
+    @property
+    def overlay_slot_pct(self) -> float:
+        """One dip slot as a share of equity: ``slot_pct`` of the dip sleeve."""
+        return self.slot_pct * (1 - self.momentum_weight)
+
 
 @dataclass(frozen=True)
 class Config:
@@ -111,6 +129,9 @@ MECHANICAL_FIELDS = {
     "dip_pct", "dip_lookback_days", "trend_sma_days", "slot_pct", "max_slots",
     "tp_pct", "stop_pct", "max_hold_days", "insurance_sma_days",
     "insurance_breadth", "insurance_scale", "sector_etfs",
+    "core_ticker", "core_rebalance_band_pct",
+    "momentum_ticker", "momentum_weight",
+    "shock_drop_pct", "shock_lookback_days", "shock_hold_days", "shock_scale",
 }
 
 

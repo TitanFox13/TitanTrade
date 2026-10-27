@@ -27,7 +27,7 @@ from titantrade.core_allocation import _is_core_ticker
 from titantrade.logger import get_logger
 from titantrade.market_context import get_stock_sector
 from titantrade.risk_manager import MIN_CASH_RESERVE_PCT
-from titantrade.signals import evaluate_dip, insurance_state, rank_dips
+from titantrade.signals import evaluate_dip, insurance_state, rank_dips, shock_state
 from titantrade.trade_state import _load, _opening_buy, position_opened_at
 
 log = get_logger("mechanical")
@@ -43,15 +43,37 @@ def strategy_started_at() -> str | None:
     return ts if isinstance(ts, str) and ts else None
 
 
-def _ensure_strategy_started(now: datetime) -> str:
-    started = strategy_started_at()
-    if started:
-        return started
-    started = now.isoformat()
-    with open(STATE_DIR / STRATEGY_FILE, "w") as f:
-        json.dump({"strategy": "mechanical", "started_at": started, "decision": "061"}, f, indent=2)
-    log.warning(f"Mechanical strategy started at {started} — positions opened before this are legacy")
-    return started
+def benchmark_window_start() -> str | None:
+    """Start of the clean window the benchmark is judged on: the two-sleeve
+    book's first run (``window_started_at``, Decision 068) when the sleeve is
+    on, else the strategy start."""
+    doc = _load(STRATEGY_FILE)
+    if not isinstance(doc, dict):
+        return None
+    ts = doc.get("window_started_at") or doc.get("started_at")
+    return ts if isinstance(ts, str) and ts else None
+
+
+def _ensure_strategy_started(now: datetime, cfg: Config | None = None) -> str:
+    """Stamp ``strategy.json`` on the first run; stamp the Decision 068 window
+    the first time the momentum sleeve is on. ``started_at`` never moves —
+    it is what separates mechanical positions from legacy ones."""
+    doc = _load(STRATEGY_FILE)
+    doc = doc if isinstance(doc, dict) else {}
+    changed = False
+    if not strategy_started_at():
+        doc = {"strategy": "mechanical", "started_at": now.isoformat(), "decision": "061"}
+        log.warning(f"Mechanical strategy started at {doc['started_at']} — positions opened before this are legacy")
+        changed = True
+    if cfg and cfg.trading.momentum_weight > 0 and not doc.get("window_started_at"):
+        doc.update(window_started_at=now.isoformat(), design="068",
+                   sleeve={"ticker": cfg.trading.momentum_ticker, "weight": cfg.trading.momentum_weight})
+        log.warning(f"Two-sleeve book (Decision 068) starts at {doc['window_started_at']} — benchmark window reset")
+        changed = True
+    if changed:
+        with open(STATE_DIR / STRATEGY_FILE, "w") as f:
+            json.dump(doc, f, indent=2)
+    return doc["started_at"]
 
 
 def is_mechanical_position(ticker: str, started_at: str | None) -> bool:
@@ -126,6 +148,14 @@ def build_plan(
         breadth_ctx.get("spy_above_sma"), breadth_ctx.get("pct"),
         breadth_threshold=cfg.trading.insurance_breadth, scale=cfg.trading.insurance_scale,
     )
+    spy_closes = (bundle.get("market_context", {}) or {}).get("spy", {}).get("closes") or []
+    shock = shock_state(
+        [float(c) for c in spy_closes if c is not None],
+        drop_pct=cfg.trading.shock_drop_pct, lookback=cfg.trading.shock_lookback_days,
+        hold=cfg.trading.shock_hold_days, scale=cfg.trading.shock_scale,
+    )
+    # Exposure rules combine by min(), not multiplication (Decision 067).
+    exposure_scale = min(insurance["exposure_scale"], shock["exposure_scale"])
 
     # The bundle bakes the lookback/SMA lengths into signal_inputs at fetch
     # time; after a parameter change the inputs are stale until the next fetch.
@@ -170,6 +200,12 @@ def build_plan(
     if insurance["risk_off"]:
         chosen: list[str] = []
         why_blocked = "insurance is risk-off (SPY below its SMA and sector breadth below threshold) — no new entries"
+    elif shock["active"]:
+        chosen = []
+        why_blocked = (
+            f"shock trigger is on (SPY fell {-shock['worst_drop']:.1%} in {cfg.trading.shock_lookback_days} sessions; "
+            f"{shock['sessions_left']} sessions left) — no new entries"
+        )
     else:
         chosen = ranked[:free_slots]
         why_blocked = (
@@ -208,9 +244,22 @@ def build_plan(
             "insurance_sma_days": cfg.trading.insurance_sma_days,
             "insurance_breadth": cfg.trading.insurance_breadth,
             "insurance_scale": cfg.trading.insurance_scale,
+            "momentum_ticker": cfg.trading.momentum_ticker,
+            "momentum_weight": cfg.trading.momentum_weight,
+            "shock_drop_pct": cfg.trading.shock_drop_pct,
+            "shock_lookback_days": cfg.trading.shock_lookback_days,
+            "shock_hold_days": cfg.trading.shock_hold_days,
+            "shock_scale": cfg.trading.shock_scale,
         },
         "stale_inputs": stale,
         "insurance": insurance,
+        "shock": shock,
+        "exposure_scale": exposure_scale,
+        "sleeve": {
+            "ticker": cfg.trading.momentum_ticker,
+            "weight": cfg.trading.momentum_weight,
+            "target_pct": momentum_target_pct(cfg, exposure_scale),
+        },
         "breadth": {k: v for k, v in breadth_ctx.items() if k != "flags"},
         "items": items,
         "watch": watch,
@@ -233,11 +282,13 @@ def core_target_pct(
     planned_new_slots: int,
     exposure_scale: float,
 ) -> float:
-    """SPY target as a fraction of equity: the residual after the overlay.
+    """SPY target as a fraction of equity: the residual of the dip sleeve.
 
-    ``exposure_scale × (1 − cash reserve) − (held overlay + planned slots)``.
-    Planned slots are subtracted so the core sells SPY *before* the entries
-    need the cash in the same run; after an exit the next run buys SPY back.
+    ``exposure_scale × (1 − cash reserve) × (1 − momentum_weight) − (held
+    overlay + planned slots)``. Planned slots are subtracted so the core
+    sells SPY *before* the entries need the cash in the same run; after an
+    exit the next run buys SPY back. The momentum ETF is a core leg, not
+    overlay (Decision 068).
     """
     if portfolio_value <= 0:
         return 0.0
@@ -246,10 +297,16 @@ def core_target_pct(
         for p in positions
         if not _is_core_ticker(p.get("symbol", ""), cfg)
     )
-    planned = planned_new_slots * cfg.trading.slot_pct * portfolio_value
-    investable = exposure_scale * (1 - MIN_CASH_RESERVE_PCT / 100)
+    planned = planned_new_slots * cfg.trading.overlay_slot_pct * portfolio_value
+    investable = exposure_scale * (1 - MIN_CASH_RESERVE_PCT / 100) * (1 - cfg.trading.momentum_weight)
     target = investable - (overlay + planned) / portfolio_value
     return max(0.0, min(1.0, round(target, 4)))
+
+
+def momentum_target_pct(cfg: Config, exposure_scale: float) -> float:
+    """The momentum sleeve's target share of equity (Decision 068):
+    ``exposure_scale × (1 − cash reserve) × momentum_weight``."""
+    return round(max(0.0, exposure_scale) * (1 - MIN_CASH_RESERVE_PCT / 100) * cfg.trading.momentum_weight, 4)
 
 
 def _pending_buy_tickers(cfg: Config) -> set[str]:
@@ -266,7 +323,7 @@ def _pending_buy_tickers(cfg: Config) -> set[str]:
 def refresh_plan(cfg: Config) -> dict[str, Any]:
     """Compute the plan from the data bundle and the book; write ``plan.json``."""
     now = datetime.now(timezone.utc)
-    started_at = _ensure_strategy_started(now)
+    started_at = _ensure_strategy_started(now, cfg)
     bundle = _load("data_bundle.json")
     if not bundle.get("stocks"):
         log.error("No data bundle — run `titantrade fetch` first; plan left untouched")
@@ -283,7 +340,9 @@ def refresh_plan(cfg: Config) -> dict[str, Any]:
         f"{len(plan['held'])} held, {plan['free_slots']} free slot(s), "
         f"legacy to close {plan['legacy_to_close']} | risk-off "
         f"{'YES (exposure x' + str(ins['exposure_scale']) + ')' if ins['risk_off'] else 'no'} "
-        f"(SPY above SMA: {ins['spy_above_sma']}, breadth {ins['sector_breadth']})"
+        f"(SPY above SMA: {ins['spy_above_sma']}, breadth {ins['sector_breadth']}) | shock "
+        f"{'ON (' + str(plan['shock']['sessions_left']) + ' sessions left)' if plan['shock']['active'] else 'off'} "
+        f"| exposure x{plan['exposure_scale']} | {plan['sleeve']['ticker']} target {plan['sleeve']['target_pct']:.0%}"
     )
     return plan
 
@@ -297,6 +356,8 @@ def main() -> None:
         return
     ins = plan["insurance"]
     print(f"Risk-off: {'YES' if ins['risk_off'] else 'no'} | SPY above SMA: {ins['spy_above_sma']} | sector breadth: {ins['sector_breadth']}")
+    sh = plan["shock"]
+    print(f"Shock trigger: {'ON (' + str(sh['sessions_left']) + ' sessions left)' if sh['active'] else 'off'} | exposure x{plan['exposure_scale']} | {plan['sleeve']['ticker']} target {plan['sleeve']['target_pct']:.0%}")
     print(f"Held: {plan['held']} | legacy to close: {plan['legacy_to_close']} | free slots: {plan['free_slots']}")
     for c in plan["candidates"]:
         print(f"  {'BUY ' if c['chosen'] else '    '} {c['ticker']:6} dip {c['dip_pct']:.1%}")

@@ -99,11 +99,11 @@ def _run_daily_summary() -> str:
     try:
         from .benchmark import compute_benchmark
         from .config import load_config
-        from .mechanical import strategy_started_at
+        from .mechanical import benchmark_window_start
 
         # The clean window is the strategy's own history (Decision 062); fall
         # back to 90 days when no strategy start is recorded yet.
-        started = strategy_started_at()
+        started = benchmark_window_start()
         compute_benchmark(load_config(), lookback_days=90, since=started[:10] if started else None)
     except Exception:
         log.exception("Benchmark refresh failed — daily summary will use stale/no metrics")

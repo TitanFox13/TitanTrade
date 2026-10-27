@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from titantrade.signals import (
-    breadth, dip_state, evaluate_dip, insurance_state, rank_dips, sma, trading_days_between,
+    breadth, dip_state, evaluate_dip, insurance_state, rank_dips, shock_state, sma, trading_days_between,
 )
 
 STARTED = "2026-10-14T12:00:00+00:00"
@@ -27,9 +27,13 @@ def _write(state_dir, name, data):
     (state_dir / name).write_text(json.dumps(data))
 
 
-def _bundle(spy_above=True, pct=0.7, lookback=90, sma_days=150, **inputs):
+def _bundle(spy_above=True, pct=0.7, lookback=90, sma_days=150, spy_closes=None, **inputs):
     stocks = {t: {"signal_inputs": {**v, "lookback_days": lookback, "trend_sma_days": sma_days}} for t, v in inputs.items()}
-    return {"generated_at": AFTER, "market_context": {"spy": {"close": 778.1}, "breadth": {"spy_above_sma": spy_above, "pct": pct}}, "stocks": stocks}
+    spy = {"close": 778.1, "closes": spy_closes or [100.0] * 31}
+    return {"generated_at": AFTER, "market_context": {"spy": spy, "breadth": {"spy_above_sma": spy_above, "pct": pct}}, "stocks": stocks}
+
+
+SHOCKED = [100.0] * 20 + [91.0] * 11     # a −9% drop over 10 sessions, 10 sessions ago
 
 
 def _inp(close, high, trend):
@@ -55,6 +59,15 @@ class TestSignals:
         assert off["risk_off"] is True and off["exposure_scale"] == 0.5
         assert insurance_state(False, 0.6, breadth_threshold=0.5, scale=0.5)["risk_off"] is False
         assert insurance_state(None, 0.1, breadth_threshold=0.5, scale=0.5)["risk_off"] is False
+
+    def test_shock_trigger(self):
+        on = shock_state(SHOCKED, drop_pct=0.07, lookback=10, hold=20, scale=0.5)
+        # the 10-session return stays at −9% for ten sessions, and each of them re-arms the hold (as researched)
+        assert on["active"] is True and on["exposure_scale"] == 0.5 and on["sessions_left"] == 19 and on["worst_drop"] == -0.09
+        expired = shock_state([100.0] * 10 + [91.0] * 31, drop_pct=0.07, lookback=10, hold=20, scale=0.5)
+        assert expired["active"] is False and expired["exposure_scale"] == 1.0
+        assert shock_state([100.0] * 20 + [94.0] * 11, drop_pct=0.07, lookback=10, hold=20, scale=0.5)["active"] is False   # −6% is not a shock
+        assert shock_state([91.0] * 5, drop_pct=0.07, lookback=10, hold=20, scale=0.5)["exposure_scale"] == 1.0         # too short → fails open
 
     def test_rank_and_trading_days(self):
         assert rank_dips({"A": {"signal": True, "dip_pct": 0.11}, "B": {"signal": True, "dip_pct": 0.15}, "C": {"signal": False, "dip_pct": 0.2}}) == ["B", "A"]
@@ -94,6 +107,19 @@ class TestBuildPlan:
         assert [i["action"] for i in plan["items"]] == ["HOLD"]
         assert any("risk-off" in w["reason"] for w in plan["watch"] if w["ticker"] == "AAA")
 
+    def test_shock_blocks_entries_and_scales_the_whole_book(self, fake_config, tmp_state_dir):
+        from titantrade.mechanical import build_plan
+        self._log(tmp_state_dir)
+        cfg = _cfg(fake_config, momentum_weight=0.6)
+        bundle = _bundle(spy_closes=SHOCKED, AAA=_inp(88, 100, 80), BBB=_inp(100, 100, 80), CCC=_inp(100, 100, 80), DDD=_inp(100, 100, 80))
+        plan = build_plan(cfg, bundle, [], set(), started_at=STARTED)
+        assert plan["shock"]["active"] is True and plan["insurance"]["risk_off"] is False
+        assert plan["exposure_scale"] == 0.5 and plan["new_signals"] == 0
+        assert plan["sleeve"] == {"ticker": "SPMO", "weight": 0.6, "target_pct": 0.285}        # 0.5 × 0.95 × 0.6
+        assert any("shock trigger" in w["reason"] for w in plan["watch"] if w["ticker"] == "AAA")
+        both = build_plan(cfg, _bundle(spy_above=False, pct=0.3, spy_closes=SHOCKED, AAA=_inp(88, 100, 80)), [], set(), started_at=STARTED)
+        assert both["exposure_scale"] == 0.5                                                     # min(), not 0.25
+
     def test_pending_bracket_keeps_its_item_and_occupies_a_slot(self, fake_config, tmp_state_dir):
         from titantrade.mechanical import build_plan
         self._log(tmp_state_dir)
@@ -120,6 +146,21 @@ class TestBuildPlan:
         assert json.loads((tmp_state_dir / "plan.json").read_text())["items"][0]["ticker"] == "AAA"
         assert json.loads((tmp_state_dir / "strategy.json").read_text())["started_at"]
 
+    def test_sleeve_stamps_the_clean_window_without_moving_the_start(self, fake_config, tmp_state_dir):
+        from titantrade.mechanical import benchmark_window_start, refresh_plan
+        self._log(tmp_state_dir)
+        _write(tmp_state_dir, "strategy.json", {"strategy": "mechanical", "started_at": STARTED, "decision": "061"})
+        _write(tmp_state_dir, "data_bundle.json", _bundle(AAA=_inp(88, 100, 80), BBB=_inp(100, 100, 80), CCC=_inp(100, 100, 80), DDD=_inp(100, 100, 80)))
+        assert benchmark_window_start() == STARTED
+        with patch("titantrade.mechanical.get_positions", return_value=[]), patch("titantrade.mechanical.get_open_orders", return_value=[]):
+            refresh_plan(_cfg(fake_config, momentum_weight=0.6))
+            doc = json.loads((tmp_state_dir / "strategy.json").read_text())
+            window = doc["window_started_at"]
+            refresh_plan(_cfg(fake_config, momentum_weight=0.6))
+        assert doc["started_at"] == STARTED and doc["design"] == "068" and window > STARTED
+        assert json.loads((tmp_state_dir / "strategy.json").read_text())["window_started_at"] == window   # stamped once
+        assert benchmark_window_start() == window
+
 
 class TestCoreTarget:
     def test_residual_after_overlay_and_planned_slots(self, fake_config):
@@ -129,6 +170,15 @@ class TestCoreTarget:
         assert core_target_pct(cfg, 100_000, positions, planned_new_slots=1, exposure_scale=1.0) == 0.50
         assert core_target_pct(cfg, 100_000, positions, planned_new_slots=1, exposure_scale=0.5) == 0.025
         assert core_target_pct(cfg, 100_000, positions, planned_new_slots=3, exposure_scale=1.0) == 0.0
+
+    def test_two_sleeve_targets(self, fake_config):
+        from titantrade.mechanical import core_target_pct, momentum_target_pct
+        cfg = _cfg(fake_config, momentum_weight=0.6)
+        assert cfg.trading.overlay_slot_pct == 0.1                                               # 25% of the 40% dip sleeve
+        positions = [{"symbol": "SPY", "market_value": "20000"}, {"symbol": "SPMO", "market_value": "50000"}, {"symbol": "BBB", "market_value": "20000"}]
+        assert core_target_pct(cfg, 100_000, positions, planned_new_slots=1, exposure_scale=1.0) == 0.08   # 0.95 × 0.4 − 0.2 held − 0.1 planned
+        assert momentum_target_pct(cfg, 1.0) == 0.57 and momentum_target_pct(cfg, 0.5) == 0.285
+        assert core_target_pct(cfg, 100_000, positions, planned_new_slots=0, exposure_scale=0.5) == 0.0    # 0.19 − 0.2 held
 
 
 def _bars(closes, start=datetime(2024, 1, 1)):

@@ -272,6 +272,8 @@ def send_daily_summary() -> str:
     plan = _load_state("plan.json")
     if plan:
         ins = plan.get("insurance", {}) or {}
+        shock = plan.get("shock", {}) or {}
+        sleeve = plan.get("sleeve", {}) or {}
         held = plan.get("held", []) or []
         chosen = [c.get("ticker") for c in plan.get("candidates", []) if c.get("chosen")]
         fields.append({
@@ -279,7 +281,9 @@ def send_daily_summary() -> str:
             "value": (
                 f"risk-off {'YES (exposure x' + str(ins.get('exposure_scale')) + ')' if ins.get('risk_off') else 'no'} "
                 f"(SPY above SMA: {ins.get('spy_above_sma')}, breadth {ins.get('sector_breadth')}) | "
-                f"held {', '.join(held) or 'none'} | free slots {plan.get('free_slots', '?')} | "
+                + (f"shock {'ON (' + str(shock.get('sessions_left')) + ' left)' if shock.get('active') else 'off'} | " if shock else "")
+                + (f"{sleeve.get('ticker')} target {sleeve.get('target_pct', 0):.0%} | " if sleeve else "")
+                + f"held {', '.join(held) or 'none'} | free slots {plan.get('free_slots', '?')} | "
                 f"signals {', '.join(chosen) or 'none'}"
             ),
             "inline": False,

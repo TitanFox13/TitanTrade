@@ -24,19 +24,23 @@ log = get_logger("core_allocation")
 
 
 def _is_core_ticker(ticker: str, cfg: Config) -> bool:
-    """True for the core ETF, which the plan and the gates never touch."""
-    return ticker == cfg.trading.core_ticker
+    """True for the core legs (SPY, the momentum ETF), which the plan and the
+    gates never touch."""
+    return ticker in (cfg.trading.core_ticker, cfg.trading.momentum_ticker)
 
 
-def manage_core_position(cfg: Config, target_pct: float | None = None) -> dict[str, Any] | None:
-    """Rebalance the core ETF toward ``target_pct`` of equity (default: the
-    whole investable book). Skipped off-hours (market orders). Returns the
-    trade record if an order fired, else None."""
+def manage_core_position(
+    cfg: Config, target_pct: float | None = None, ticker: str | None = None,
+) -> dict[str, Any] | None:
+    """Rebalance a core leg (default SPY; the momentum ETF when ``ticker``
+    says so) toward ``target_pct`` of equity (default: the whole investable
+    book). Skipped off-hours (market orders). Returns the trade record if an
+    order fired, else None."""
     if not is_market_open(cfg):
         log.info("Core position management deferred — market closed")
         return None
 
-    ticker = cfg.trading.core_ticker
+    ticker = ticker or cfg.trading.core_ticker
     account = get_account(cfg)
     portfolio_value = float(account.get("portfolio_value", 0))
     cash_balance = float(account.get("cash", 0))

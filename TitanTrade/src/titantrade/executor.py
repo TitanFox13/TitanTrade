@@ -3,7 +3,8 @@
 ``execute_trades`` runs, in order:
   1. pre-flight — orphan close (held names without a plan item), gap-down protection
   2. plan + data bundle
-  3. core — SPY to its residual target, freeing the cash this run's entries need
+  3. core — SPY to its residual target, freeing the cash this run's entries
+     need, then the momentum ETF to its sleeve target (Decision 068)
   4. stop-out cooldown scan
   5. NEW items → entries through the gates; HOLD items → stop coverage,
      then the target or the holding limit closes the position
@@ -35,7 +36,7 @@ from titantrade.market_context import load_stock_sectors
 from titantrade.protection import check_gap_down_protection, close_orphaned_positions, close_position_settled
 from titantrade.entries import handle_entry, record_stop_out_cooldowns
 from titantrade.core_allocation import _is_core_ticker, manage_core_position
-from titantrade.mechanical import core_target_pct
+from titantrade.mechanical import core_target_pct, momentum_target_pct
 from titantrade.signals import trading_days_between
 from titantrade.trade_state import _load, _save, position_opened_at
 from titantrade.alerts import _maybe_alert_stuck_in_cash, _maybe_alert_ticker_churn
@@ -275,20 +276,32 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     # --- Core: SPY is the residual (Decision 061) ---
     held_now = {p.get("symbol") for p in positions}
     planned = sum(1 for i in items if i.get("action") == "NEW" and i.get("ticker") not in held_now)
-    scale = float((plan.get("insurance", {}) or {}).get("exposure_scale") or 1.0)
+    scale = plan.get("exposure_scale")
+    if scale is None:   # a plan from before Decision 068
+        scale = (plan.get("insurance", {}) or {}).get("exposure_scale") or 1.0
+    scale = float(scale)
     core_target = core_target_pct(cfg, portfolio_value, positions, planned_new_slots=planned, exposure_scale=scale)
-    log.info(f"Core target {core_target:.0%} of equity (planned new slots {planned}, exposure scale {scale})")
+    sleeve = cfg.trading.momentum_ticker
+    sleeve_target = momentum_target_pct(cfg, scale) if (cfg.trading.momentum_weight > 0 or sleeve in held_now) else None
+    log.info(
+        f"Core target {core_target:.0%} of equity (planned new slots {planned}, exposure scale {scale})"
+        + (f" | {sleeve} target {sleeve_target:.0%}" if sleeve_target is not None else "")
+    )
     if market_open:
-        try:
-            core_trade = manage_core_position(cfg, target_pct=core_target)
-            if core_trade:
-                executed.append(core_trade)
-                positions = get_positions(cfg)
-                account = get_account(cfg)   # the core trade moved cash
-                portfolio_value = float(account.get("portfolio_value", portfolio_value))
-                cash_balance = float(account.get("cash", cash_balance))
-        except Exception as exc:  # noqa: BLE001
-            log.error(f"Core position management failed: {exc}")
+        legs = [(cfg.trading.core_ticker, core_target)]
+        if sleeve_target is not None:
+            legs.append((sleeve, sleeve_target))   # SPY first: its sale funds the sleeve and the entries
+        for leg, target in legs:
+            try:
+                core_trade = manage_core_position(cfg, target_pct=target, ticker=leg)
+                if core_trade:
+                    executed.append(core_trade)
+                    positions = get_positions(cfg)
+                    account = get_account(cfg)   # the core trade moved cash
+                    portfolio_value = float(account.get("portfolio_value", portfolio_value))
+                    cash_balance = float(account.get("cash", cash_balance))
+            except Exception as exc:  # noqa: BLE001
+                log.error(f"Core position management failed for {leg}: {exc}")
 
     # --- Stop-out cooldowns (ADR 056) before anything can re-enter ---
     try:

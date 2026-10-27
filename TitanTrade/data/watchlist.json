@@ -29,7 +29,13 @@
       "max_slots": 3,
       "insurance_sma_days": 200,
       "insurance_breadth": 0.5,
-      "insurance_scale": 0.5
+      "insurance_scale": 0.5,
+      "momentum_ticker": "SPMO",
+      "momentum_weight": 0.6,
+      "shock_drop_pct": 0.07,
+      "shock_lookback_days": 10,
+      "shock_hold_days": 20,
+      "shock_scale": 0.5
     }
   }
 }

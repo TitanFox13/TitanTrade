@@ -7,7 +7,7 @@ The system's job is to not lose money, and secondarily to make money. Missed opp
 ## What Protects the Book
 
 - **Position level**: a GTC stop-limit at −12% on every whole-share overlay position (placed by the bracket, converted on fill, re-placed by the 09:35 ET coverage job if ever missing — Decision 060); a +20% target and a 60-trading-day limit evaluated at each executor run; the orphan close for any position without a plan item.
-- **Portfolio level**: flat 25% slots (max 3) under a 70% overlay cap, the 5% cash reserve, the drawdown breaker, the sector / correlation / earnings / macro gates, and the two-signal insurance (SPY < 200-day SMA **and** sector breadth < 50% → exposure halves, no new entries; fails open when inputs are unknown).
+- **Portfolio level**: flat slots of 25% of the dip sleeve (10% of equity, max 3) under a 70% overlay cap, the 5% cash reserve, the drawdown breaker, the sector / correlation / earnings / macro gates, the two-signal insurance (SPY < 200-day SMA **and** sector breadth < 50% → exposure halves, no new entries; fails open when inputs are unknown) and the shock trigger (068: SPY −7% over 10 sessions within the last 20 → exposure halves, no new entries); exposure = min of the two, applied to both core legs (SPY, SPMO).
 - **What no longer sells**: the LLM sentry, the intraday price check, the hedge swap and the trailing / TP1 manager — measured as net losses or untested (Decision 060, Evidence 3) and frozen under `legacy/`.
 
 ## The Eight Gates (`risk_manager.pre_trade_check`)
@@ -17,8 +17,8 @@ Evaluated in order for every NEW item (an entry that expired unfilled is simply 
 1. **Earnings blackout** — no entry within 2 calendar days of earnings (Finnhub; `earnings.DEFAULT_BLOCK_DAYS`). Binary risk that cannot be hedged.
 2. **Drawdown circuit breaker** — all entries halt while equity is ≥ 8% below the recorded peak (`state/peak_portfolio.json`). **Suspect-value guard** (054): a value more than ±50% off the peak is broker data corruption, not a drawdown — entries pause for the run, the block is labelled "suspect broker data" and alerted, and `update_peak_value` refuses the spike so a glitch never trips the breaker permanently.
 3. **Cash reserve** — 5% of equity stays in cash. The gate nets out the notional of pending (unfilled) buy orders (`open_buy_commitment`, 035), and the executor re-reads the account after every executed entry so an instantly filled bracket cannot be spent twice (058).
-4. **Overlay cap** — overlay positions ≤ 70% of equity (`compute_overlay_headroom`, core excluded). Protects the SPY core.
-5. **Position size** — the slot is `slot_pct` × equity, reduced to the cash and overlay headroom, floored to whole shares; anything below `MIN_POSITION_NOTIONAL` ($500) is blocked as dust (054). No ATR, confidence or VIX scaling (061).
+4. **Overlay cap** — overlay positions ≤ 70% of equity (`compute_overlay_headroom`, both core legs excluded). Protects the core.
+5. **Position size** — the slot is `overlay_slot_pct` = `slot_pct × (1 − momentum_weight)` × equity, reduced to the cash and overlay headroom, floored to whole shares; anything below `MIN_POSITION_NOTIONAL` ($500) is blocked as dust (054). No ATR, confidence or VIX scaling (061).
 6. **Sector exposure** — the trade may not push one sector above 50% of equity.
 7. **Macro blackout** — no entry within 6 h of a high-impact release: FOMC, NFP / jobs, CPI, core PCE, GDP (046 whitelist).
 8. **Correlation** — blocked when the average 60-day correlation with held positions exceeds 0.75 (hidden concentration across sectors).
@@ -42,7 +42,9 @@ Evaluated in order for every NEW item (an entry that expired unfilled is simply 
 | Parameter | Value | Defined in |
 |-----------|-------|-----------|
 | `dip_pct` / `dip_lookback_days` / `trend_sma_days` | 0.08 / 90 / 150 | `data/watchlist.json` → `TradingSettings` (Decision 062) |
-| `slot_pct` / `max_slots` | 0.25 / 3 | same |
+| `slot_pct` / `max_slots` | 0.25 (of the dip sleeve) / 3 | same |
+| `momentum_ticker` / `momentum_weight` | SPMO / 0.6 | same |
+| `shock_drop_pct` / `shock_lookback_days` / `shock_hold_days` / `shock_scale` | 0.07 / 10 / 20 / 0.5 | same |
 | `tp_pct` / `stop_pct` / `max_hold_days` | 0.20 / 0.12 / 60 | same |
 | `insurance_sma_days` / `insurance_breadth` / `insurance_scale` | 200 / 0.5 / 0.5 | same |
 | `core_ticker` / `core_rebalance_band_pct` | SPY / 0.05 | config.py |

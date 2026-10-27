@@ -48,8 +48,8 @@ class TestCashReserve:
 
 class TestOverlayCap:
     def test_headroom_excludes_core(self):
-        positions = [{"symbol": "SPY", "market_value": "50000"}, {"symbol": "AAA", "market_value": "30000"}]
-        assert compute_overlay_headroom(positions, 100_000, core_tickers=("SPY",)) == 100_000 * MAX_TOTAL_OVERLAY_PCT - 30_000
+        positions = [{"symbol": "SPY", "market_value": "50000"}, {"symbol": "SPMO", "market_value": "10000"}, {"symbol": "AAA", "market_value": "30000"}]
+        assert compute_overlay_headroom(positions, 100_000, core_tickers=("SPY", "SPMO")) == 100_000 * MAX_TOTAL_OVERLAY_PCT - 30_000
         assert compute_overlay_headroom([{"symbol": "AAA", "market_value": "80000"}], 100_000) == 0
 
 
@@ -73,6 +73,13 @@ class TestPreTradeCheck:
         check = pre_trade_check("AAA", _item(100.0), 100_000, 60_000, [], earnings_blocked=False, cfg=fake_config)
         assert check["allowed"] and check["shares"] == 250.0            # 25% slot
         assert set(check["gate_results"]) == {"earnings", "drawdown", "cash_reserve", "overlay_cap", "position_size", "sector_exposure", "macro_blackout", "correlation"}
+
+    def test_slot_is_sized_on_the_dip_sleeve(self, fake_config, tmp_state_dir):
+        from dataclasses import replace
+        cfg = replace(fake_config, trading=replace(fake_config.trading, momentum_weight=0.6))
+        positions = [{"symbol": "SPMO", "market_value": "57000"}]
+        check = pre_trade_check("AAA", _item(100.0), 100_000, 40_000, positions, earnings_blocked=False, cfg=cfg)
+        assert check["allowed"] and check["shares"] == 100.0            # 25% × 40% = 10% slot; SPMO is core, not overlay
 
     def test_cash_and_overlay_reduce_the_slot(self, fake_config, tmp_state_dir, monkeypatch):
         check = pre_trade_check("AAA", _item(100.0), 100_000, 15_000, [], earnings_blocked=False, cfg=fake_config)
