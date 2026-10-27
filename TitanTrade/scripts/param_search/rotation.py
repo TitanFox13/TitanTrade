@@ -152,5 +152,104 @@ def century():
         score_line(f"dip 40 / {k} 60", rr, r_mkt, fd, "1975-01-01", ERAS)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and "--timing" not in sys.argv:
     decade(); century()
+
+
+# ---- timing (operator follow-up, 2026-10-27): how often to rotate, and whether a marker beats the calendar -----------------
+# Pre-registered hypotheses, written before any result:
+#   T1 calendar frequency — century industries: monthly ≈ quarterly > semi-annual > annual, spread ≤ 1.5 pp/yr net of costs;
+#      daily re-ranking adds turnover and nothing; decade sectors ≈ 0 at every frequency (too little dispersion among 11).
+#   T2 a rank tolerance band (hold while still inside the top 2N, refill from the top N) cuts turnover by about half at
+#      about the same excess — the classic result for threshold rebalancing.
+#   T3 a trend-break trigger (drop a holding once it is below its 10-month SMA, refill from the top N that are above) is
+#      the absolute-momentum filter with hysteresis: lower drawdown, lower return.
+#   T4 re-ranking the day after a market shock (−7 % in 10 sessions) adds nothing: the ranking barely moves in ten days,
+#      and it rotates into whatever fell least, then misses the rebound.
+#   SPMO's own schedule (semi-annual, March / September, set by the index) is not a knob this book holds.
+
+def rotate2(P, dates, form, skip, top, start_i, every=1, anchor=0, band=None, trend=False, shock=None, daily=False):
+    """Top-`top` by trailing return; full re-rank on the calendar (`every` months, `anchor`) and/or on triggers; cost 0.05 %/side."""
+    T, N = P.shape; R = P[1:] / P[:-1] - 1
+    w = np.zeros(N); out = np.zeros(T - 1); turnover = 0.0
+    ms = month_starts(dates); mset = set(ms); midx = {t: k for k, t in enumerate(ms)}
+    sma10 = np.full(P.shape, np.nan)
+    for k in range(10, len(ms)):
+        sma10[ms[k]] = np.nanmean(P[ms[k - 10:k]], axis=0)
+    last_sma = np.full(N, np.nan)
+    for t in range(start_i, T - 1):
+        check = daily or t in mset
+        if t in mset:
+            last_sma = np.where(np.isnan(sma10[t]), last_sma, sma10[t])
+        if not check and not (shock is not None and shock[t]):
+            r = R[t]; ok = ~np.isnan(r); out[t] += (w[ok] * r[ok]).sum(); w = w * np.where(ok, 1 + r, 1.0); continue
+        with np.errstate(all="ignore"):
+            score = P[t - skip] / P[t - skip - form] - 1
+        score = np.where(np.isnan(score) | np.isnan(P[t]), -np.inf, score)
+        order = np.argsort(-score, kind="stable"); rank = np.empty(N, dtype=int); rank[order] = np.arange(N)
+        held = w > 0
+        full = (t in mset and (midx[t] % every == anchor % every)) or (shock is not None and shock[t]) or (daily and band is None and not trend)
+        if full:
+            keep = [j for j in order[:top] if np.isfinite(score[j])]
+        else:
+            keep = [j for j in np.nonzero(held)[0] if np.isfinite(score[j])]
+            if band:
+                keep = [j for j in keep if rank[j] < band * top]
+            if trend:
+                keep = [j for j in keep if not (P[t, j] < last_sma[j])]
+            for j in order:
+                if len(keep) >= top:
+                    break
+                if j in keep or not np.isfinite(score[j]) or rank[j] >= top or (trend and P[t, j] < last_sma[j]):
+                    continue
+                keep.append(j)
+        new = np.zeros(N)
+        if keep:
+            new[keep] = 1.0 / top
+        wn = w / w.sum() if w.sum() > 0 else w
+        to = np.abs(new - wn).sum() / 2; turnover += to; out[t] -= COST * 2 * to
+        w = new
+        r = R[t]; ok = ~np.isnan(r); out[t] += (w[ok] * r[ok]).sum(); w = w * np.where(ok, 1 + r, 1.0)
+    years = (T - 1 - start_i) / 252
+    return out, turnover / years
+
+
+def timing():
+    ind = datasets.load("F_french_49ind_1926"); r0 = fastbt.run(ind, LIVE, "1927-07-01", None); fd = ind.dates[ind.dates.index(r0["start"]):]; j0 = ind.dates.index(fd[0])
+    dip = r0["_curve"]; mk = r0["_spy_curve"]; r_dip = dip[1:] / dip[:-1] - 1; r_mkt = mk[1:] / mk[:-1] - 1
+    bear = master.prev(master.sma_above(mk)[1:]) == 0.0; shock = master.shock_flags(mk, -0.07, 10, 20)
+    shock_full = np.zeros(len(ind.dates), dtype=bool); shock_full[j0 + 1:j0 + len(fd)] = shock & ~np.concatenate([[False], shock[:-1]])   # the first day of each shock
+    cur = datasets.load("A_alpaca_names_2016"); sec = datasets.load("D_alpaca_sectors_2016"); dates = cur.dates; i0 = dates.index("2017-01-03")
+    _, _, spy_above, breadth = cur.pre(90, 150, 200)
+    SEC = fastbt.run(sec, LIVE, "2017-01-03", None)["_curve"]; d = dates[i0:]; n = len(SEC); spy = cur.spy[i0:i0 + n]
+    r_dip_d = SEC[1:] / SEC[:-1] - 1; r_mkt_d = spy[1:] / spy[:-1] - 1
+    bear_d = (master.prev(spy_above[i0:i0 + n][1:]) == 0.0) & (master.prev(breadth[i0:i0 + n][1:]) < 0.5); shock_d = master.shock_flags(spy, -0.07, 10, 20)
+    shock_full_d = np.zeros(len(dates), dtype=bool); shock_full_d[i0 + 1:i0 + n] = shock_d & ~np.concatenate([[False], shock_d[:-1]])
+    variants = [("monthly (reference)", dict(every=1)), ("daily re-rank", dict(daily=True)), ("quarterly", dict(every=3)), ("semi-annual, Mar/Sep", dict(every=6, anchor=2)), ("semi-annual, Jun/Dec", dict(every=6, anchor=5)),
+                ("annual, Jan", dict(every=12, anchor=0)), ("annual, Jul", dict(every=12, anchor=6)),
+                ("band: hold while in top 1.5N, monthly check", dict(every=10 ** 6, band=1.5)), ("band: hold while in top 2N", dict(every=10 ** 6, band=2.0)), ("band: hold while in top 3N", dict(every=10 ** 6, band=3.0)),
+                ("trend-break: drop below 10-month SMA, refill from top N", dict(every=10 ** 6, trend=True)), ("trend-break + band 2N", dict(every=10 ** 6, band=2.0, trend=True)),
+                ("monthly + re-rank on a market shock", dict(every=1, shock="S")), ("quarterly + re-rank on a market shock", dict(every=3, shock="S")), ("band 2N, checked daily", dict(every=10 ** 6, band=2.0, daily=True))]
+    for name, P, dd, start, r_dip_, r_mkt_, bear_, shock_, sfull, split, eras, top, mom_ref in (
+            ("CENTURY 49 industries, top 10 by 12-1", ind.names, fd, j0, r_dip, r_mkt, bear, shock, shock_full, "1975-01-01", ERAS, 10, None),
+            ("DECADE 11 sectors, top 3 by 12-1", sec.sectors, d, i0, r_dip_d, r_mkt_d, bear_d, shock_d, shock_full_d, "2022-01-01", None, 3, "SPMO")):
+        print(f"\n=== timing — {name}: sleeve alone vs market (IS / OOS), DD, Sharpe, worst year, eras / rolling-3y; turnover; then dip 40 / sleeve 60 book (ins x0.5, shock)")
+        print(f"{'variant':60} {'excess':>6} {'(IS/OOS)':>13} {'':>30} {'turnover':>9} | {'book':>6} {'(IS/OOS)':>13} {'DD':>7} {'Sharpe':>6}")
+        if mom_ref:
+            v = datasets.alpaca(mom_ref); SP = np.array([v.get(t, np.nan) for t in dd]); r_m = SP[1:] / SP[:-1] - 1
+            s = master.score(r_m, r_mkt_, dd, split, eras); b = master.score(master.book(0.4, r_dip_, r_m, r_mkt_, bear_, 0.5, shock_, None, False, None), r_mkt_, dd, split, eras)
+            print(f"{mom_ref + ' held (index rebalances semi-annually)':60} {s['excess']:+6.1%} ({s['is']:+5.1%}/{s['oos']:+5.1%}) DD {s['dd']:6.1%} Sh {s['sharpe']:4.2f} {'':>13} {'n/a':>9} | {b['excess']:+6.1%} ({b['is']:+5.1%}/{b['oos']:+5.1%}) {b['dd']:7.1%} {b['sharpe']:6.2f}")
+        for label, kw in variants:
+            kw = dict(kw)
+            if kw.get("shock") == "S":
+                kw["shock"] = sfull
+            rr, to = rotate2(P, ind.dates if name.startswith("CENTURY") else dates, 252, 21, top, start, **kw)
+            rr = rr[start:start + len(r_mkt_)]
+            s = master.score(rr, r_mkt_, dd, split, eras)
+            b = master.score(master.book(0.4, r_dip_, rr, r_mkt_, bear_, 0.5, shock_, None, False, None), r_mkt_, dd, split, eras)
+            tail = f"eras+ {sum(1 for x in s['eras'] if x > 0)}/4" if eras else f"roll3 {s['roll3_pos']:3.0%}"
+            print(f"{label:60} {s['excess']:+6.1%} ({s['is']:+5.1%}/{s['oos']:+5.1%}) DD {s['dd']:6.1%} Sh {s['sharpe']:4.2f} worst {s['worst_year']:+5.0%} {tail:>9} {to:8.0%}/yr | {b['excess']:+6.1%} ({b['is']:+5.1%}/{b['oos']:+5.1%}) {b['dd']:7.1%} {b['sharpe']:6.2f}")
+
+
+if __name__ == "__main__" and "--timing" in sys.argv:
+    timing()

@@ -149,6 +149,22 @@ In-sample, every scheme improves on the best single book and the improvement gro
 
 Reading: rotation by trailing return *is* momentum. Over a century, rotating into the top fifth of 49 industries is as good as the frictionless top decile and investable (Sharpe 0.95 inside the book, the best century number in this project). On the decade the same rule on 11 sector ETFs is ≈ 0 (a single concentrated cell positive), correlated 0.3 with the sector dip book because it trades the same eleven instruments, while SPMO — momentum across ~100 S&P 500 names, rebalanced by the index, no parameters to fit — made +5.2 in the same years at 0.06 correlation. **The recommended design already rotates the hedging bit by a rule: the SPMO sleeve is that rotation**, done inside the index rather than across sector ETFs. Multi-asset rotation and GTAA buy their smaller drawdowns with 5–10 pp/yr — the price of bonds and commodities in 2017–26 — and are not a hedge for this book. If SPMO were ever unavailable, an industry rotation (top fifth by 12-1, monthly) is the century-backed stand-in.
 
+**3. Rotation timing — how often, and whether a marker beats the calendar** (operator follow-up; `rotation.py --timing`). SPMO's schedule is the index's (semi-annual, March / September) and not a knob this book holds; for a rotation run in-house the frequency and the trigger were swept on the century industries (top 10 by 12-1) and the decade sectors (top 3), net of 0.05 % per side:
+
+| timing | century: sleeve excess (IS / OOS), DD, Sharpe, turnover; book Sharpe | decade sectors: sleeve excess; book excess (SPMO: +5.2; book +1.4, Sharpe 1.10) |
+|---|---|---|
+| daily re-rank | +4.1 (+5.1 / +3.1), −78 %, 0.78, 1,402 %/yr; 0.90 | −0.1; −1.4 |
+| **monthly** (reference) | **+5.2 (+6.2 / +4.1), −76 %, 0.85, 253 %/yr; 0.95** | +0.2; −1.2 |
+| quarterly | +4.4, −77 %, 0.81, 156 %/yr; 0.93 | −1.0; −1.9 |
+| semi-annual (Mar/Sep · Jun/Dec) | +4.4 · +3.9, 116 %/yr; 0.94 · 0.92 | +0.6 · +0.5; −0.7 · −0.8 |
+| annual (Jan · Jul) | +2.3 · +2.2, 89 %/yr, one era lost; 0.88 · 0.86 | −4.4 · −1.4; −4.1 · −2.0 |
+| **band: hold while still in the top 1.5 N, monthly check** | **+5.2 (+6.6 / +3.8), −75 %, 0.85, 146 %/yr; 0.95** | −2.0; −2.3 |
+| band 2 N · 3 N | +4.3 · +3.4, 114 · 77 %/yr | −2.0 · −1.9 |
+| trend-break: drop a holding below its 10-month SMA, refill from the top N | +3.6, **−65 %**, 0.94, 157 %/yr; book +2.5, **DD −46 %, Sharpe 0.97** | −6.4; −4.3 |
+| monthly + re-rank the day after a market shock (−7 % in 10 sessions) | +5.1 (unchanged), 259 %/yr | +0.2 (unchanged) |
+
+Readings. (a) Momentum in industries decays within months: monthly ≈ the rank tolerance band > quarterly ≈ semi-annual (−0.8) > annual (−3, and the January anchor loses a quarter-century); daily re-ranking only adds turnover (−1.1 after costs). (b) The one timing refinement that is free is the tolerance band: hold a name while it is still inside the top 15 of 49, refill from the top 10 — the same +5.2 at 42 % less trading. (c) A trend-break marker is the absolute-momentum filter again: −1.6 pp of return for 11 points of drawdown and the best century Sharpe in the project (0.97 in the book) — a drawdown instrument, not a return one. (d) Re-ranking after a shock changes nothing: the ranking barely moves in ten sessions. (e) On the decade the eleven sector ETFs are ≈ 0 at every frequency and worse with every marker (−2 to −6), while SPMO, rebalanced twice a year by the index across ~100 names, made +5.2 — the vehicle matters, the calendar does not. **Nothing changes**: SPMO's timing is not ours to set and the in-house alternative does not beat it on investable data; if an industry rotation were ever built, monthly with a 1.5 N band is the setting, and the trend-break marker the drawdown option.
+
 **Decision**: nothing changes. "Ten market types" is answered by the placebo: the in-sample gain is what any labelling buys, and out of sample it is gone. "Rotate the hedging bit" is answered by Decision 068's momentum sleeve. The one durable state fact from the cross product — momentum collapses in the rebound after a crash, the dip book carries it — is already why the design holds both.
 
 ## Decision 066: Universe research — momentum is the only survivor; nothing changes live; a momentum sleeve is the operator's call
