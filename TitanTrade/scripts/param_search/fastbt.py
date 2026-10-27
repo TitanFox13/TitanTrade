@@ -132,6 +132,8 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
     signal_ok = (dip_m >= p["dip_pct"]) & (above_m == True)  # noqa: E712
     if p.get("dip_max"):
         signal_ok &= dip_m <= p["dip_max"]
+    if p.get("eligible") is not None:
+        signal_ok &= np.asarray(p["eligible"], dtype=bool)
     for i in range(i0, i1 + 1):
         if i > i0:
             v_spy *= mkt.spy[i] / mkt.spy[i - 1]

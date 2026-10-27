@@ -49,6 +49,17 @@ The LLM pipeline could only be judged forward, one week at a time; after five mo
 ### Optimise Across Universes, Not Within Windows (Decision 062)
 On the hindsight-free sector universe, the point that won each training window lost to SPY in every test window; the point that merely agreed across universes and eras won most of them. Small edges are found by consensus and plateau width, not by the maximum of one backtest. Every future search: several universes (one chosen without hindsight), in-sample / out-of-sample halves, the median over neighbours as the score, and a walk-forward of the selection rule itself.
 
+### Momentum Is Harvested by Holding (Decision 066)
+The one name-selection rule with a century behind it, buying last year's
+winners, beat SPY by about 5 points a year since 1927 and by a noisy 2 to 8
+in the 2017–2026 point-in-time S&P 500. Put the live dip rule on top of
+those names and the result is −14 points a year: a momentum name's dip is
+the moment its momentum broke, and a +20% cap throws away the trend. The
+two ideas are not complementary; they are opposites. Also learned: a screen
+whose decade is made by its last year (2026) is a candidate, not a result,
+and a regime guard that halves a dip strategy's drawdown does nothing for
+momentum's, because momentum crashes are its own.
+
 ### The Universe Is a Parameter (Decision 065 Evidence, 2026-10-27)
 The same dip-in-uptrend rule made +4 pp/yr on the 15 curated names, +0.4 on
 the 11 sector ETFs, −0.04 over a century of 49 industries, and **−10 pp/yr on

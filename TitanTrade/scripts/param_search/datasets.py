@@ -63,6 +63,20 @@ def french_market():
     return out
 
 
+def french_levels(filename):
+    """Value-weighted daily total-return index per column of a French portfolio file (first VW section)."""
+    cols, rows = _french_section(f"{S}/french/{filename}", "Average Value Weighted Returns")
+    levels = {c: 100.0 for c in cols}; out = {c: {} for c in cols}
+    for d in sorted(rows):
+        for j, c in enumerate(cols):
+            r = rows[d][j]
+            if r is None:
+                continue
+            levels[c] *= 1 + r / 100
+            out[c][d] = levels[c]
+    return out
+
+
 def french_industries():
     """Value-weighted daily total-return index per industry; a missing return leaves that day out of the series."""
     cols, rows = _french_section(f"{S}/french/49_Industry_Portfolios_Daily.csv", "Average Value Weighted Returns")

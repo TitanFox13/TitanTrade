@@ -9,7 +9,8 @@ from `TitanTrade/`; `-I` because the data files are downloaded, untrusted input)
 - `yahoo/*.json` — Yahoo chart API `v8/finance/chart/<SYM>?period1=0&period2=<now>&interval=1d` (adjusted closes;
   SPY from 1993, sector ETFs from 1998, names from their listing dates). Yahoo rate-limits aggressively (429 for hours, per address); fetch one symbol every few seconds, one attempt, and back off 20 minutes on a 429.
 - `alpaca_hist/sp500_2016/*.json` — the S&P 500 as of 2016-01-04 (point-in-time list in `universes/`, from the public `fja05680/sp500` file), Alpaca SIP 2016 →, delisted names included.
-- `french/*.csv` — Kenneth French 49 industry portfolios (daily value-weighted returns 1926 →) and the daily factors file (market = Mkt-RF + RF).
+- `french/*.csv` — Kenneth French daily files: 49 industry portfolios, 10 prior-return (momentum 12-2, short-term 1-0, long-term 60-13) deciles, 25 size × momentum, the momentum factor and the daily factors file (market = Mkt-RF + RF), all 1926 →.
+- `alpaca_hist/sp500_2016/` also holds every member added 2016 → 2026 (742 names; `universes/sp500_union_2016_2026.json`), so screens can use each date's actual membership.
 
 | Script | What |
 |---|---|
@@ -21,5 +22,7 @@ from `TitanTrade/`; `-I` because the data files are downloaded, untrusted input)
 | `midpoint.py` | The chosen plateau midpoint vs the centres and the live defaults, with its neighbourhood |
 | `datasets.py` | One loader per universe (A / D Alpaca, B / C Yahoo, E S&P 500 2016, F French industries) → `fastbt.Market` |
 | `exits.py` | Decision 065 Evidence: exit-side variants (targets / clocks / trailing), `--universe` slot-count and ranking variants, `--band` crash filter |
+| `screens.py` | Decision 066: pre-registered universe screens on the point-in-time S&P 500 (`--grid` momentum robustness, `--overlay` dip rule on screened picks, `--profile` the operator's list, `--trades` entry-time features, `--refine` guards and blends, `--s6`) |
+| `century.py` | Decision 066: French momentum deciles 1927 → — the premium by era, the dip rule on deciles, `--regime` trend-guarded top decile |
 
 Read the results in `docs/decisions.md` Decision 062 before re-running; pick plateaus, hold out time, charge costs.
