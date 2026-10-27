@@ -49,5 +49,17 @@ The LLM pipeline could only be judged forward, one week at a time; after five mo
 ### Optimise Across Universes, Not Within Windows (Decision 062)
 On the hindsight-free sector universe, the point that won each training window lost to SPY in every test window; the point that merely agreed across universes and eras won most of them. Small edges are found by consensus and plateau width, not by the maximum of one backtest. Every future search: several universes (one chosen without hindsight), in-sample / out-of-sample halves, the median over neighbours as the score, and a walk-forward of the selection rule itself.
 
+### The Universe Is a Parameter (Decision 065 Evidence, 2026-10-27)
+The same dip-in-uptrend rule made +4 pp/yr on the 15 curated names, +0.4 on
+the 11 sector ETFs, −0.04 over a century of 49 industries, and **−10 pp/yr on
+the 502 members of the 2016 S&P 500**. Nothing in the rule changed; "deepest
+dip above its 150-day SMA, three slots" is a small edge on a short list of
+quality names and adverse selection on a long list of anything (the deepest
+dips in 500 names are blow-ups from parabolic runs; the median trade ended at
+the stop). Ten slots or a crash filter repair most of it on the broad
+universe. Lesson: a backtest result belongs to the universe it ran on as much
+as to the rule, and a watchlist change is a strategy change — test it like
+one.
+
 ### Delete What You Stopped Trusting (Decision 063)
 Keeping the retired pipeline importable "for A/B" meant six modules, 350 tests and three state-file schemas that nothing scheduled used, a thesis schema the mechanical plan had to impersonate, and docs that described two systems at once. Freezing it under `legacy/` with a git tag kept the option and removed the weight: the live tree is a third of the size and every file in it is exercised by the schedule.

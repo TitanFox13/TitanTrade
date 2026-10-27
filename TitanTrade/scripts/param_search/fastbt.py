@@ -16,7 +16,9 @@ DEFAULTS = dict(dip_pct=0.10, dip_lookback_days=60, trend_sma_days=200, slot_pct
                 max_slots=3, tp_pct=0.10, stop_pct=0.12, max_hold_days=40,
                 insurance_sma_days=200, insurance_breadth=0.5, insurance_scale=0.5,
                 cash_reserve_pct=0.05, cost_per_side=0.0005, core_band_pct=0.05,
-                trail_pct=None)   # optional trailing stop below the high-water mark, armed once above entry
+                trail_pct=None,   # optional trailing stop below the high-water mark, armed once above entry
+                rank="deepest",  # candidate order when slots are free: "deepest" dip first (live) or "shallowest"
+                dip_max=None)     # optional upper bound on the dip: skip names that fell more than this (crash filter)
 
 
 class Market:
@@ -118,6 +120,9 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
     hwm = np.full(N, np.nan)
     day_index = np.full(N, -1)
     trail = p.get("trail_pct")
+    # A name whose series ends (delisting / acquisition) is settled at its last price on the next day.
+    has = ~np.isnan(mkt.names)
+    last_valid = np.array([int(np.nonzero(has[:, j])[0].max()) if has[:, j].any() else -1 for j in range(N)])
     pending: list[int] = []
     curve = []
     trades = []
@@ -125,6 +130,8 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
     risk_off_days = 0
     scale = 1.0
     signal_ok = (dip_m >= p["dip_pct"]) & (above_m == True)  # noqa: E712
+    if p.get("dip_max"):
+        signal_ok &= dip_m <= p["dip_max"]
     for i in range(i0, i1 + 1):
         if i > i0:
             v_spy *= mkt.spy[i] / mkt.spy[i - 1]
@@ -148,11 +155,17 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
         for j in np.nonzero(v_name > 0)[0]:
             c = mkt.names[i, j]
             if np.isnan(c):
-                continue
+                if i <= last_valid[j]:
+                    continue                      # a gap in the series: hold on
+                c = mkt.names[last_valid[j], j]   # series ended: settle at the last price
+                kind = "delist"
+            else:
+                kind = None
             ret = c / entry[j] - 1
             held_days = len(curve) - day_index[j]
             hwm[j] = max(hwm[j], c)
-            kind = "tp" if ret >= p["tp_pct"] else "stop" if ret <= -p["stop_pct"] else "time" if held_days >= p["max_hold_days"] else None
+            if kind is None:
+                kind = "tp" if ret >= p["tp_pct"] else "stop" if ret <= -p["stop_pct"] else "time" if held_days >= p["max_hold_days"] else None
             if kind is None and trail and hwm[j] > entry[j] and c <= hwm[j] * (1 - trail):
                 kind = "trail"
             if kind:
@@ -182,7 +195,8 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
             if free > 0:
                 cand = np.nonzero(signal_ok[i] & (v_name <= 0))[0]
                 if len(cand):
-                    order = cand[np.argsort(-dip_m[i, cand], kind="stable")]
+                    key = dip_m[i, cand] if p.get("rank") == "shallowest" else -dip_m[i, cand]
+                    order = cand[np.argsort(key, kind="stable")]
                     pending = [int(j) for j in order[:free]]
     curve = np.array(curve)
     spy_curve = mkt.spy[i0:i1 + 1] / mkt.spy[i0]
@@ -212,7 +226,7 @@ def metrics(curve: np.ndarray, trades) -> dict:
             "trades": len(trades), "win_rate": (sum(1 for r in rets if r > 0) / len(rets)) if rets else None,
             "avg_trade": statistics.mean(rets) if rets else None,
             "calmar": (cagr / -mdd) if mdd < 0 else None,
-            "exits": {k: kinds.count(k) for k in ("tp", "stop", "time", "trail")}}
+            "exits": {k: kinds.count(k) for k in ("tp", "stop", "time", "trail", "delist")}}
 
 
 def yearly_excess(res: dict, dates: list[str]) -> dict[str, float]:
