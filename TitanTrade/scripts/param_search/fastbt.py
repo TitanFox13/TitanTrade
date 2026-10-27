@@ -18,7 +18,8 @@ DEFAULTS = dict(dip_pct=0.10, dip_lookback_days=60, trend_sma_days=200, slot_pct
                 cash_reserve_pct=0.05, cost_per_side=0.0005, core_band_pct=0.05,
                 trail_pct=None,   # optional trailing stop below the high-water mark, armed once above entry
                 rank="deepest",  # candidate order when slots are free: "deepest" dip first (live) or "shallowest"
-                dip_max=None)     # optional upper bound on the dip: skip names that fell more than this (crash filter)
+                dip_max=None,     # optional upper bound on the dip: skip names that fell more than this (crash filter)
+                stop_cooldown_days=0)  # after a stop exit the name is ineligible for this many sessions (0 = live 72 h ≈ 3)
 
 
 class Market:
@@ -118,6 +119,7 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
     v_name = np.zeros(N)
     entry = np.full(N, np.nan)
     hwm = np.full(N, np.nan)
+    cool_until = np.full(N, -1)
     day_index = np.full(N, -1)
     trail = p.get("trail_pct")
     # A name whose series ends (delisting / acquisition) is settled at its last price on the next day.
@@ -173,6 +175,8 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
             if kind:
                 v_spy += v_name[j] * (1 - p["cost_per_side"])
                 v_name[j] = 0.0
+                if kind == "stop" and p.get("stop_cooldown_days"):
+                    cool_until[j] = i + int(p["stop_cooldown_days"])
                 if want_trades:
                     trades.append({"ticker": mkt.name_list[j], "exit_date": dates[i], "return": round(float(ret), 4), "exit": kind, "days": int(held_days)})
                 else:
@@ -195,7 +199,7 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
         if i + 1 >= warm and not risk_off:
             free = p["max_slots"] - int((v_name > 0).sum())
             if free > 0:
-                cand = np.nonzero(signal_ok[i] & (v_name <= 0))[0]
+                cand = np.nonzero(signal_ok[i] & (v_name <= 0) & (cool_until < i))[0]
                 if len(cand):
                     key = dip_m[i, cand] if p.get("rank") == "shallowest" else -dip_m[i, cand]
                     order = cand[np.argsort(key, kind="stable")]
