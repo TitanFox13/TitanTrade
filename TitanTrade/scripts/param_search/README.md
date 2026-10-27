@@ -30,5 +30,7 @@ from `TitanTrade/`; `-I` because the data files are downloaded, untrusted input)
 | `crashes.py` | Decision 067: every recorded crash from the peak, four books, century and ETF era → `data/param_search/crashes.json` (the crash-scenarios page) |
 | `master.py` | Decision 067: the master grid — every discussed design on the decade (4,140 books) and the century (765); marginal effects, constrained leaderboards, walk-forward of the selection; `--finalists` for the consensus region with crash episodes |
 | `regimes.py` | Decision 067: regime rules on the 50/50 book (two-signal, three-state, own momentum, vol target, shock trigger); `--grid` = the shock trigger's 81-cell robustness grid |
-
+| `shorts.py` | Decision 067 addendum: shorts — the French WML factor as an overlay, the de-risked half short the market (−1× / SH) instead of cash, the anti-dip mirror on 1/P priced as real shorts |
+| `analogues.py` | Decision 067 addendum: today's coarse state (trend, 12-month return, 20-day vol, distance from the high, breadth, momentum leadership) → historical analogue days and episodes, forward 1 / 2-year market and design distributions, the state over the past 12 months |
+| `dynamic_universe.py` | Decision 067 addendum: multi-asset / industry ETF universes (3 and 5 slots), `stop_cooldown_days` 60–250, own-12-month eligibility inside the dip rule — each vs SPY and vs the equal-weight universe |
 Read the results in `docs/decisions.md` Decision 062 before re-running; pick plateaus, hold out time, charge costs.

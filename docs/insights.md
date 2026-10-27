@@ -58,6 +58,23 @@ better than the median of its family. What held across both eras was a
 useful output of a big search is the marginal-effects table, read before any
 leaderboard; the leaderboard is where overfitting lives.
 
+### Inverted Prices Are Not Shorts (Decision 067 addendum)
+Feeding 1/P to a long-only engine looks like a free short simulation and
+reads +4 %/yr on the S&P 500 for the anti-dip mirror; the same trades priced
+as real shorts on the real path lose 15. A long position in 1/P has bounded
+losses and unbounded gains; a short has the reverse, and the stopped trades
+are exactly where the two diverge. Whenever a transform makes a test cheap,
+price the result the way the broker would before reading it.
+
+### Analogues Describe the Weather, Not the Plan (Decision 067 addendum)
+Matching today's coarse state against a century finds the forward year is
+below average when breadth narrows at the highs, and finds nothing from low
+volatility, an uptrend or momentum leadership. That is useful to know and
+useless to act on: the designs' relative returns in those states are
+positive in one half of the century and negative in the other, and the
+decade holds three episodes. The state tells you which kind of year to brace
+for; the design already holds a sleeve for each kind.
+
 ### You Cannot Detect the Epoch, You Can Detect the Fall (Decision 067)
 Every slow "which regime are we in" rule we tried (trend, breadth, a three-state
 mix, the sleeve's own momentum) gave back return and cut no drawdown, over a

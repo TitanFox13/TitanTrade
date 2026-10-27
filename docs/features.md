@@ -100,7 +100,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 - `backtest-mech`: the same `signals.py` rules on daily closes, next-close fills, per-side costs, slot accounting out of SPY, cash reserve, the insurance switch, a walk-forward helper and a coarse built-in grid → `state/backtest_mechanical.json`
 - `download-history [dir] [--days N]`: SIP daily bars for the watchlist, SPY and the 11 sector ETFs
-- `scripts/param_search/`: the Decision 062 harness — a vectorised engine validated trade-for-trade against the backtester, a 6,000-point grid, insurance × sizing stage, walk-forward of the selection procedure, plateau scoring. Data (git-ignored) in `data/param_search/`
+- `scripts/param_search/`: the Decision 062 harness — a vectorised engine validated trade-for-trade against the backtester, a 6,000-point grid, insurance × sizing stage, walk-forward of the selection procedure, plateau scoring; the Decision 066 / 067 research scripts (screens, century, sleeves, master grid, regimes, crashes, shorts, analogues, dynamic universe) on the same engine. Data (git-ignored) in `data/param_search/`
 
 ## HTTP API
 
