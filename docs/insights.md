@@ -49,6 +49,15 @@ The LLM pipeline could only be judged forward, one week at a time; after five mo
 ### Optimise Across Universes, Not Within Windows (Decision 062)
 On the hindsight-free sector universe, the point that won each training window lost to SPY in every test window; the point that merely agreed across universes and eras won most of them. Small edges are found by consensus and plateau width, not by the maximum of one backtest. Every future search: several universes (one chosen without hindsight), in-sample / out-of-sample halves, the median over neighbours as the score, and a walk-forward of the selection rule itself.
 
+### A Grid Finds a Family, Never a Winner (Decision 067)
+Four thousand books on the decade and eight hundred on the century, scored
+one way, produced no cell worth naming. The best cell changed with every
+objective and every era, and the walk-forward showed the chosen cell doing no
+better than the median of its family. What held across both eras was a
+*region*: momentum-majority, the shock trigger on, no volatility target. The
+useful output of a big search is the marginal-effects table, read before any
+leaderboard; the leaderboard is where overfitting lives.
+
 ### You Cannot Detect the Epoch, You Can Detect the Fall (Decision 067)
 Every slow "which regime are we in" rule we tried (trend, breadth, a three-state
 mix, the sleeve's own momentum) gave back return and cut no drawdown, over a
