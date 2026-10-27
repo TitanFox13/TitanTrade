@@ -10,7 +10,7 @@ from `TitanTrade/`). Data lives in `data/param_search/` (git-ignored):
 
 | Script | What |
 |---|---|
-| `fastbt.py` | Vectorised engine with the same semantics as `titantrade.backtest.mechanical` (`validate.py` proves identical trades/equity) |
+| `fastbt.py` | Vectorised engine with the same semantics as `titantrade.backtest.mechanical` (`validate.py` proves identical trades/equity); optional `trail_pct` adds a trailing stop armed once above entry (off by default, 2026-10-27 outlier test) |
 | `search.py` | Stage 1: 6,000-point entry/exit grid, insurance off, four datasets (Alpaca names/sectors 2016 →, Yahoo names/sectors 1999 →) |
 | `analyze1.py` | Plateau scoring (median over one-step neighbours), marginal effects, cross-dataset ranks |
 | `stage2.py` | Insurance (SMA × breadth × scale) × sizing (slot × max slots) around the chosen centres |

@@ -15,7 +15,8 @@ import numpy as np
 DEFAULTS = dict(dip_pct=0.10, dip_lookback_days=60, trend_sma_days=200, slot_pct=0.20,
                 max_slots=3, tp_pct=0.10, stop_pct=0.12, max_hold_days=40,
                 insurance_sma_days=200, insurance_breadth=0.5, insurance_scale=0.5,
-                cash_reserve_pct=0.05, cost_per_side=0.0005, core_band_pct=0.05)
+                cash_reserve_pct=0.05, cost_per_side=0.0005, core_band_pct=0.05,
+                trail_pct=None)   # optional trailing stop below the high-water mark, armed once above entry
 
 
 class Market:
@@ -114,7 +115,9 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
     v_spy = initial_capital - cash
     v_name = np.zeros(N)
     entry = np.full(N, np.nan)
+    hwm = np.full(N, np.nan)
     day_index = np.full(N, -1)
+    trail = p.get("trail_pct")
     pending: list[int] = []
     curve = []
     trades = []
@@ -139,6 +142,7 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
             v_spy -= amt
             v_name[j] += amt * (1 - p["cost_per_side"])
             entry[j] = mkt.names[i, j]
+            hwm[j] = entry[j]
             day_index[j] = len(curve)
         pending = []
         for j in np.nonzero(v_name > 0)[0]:
@@ -147,7 +151,10 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
                 continue
             ret = c / entry[j] - 1
             held_days = len(curve) - day_index[j]
+            hwm[j] = max(hwm[j], c)
             kind = "tp" if ret >= p["tp_pct"] else "stop" if ret <= -p["stop_pct"] else "time" if held_days >= p["max_hold_days"] else None
+            if kind is None and trail and hwm[j] > entry[j] and c <= hwm[j] * (1 - trail):
+                kind = "trail"
             if kind:
                 v_spy += v_name[j] * (1 - p["cost_per_side"])
                 v_name[j] = 0.0
@@ -205,7 +212,7 @@ def metrics(curve: np.ndarray, trades) -> dict:
             "trades": len(trades), "win_rate": (sum(1 for r in rets if r > 0) / len(rets)) if rets else None,
             "avg_trade": statistics.mean(rets) if rets else None,
             "calmar": (cagr / -mdd) if mdd < 0 else None,
-            "exits": {k: kinds.count(k) for k in ("tp", "stop", "time")}}
+            "exits": {k: kinds.count(k) for k in ("tp", "stop", "time", "trail")}}
 
 
 def yearly_excess(res: dict, dates: list[str]) -> dict[str, float]:
