@@ -49,6 +49,16 @@ The LLM pipeline could only be judged forward, one week at a time; after five mo
 ### Optimise Across Universes, Not Within Windows (Decision 062)
 On the hindsight-free sector universe, the point that won each training window lost to SPY in every test window; the point that merely agreed across universes and eras won most of them. Small edges are found by consensus and plateau width, not by the maximum of one backtest. Every future search: several universes (one chosen without hindsight), in-sample / out-of-sample halves, the median over neighbours as the score, and a walk-forward of the selection rule itself.
 
+### You Cannot Detect the Epoch, You Can Detect the Fall (Decision 067)
+Every slow "which regime are we in" rule we tried (trend, breadth, a three-state
+mix, the sleeve's own momentum) gave back return and cut no drawdown, over a
+decade and over a century, because a regime is only knowable after the move
+that defines it. A fast rule that reacts to the fall itself, halve exposure
+for twenty sessions after a 7% drop in ten, cut the worst drawdown by a third
+at almost no cost, and 80 of 81 parameter cells agreed. The lesson is about
+what a signal can know: the market's state is a story told afterwards; a 7%
+drop is a fact on the day it happens.
+
 ### Point-in-Time Membership or Nothing (Decision 067)
 A dip rule on "the S&P 500" made +6.7 pp/yr on the union of everything that
 was ever in the index, +1.4 on the 2016 list, and −4.3 on the actual members
