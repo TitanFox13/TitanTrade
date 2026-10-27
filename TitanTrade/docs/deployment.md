@@ -36,6 +36,8 @@ docker compose build api titantrade   # BOTH images
 docker compose up -d api
 ```
 
+Each build leaves ~3 GB of build cache behind; finish a deploy with `docker builder prune -a -f` (safe — it never touches images or containers), or the disk climbs ~15 points a week of deploys.
+
 The `api` and `titantrade` images drift independently: `api` runs the server + scheduler, `titantrade` runs one-off CLI commands. Rebuilding only `api` leaves `docker compose run titantrade …` on stale code (this happened in production). Verify the CLI image through its entrypoint — a bare `/app/.venv/bin/python` inside it cannot import the package:
 
 ```bash
