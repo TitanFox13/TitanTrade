@@ -49,6 +49,22 @@ The LLM pipeline could only be judged forward, one week at a time; after five mo
 ### Optimise Across Universes, Not Within Windows (Decision 062)
 On the hindsight-free sector universe, the point that won each training window lost to SPY in every test window; the point that merely agreed across universes and eras won most of them. Small edges are found by consensus and plateau width, not by the maximum of one backtest. Every future search: several universes (one chosen without hindsight), in-sample / out-of-sample halves, the median over neighbours as the score, and a walk-forward of the selection rule itself.
 
+### Point-in-Time Membership or Nothing (Decision 067)
+A dip rule on "the S&P 500" made +6.7 pp/yr on the union of everything that
+was ever in the index, +1.4 on the 2016 list, and −4.3 on the actual members
+of each day. The first two let the rule buy names before the index did, and
+index inclusion is a record of past strength: look-ahead wearing a lab coat.
+Every universe test needs the membership mask, and a result that moves by
+ten points when the mask goes on was never a result.
+
+### Different Bets Add, Same Bets Pile Up (Decision 067)
+Two dip rules on two universes had excess-return correlation 0.4 and summed
+to nothing. A dip rule and a momentum ETF had correlation 0.05 and the sum
+beat SPY in both halves, in 23 of 27 rolling windows and in all four
+quarter-centuries. "Adding strategies" only hedges when the strategies bet
+on different things; a second copy of the same bet is leverage, not
+diversification.
+
 ### Momentum Is Harvested by Holding (Decision 066)
 The one name-selection rule with a century behind it, buying last year's
 winners, beat SPY by about 5 points a year since 1927 and by a noisy 2 to 8

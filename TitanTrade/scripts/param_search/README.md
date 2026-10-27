@@ -10,6 +10,7 @@ from `TitanTrade/`; `-I` because the data files are downloaded, untrusted input)
   SPY from 1993, sector ETFs from 1998, names from their listing dates). Yahoo rate-limits aggressively (429 for hours, per address); fetch one symbol every few seconds, one attempt, and back off 20 minutes on a 429.
 - `alpaca_hist/sp500_2016/*.json` — the S&P 500 as of 2016-01-04 (point-in-time list in `universes/`, from the public `fja05680/sp500` file), Alpaca SIP 2016 →, delisted names included.
 - `french/*.csv` — Kenneth French daily files: 49 industry portfolios, 10 prior-return (momentum 12-2, short-term 1-0, long-term 60-13) deciles, 25 size × momentum, the momentum factor and the daily factors file (market = Mkt-RF + RF), all 1926 →.
+- `alpaca_hist/historical_long/` also holds MTUM, SPMO, USMV, QUAL, RSP (factor ETFs, 2016 →).
 - `alpaca_hist/sp500_2016/` also holds every member added 2016 → 2026 (742 names; `universes/sp500_union_2016_2026.json`), so screens can use each date's actual membership.
 
 | Script | What |
@@ -24,5 +25,7 @@ from `TitanTrade/`; `-I` because the data files are downloaded, untrusted input)
 | `exits.py` | Decision 065 Evidence: exit-side variants (targets / clocks / trailing), `--universe` slot-count and ranking variants, `--band` crash filter |
 | `screens.py` | Decision 066: pre-registered universe screens on the point-in-time S&P 500 (`--grid` momentum robustness, `--overlay` dip rule on screened picks, `--profile` the operator's list, `--trades` entry-time features, `--refine` guards and blends, `--s6`) |
 | `century.py` | Decision 066: French momentum deciles 1927 → — the premium by era, the dip rule on deciles, `--regime` trend-guarded top decile |
+| `combo.py` | Decision 067: portfolio of sleeves — walk-forward of the momentum and broad-dip rules, sleeve correlations, blends (curated vs sector floor), the century blend |
+| `etf_sleeve.py` | Decision 067: momentum ETFs (MTUM / SPMO) as the second sleeve — year by year, weight sweep, rolling 3-year windows |
 
 Read the results in `docs/decisions.md` Decision 062 before re-running; pick plateaus, hold out time, charge costs.
