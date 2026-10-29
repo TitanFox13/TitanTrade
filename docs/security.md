@@ -3,7 +3,7 @@
 ## API Key Management
 
 1. **Never commit API keys.** All keys come from the environment (`.env`, git-ignored, loaded by `python-dotenv`; Docker reads the same file).
-2. Required: `ALPACA_PAPER_KEY` / `ALPACA_PAPER_SECRET`, `CLAUDE_KEY`. Optional: `ALPACA_LIVE_KEY` / `ALPACA_LIVE_SECRET`, `FRED_KEY`, `FINNHUB_KEY`, `DISCORD_WEBHOOK_URL`, `CLOUDFLARE_TUNNEL_TOKEN`.
+2. Required: `ALPACA_PAPER_KEY` / `ALPACA_PAPER_SECRET`, `CLAUDE_KEY`. Optional: `ALPACA_LIVE_KEY` / `ALPACA_LIVE_SECRET`, `FRED_KEY`, `FINNHUB_KEY`, `DISCORD_WEBHOOK_URL`, `HEALTHCHECK_PING_URL`, `CLOUDFLARE_TUNNEL_TOKEN`.
 3. No key is ever logged or sent to the LLM; the curator prompt carries price and trade data only.
 4. Rotate keys quarterly (Alpaca dashboard, Anthropic console, FRED / Finnhub account pages).
 

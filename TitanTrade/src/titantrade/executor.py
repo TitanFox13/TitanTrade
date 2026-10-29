@@ -36,7 +36,7 @@ from titantrade.market_context import load_stock_sectors
 from titantrade.protection import check_gap_down_protection, close_orphaned_positions, close_position_settled
 from titantrade.entries import handle_entry, record_stop_out_cooldowns
 from titantrade.core_allocation import _is_core_ticker, manage_core_position
-from titantrade.mechanical import core_target_pct, momentum_target_pct
+from titantrade.mechanical import cash_target_pct, core_target_pct, momentum_target_pct
 from titantrade.signals import trading_days_between
 from titantrade.trade_state import _load, _save, position_opened_at
 from titantrade.alerts import _maybe_alert_stuck_in_cash, _maybe_alert_ticker_churn
@@ -291,6 +291,14 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
         legs = [(cfg.trading.core_ticker, core_target)]
         if sleeve_target is not None:
             legs.append((sleeve, sleeve_target))   # SPY first: its sale funds the sleeve and the entries
+        cash_leg = cfg.trading.cash_ticker
+        if cash_leg and (scale < 1 or cash_leg in held_now):
+            # The T-bill leg (071): sells first when the idle share shrinks (its cash funds the
+            # re-risking buys), buys last when it grows (with what the other legs' sales freed).
+            cash_target = cash_target_pct(cfg, scale)
+            cash_now = sum(float(p.get("market_value") or 0) for p in positions if p.get("symbol") == cash_leg) / portfolio_value if portfolio_value else 0.0
+            legs.insert(0, (cash_leg, cash_target)) if cash_now > cash_target else legs.append((cash_leg, cash_target))
+            log.info(f"{cash_leg} target {cash_target:.0%} of equity (idle capital), now {cash_now:.0%}")
         for leg, target in legs:
             try:
                 core_trade = manage_core_position(cfg, target_pct=target, ticker=leg)

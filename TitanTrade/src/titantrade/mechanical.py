@@ -271,6 +271,7 @@ def build_plan(
             "weight": cfg.trading.momentum_weight,
             "target_pct": momentum_target_pct(cfg, exposure_scale),
         },
+        "cash_leg": {"ticker": cfg.trading.cash_ticker, "target_pct": cash_target_pct(cfg, exposure_scale)} if cfg.trading.cash_ticker else None,
         "breadth": {k: v for k, v in breadth_ctx.items() if k != "flags"},
         "items": items,
         "watch": watch,
@@ -312,6 +313,13 @@ def core_target_pct(
     investable = exposure_scale * (1 - MIN_CASH_RESERVE_PCT / 100) * (1 - cfg.trading.momentum_weight)
     target = investable - (overlay + planned) / portfolio_value
     return max(0.0, min(1.0, round(target, 4)))
+
+
+def cash_target_pct(cfg: Config, exposure_scale: float) -> float:
+    """The T-bill leg's share of equity: what the exposure rules idle (Decision 071); 0 when no leg is configured."""
+    if not cfg.trading.cash_ticker:
+        return 0.0
+    return round(max(0.0, 1 - exposure_scale) * (1 - MIN_CASH_RESERVE_PCT / 100), 4)
 
 
 def momentum_target_pct(cfg: Config, exposure_scale: float) -> float:

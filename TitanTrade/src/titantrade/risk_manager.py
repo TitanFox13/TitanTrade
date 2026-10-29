@@ -357,6 +357,14 @@ def check_correlation_limit(
 # Master pre-trade check: runs ALL gates
 # ---------------------------------------------------------------------------
 
+def _core_legs(cfg: Any) -> tuple[str, ...]:
+    """SPY, the momentum ETF and, when configured, the T-bill ETF (071) — outside the overlay cap and the sector gate."""
+    legs = [cfg.trading.core_ticker, cfg.trading.momentum_ticker]
+    if getattr(cfg.trading, "cash_ticker", ""):
+        legs.append(cfg.trading.cash_ticker)
+    return tuple(legs)
+
+
 def pre_trade_check(
     ticker: str,
     item: dict[str, Any],
@@ -418,7 +426,7 @@ def pre_trade_check(
 
     # Gate 4: Overlay cap (core excluded)
     overlay_headroom = compute_overlay_headroom(
-        positions, portfolio_value, core_tickers=(cfg.trading.core_ticker, cfg.trading.momentum_ticker),
+        positions, portfolio_value, core_tickers=_core_legs(cfg),
     )
 
     # Gate 5: Position size — a flat slot, reduced by cash and overlay headroom
@@ -458,7 +466,7 @@ def pre_trade_check(
 
     # Gate 6: Sector exposure
     if shares > 0:
-        sector_allowed, sector_pct = check_sector_limit(ticker, shares * entry_price, [p for p in positions if p.get('symbol') not in (cfg.trading.core_ticker, cfg.trading.momentum_ticker)], portfolio_value)   # core legs are not sector exposure
+        sector_allowed, sector_pct = check_sector_limit(ticker, shares * entry_price, [p for p in positions if p.get('symbol') not in _core_legs(cfg)], portfolio_value)   # core legs are not sector exposure
         if not sector_allowed:
             _fail("sector_exposure", f"Sector exposure would exceed {MAX_SECTOR_EXPOSURE_PCT}%")
         else:

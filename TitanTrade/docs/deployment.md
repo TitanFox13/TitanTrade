@@ -104,11 +104,30 @@ Volumes: `./state` and `./logs` on both; `./data` on `api` (watchlist edits thro
 | `FRED_KEY` | Recommended | Macro calendar; the macro gate fails open without it |
 | `FINNHUB_KEY` | Recommended | Earnings + sectors; the earnings gate fails open without it |
 | `DISCORD_WEBHOOK_URL` | No | Job alerts + daily summary; no-op if unset |
+| `HEALTHCHECK_PING_URL` | No | Dead-man's switch: GET after each successful daily summary (Decision 071); no-op if unset |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Docker | Tunnel for trade.praguefun.cz |
 | `TRADING_MODE` | No | Overrides `settings.trading_mode` (paper / live) |
 | `LOG_LEVEL` | No | Default INFO |
 
 ---
+
+## Backups
+
+`scripts/backup_state.sh` snapshots `state/` (trade log, plan, strategy, fill ledger, cooldowns, peak, archive) and `data/watchlist.json` into `/home/TitanTrade/backups/titantrade-state-<UTC stamp>.tar.gz`, keeping the last 30. Host cron on titanserver (Decision 071): `30 21 * * * /home/TitanTrade/TitanTrade/TitanTrade/scripts/backup_state.sh >> /home/TitanTrade/backups/backup.log 2>&1` — after the 20:30 UTC daily summary. Restore on a host with the checkout: `tar xzf /home/TitanTrade/backups/<archive> -C /home/TitanTrade/TitanTrade/TitanTrade` (then `docker compose up -d api`). Off-server copies are a manual pull: `ssh titanserver 'base64 -w0 /home/TitanTrade/backups/<archive>' | base64 -d > <archive>` (`scp` fails there).
+
+## The server-down runbook (Decision 071)
+
+**What keeps working with the server down**: the GTC stop-limits on the dip positions — until their expiry, which Alpaca sets at **90 days after placement** (`expires_at` on every GTC order). The core legs (SPY, SPMO, SGOV) carry no stop by design.
+
+**What stops**: new entries, the +20 % target and the 60-trading-day holding-limit exits (they are evaluated by the executor, not the broker), core rebalances, the insurance and shock de-risking, the 09:35 ET re-placement of an expired or missing stop, the daily summary — and therefore the heartbeat ping.
+
+**The alarm**: the dead-man's switch. The API GETs `HEALTHCHECK_PING_URL` after every successful daily summary; a monitor expecting it every weekday at 16:35 ET (grace 2 h) raises the alarm when the server, the scheduler or the summary is dead. The process cannot report its own death; this is the only signal that does.
+
+**Steps**:
+1. `ssh titanserver`, `docker ps`, `docker logs titantrade-api-1 --since 24h`, `df -h /`. Restart: `docker compose up -d api`; health: `/api/health`.
+2. Catch up by hand, in this order: `docker compose run --rm titantrade gapcheck` (re-places any missing or expired stop), then `fetch`, then `execute` (= signals + execute: holding-limit and target exits fire, the core legs rebalance, the exposure rules apply).
+3. Host lost: restore `state/` from the latest archive on a new host, deploy per this guide, then step 2. While nothing runs, the Alpaca dashboard is the manual exit — every dip position's stop is visible there with its expiry date.
+4. After the outage: check the trade log and the fill ledger for the catch-up run, and that no position older than 90 days sat without a stop.
 
 ## Monitoring
 

@@ -21,7 +21,7 @@
 }
 ```
 
-`shadow_watchlist` (Decision 070) is fetched into the bundle, curated by the monthly job and run by `backtest-mech --shadow`, never traded; `design` re-stamps the benchmark window when it changes (070 since 2026-10-29: the 11 sector ETFs as `watchlist`, the 15 names as the shadow list). `settings.mechanical` may carry any of `config.MECHANICAL_FIELDS` (the keys above plus `sector_etfs`, `core_ticker`, `core_rebalance_band_pct`); missing keys use the `TradingSettings` defaults. `momentum_weight` sizes the SPMO sleeve and, through `TradingSettings.overlay_slot_pct` = `slot_pct × (1 − momentum_weight)`, the dip slots; `0` is the dip-only book. `TRADING_MODE` in the environment overrides `trading_mode`. `PUT /api/watchlist` rewrites `watchlist` and keeps `settings`.
+`shadow_watchlist` (Decision 070) is fetched into the bundle, curated by the monthly job and run by `backtest-mech --shadow`, never traded; `design` re-stamps the benchmark window when it changes (070 since 2026-10-29: the 11 sector ETFs as `watchlist`, the 15 names as the shadow list). `settings.mechanical` may carry any of `config.MECHANICAL_FIELDS` (the keys above plus `sector_etfs`, `core_ticker`, `core_rebalance_band_pct`, `cash_ticker` — the T-bill leg, Decision 071, `""` = off); missing keys use the `TradingSettings` defaults. `momentum_weight` sizes the SPMO sleeve and, through `TradingSettings.overlay_slot_pct` = `slot_pct × (1 − momentum_weight)`, the dip slots; `0` is the dip-only book. `TRADING_MODE` in the environment overrides `trading_mode`. `PUT /api/watchlist` rewrites `watchlist` and keeps `settings`.
 
 ## 2. Schedule (`data/schedule.json`)
 
@@ -104,6 +104,7 @@ A stock that failed to fetch carries `"error"` and empty inputs; the plan treats
 | `shock` | `signals.shock_state` over `market_context.spy.closes`: `active` while a −`drop_pct` move over `lookback_days` sessions happened within the last `hold_days`; `sessions_left` until it expires; `worst_drop` the worst such return in the window |
 | `exposure_scale` | `min(insurance.exposure_scale, shock.exposure_scale)` — what both core legs scale by |
 | `sleeve.target_pct` | `exposure_scale × 0.95 × momentum_weight` — the momentum ETF's share of equity this run |
+| `cash_leg` | `{ticker, target_pct}` with `target_pct = (1 − exposure_scale) × 0.95` when `cash_ticker` is set (071), else `null` |
 | `free_slots` | `max_slots − held − pending_buys` |
 
 ## 6. Trade Log (`state/trade_log.json`)

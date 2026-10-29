@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -119,7 +120,25 @@ def _run_daily_summary() -> str:
         log.exception("Fill ledger update failed — daily summary continues")
 
     from .notifier import send_daily_summary
-    return send_daily_summary()
+    result = send_daily_summary()
+    _ping_heartbeat()
+    return result
+
+
+def _ping_heartbeat() -> None:
+    """Dead-man's switch (Decision 071): GET ``HEALTHCHECK_PING_URL`` after a
+    successful daily summary. A monitor that expects the ping every weekday
+    raises the alarm when the server, the scheduler or the summary is dead —
+    the one failure this process cannot report itself. Unset → no-op."""
+    url = os.environ.get("HEALTHCHECK_PING_URL", "").strip()
+    if not url:
+        return
+    try:
+        import httpx
+
+        httpx.get(url, timeout=10.0)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"Heartbeat ping failed: {exc}")
 
 
 COMMANDS: dict[str, callable] = {

@@ -24,9 +24,16 @@ log = get_logger("core_allocation")
 
 
 def _is_core_ticker(ticker: str, cfg: Config) -> bool:
-    """True for the core legs (SPY, the momentum ETF), which the plan and the
-    gates never touch."""
-    return ticker in (cfg.trading.core_ticker, cfg.trading.momentum_ticker)
+    """True for the core legs (SPY, the momentum ETF, the T-bill ETF when
+    configured), which the plan and the gates never touch."""
+    return ticker in core_tickers(cfg)
+
+
+def core_tickers(cfg: Config) -> tuple[str, ...]:
+    legs = [cfg.trading.core_ticker, cfg.trading.momentum_ticker]
+    if cfg.trading.cash_ticker:
+        legs.append(cfg.trading.cash_ticker)
+    return tuple(legs)
 
 
 def manage_core_position(

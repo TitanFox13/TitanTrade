@@ -44,6 +44,7 @@ Evaluated in order for every NEW item (an entry that expired unfilled is simply 
 | `dip_pct` / `dip_lookback_days` / `trend_sma_days` | 0.08 / 90 / 150 | `data/watchlist.json` → `TradingSettings` (Decision 062) |
 | `slot_pct` / `max_slots` | 0.25 (of the dip sleeve) / 3 | same |
 | `momentum_ticker` / `momentum_weight` | SPMO / 0.6 | same |
+| `cash_ticker` | "" (off); SGOV at go-live if cash earns nothing (071) | same |
 | `shock_drop_pct` / `shock_lookback_days` / `shock_hold_days` / `shock_scale` | 0.07 / 10 / 20 / 0.5 | same |
 | `tp_pct` / `stop_pct` / `max_hold_days` | 0.20 / 0.12 / 60 | same |
 | `insurance_sma_days` / `insurance_breadth` / `insurance_scale` | 200 / 0.5 / 0.5 | same |

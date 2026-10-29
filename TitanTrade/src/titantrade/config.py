@@ -114,6 +114,11 @@ class TradingSettings:
     shock_lookback_days: int = 10
     shock_hold_days: int = 20
     shock_scale: float = 0.5
+    # T-bill leg (Decision 071): the capital the insurance or the shock trigger
+    # idles is held in this ETF (SGOV) instead of cash — a third core leg sized
+    # (1 − exposure) × 95 %. "" = off; invisible on paper (no distributions),
+    # +0.17 pp/yr decade-like, +0.5 on the century (Decision 068 addendum).
+    cash_ticker: str = ""
 
     @property
     def overlay_slot_pct(self) -> float:
@@ -137,7 +142,7 @@ MECHANICAL_FIELDS = {
     "core_ticker", "core_rebalance_band_pct",
     "momentum_ticker", "momentum_weight",
     "shock_drop_pct", "shock_lookback_days", "shock_hold_days", "shock_scale",
-    "design",
+    "design", "cash_ticker",
 }
 
 

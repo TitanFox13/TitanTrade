@@ -8,6 +8,7 @@ Every trading decision is a rule on prices; parameters are the Decision 062 plat
 - **Exits**: the GTC stop-limit (−12%), the +20% target and the 60-trading-day holding limit; the latter two are evaluated against the broker position at every executor run. Nothing else sells a position.
 - **Core**: SPY is the dip sleeve's residual — exposure scale × 95% × (1 − momentum weight) − overlay − this run's planned slots — rebalanced within a 5% band. The core sells before entries need the cash and buys back after exits.
 - **Momentum sleeve** (068): SPMO held at 60% of the investable book (exposure scale × 95% × 60%), a second core leg rebalanced inside the same band after SPY; never an orphan, no stop, outside the overlay cap and the sector gate. The index does the rotating (semi-annual).
+- **T-bill leg** (071, off by default): with `cash_ticker` set (SGOV), the capital the exposure rules idle — `(1 − exposure_scale) × 95%` — is held in the T-bill ETF as a third core leg, sold first when exposure returns and bought last when it drops; no stop, never an orphan, outside the overlay cap and the sector gate. For a live account that earns nothing on cash.
 - **Shock trigger** (068): SPY's 10-session return ≤ −7% on any of the last 20 sessions → exposure × 0.5, re-armed by each such session; stateless from the bundle's last 31 SPY closes. Exposure = min(insurance, shock); both core legs scale, new entries pause while either is on.
 - **Insurance**: two-signal confirmation; exposure halves only while SPY is below its 200-day SMA *and* fewer than half of the 11 sector ETFs are above theirs. New entries pause while risk-off; held positions keep their exits. Unknown inputs fail open.
 - **The plan** (`state/plan.json`, `GET /api/plan`): NEW / HOLD items with entry, stop and target, the watch list with the reason each signal was not taken, ranked candidates, insurance and breadth, the shock state, the combined exposure scale, the sleeve target, free slots, pending buys, legacy positions queued for the orphan close.
@@ -84,6 +85,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 ## Discord Notifications
 
 - Per-job completion / failure embeds (duration, result summary, error text); transient webhook failures retried twice (058)
+- Heartbeat: after a successful daily summary the API GETs `HEALTHCHECK_PING_URL` (071) — a dead-man's-switch monitor alarms when the server is silent
 - Daily summary at 16:30 ET: equity, cash, positions with P&L, the plan (risk-off yes/no with the SPY-SMA and breadth inputs, shock on/off, the sleeve target, held names, free slots, today's signals), trading mode, benchmark line
 - Observability alerts: stuck in cash (≥ 70% for 3+ days), ticker churn (2+ round-trips in 7 days), split-suspected gap, suspect broker data, cooldown override, core rebalance
 - One optional env var, `DISCORD_WEBHOOK_URL`; unset → silently skipped
@@ -116,7 +118,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 ## Test Suite (zero token spend)
 
-266 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
+272 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
 
 | File | Covers |
 |------|--------|
@@ -130,6 +132,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 | `test_scheduler.py`, `test_api_settings.py`, `test_trading_mode.py`, `test_notifier.py` | scheduler wiring and API, settings endpoints, credential selection, Discord embeds + daily summary |
 | `test_market_data.py`, `test_benchmark.py`, `test_indicators.py`, `test_retry.py`, `test_logger.py` | data facade, benchmark maths incl. the 3-year return guard, ATR, retry policy, logging |
 | `test_universe_switch.py` | shadow list and design in config, the staged Decision 070 file, HOLD survival of a removed name, the window re-stamp, ETF sectors, the correlation gate on ETFs, the curator on the shadow list, `--shadow` |
+| `test_readiness.py` | the T-bill leg (target, core membership, plan field, executor order both ways, off by default) and the heartbeat ping |
 | `test_fill_ledger.py` | gap maths, Eastern session date, idempotent update with missing bars, the API endpoint and the summary field |
 
 ```bash

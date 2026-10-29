@@ -283,6 +283,7 @@ def send_daily_summary() -> str:
                 f"(SPY above SMA: {ins.get('spy_above_sma')}, breadth {ins.get('sector_breadth')}) | "
                 + (f"shock {'ON (' + str(shock.get('sessions_left')) + ' left)' if shock.get('active') else 'off'} | " if shock else "")
                 + (f"{sleeve.get('ticker')} target {sleeve.get('target_pct', 0):.0%} | " if sleeve else "")
+                + (f"{plan['cash_leg']['ticker']} (idle) target {plan['cash_leg']['target_pct']:.0%} | " if plan.get("cash_leg") else "")
                 + f"held {', '.join(held) or 'none'} | free slots {plan.get('free_slots', '?')} | "
                 f"signals {', '.join(chosen) or 'none'}"
             ),
