@@ -37,8 +37,8 @@ Operator's call after the component audit: "fully convert with all the points ma
 Operator: "you can now do 2" (the readiness track). Findings and builds in Decision 071; nothing live changed, code not deployed.
 - [x] Found: Alpaca GTC stops expire after 90 days (`expires_at` on the book: Jan 11 / Jan 22); no backup of `state/` existed; $25k sizes every ETF slot at ≥ 13 shares, $10k is the floor; paper credits no dividends and live cash interest is unverified; taxes are in no number.
 - [x] Built: `scripts/backup_state.sh` + host cron 21:30 UTC on titanserver (30 archives kept; installed 13:18 UTC, first archive restore-checked byte-identical); `HEALTHCHECK_PING_URL` heartbeat after the daily summary; the T-bill leg `cash_ticker` (off) as a third core leg with sell-first / buy-last ordering; the server-down runbook in deployment.md. 272 tests, ruff clean.
-- [ ] **Deploy the code on the operator's go** (both images; no config change) — until then the heartbeat and the leg are in the repo only. The backup cron is live on the host already.
-- [ ] Go-live checklist items (a)–(g) in Phase 2.0 need the operator (live account, sign-ups, funding, advisor).
+- [x] **Deployed 2026-10-29 13:40 UTC** (both images, no config change; the heartbeat is a no-op until `HEALTHCHECK_PING_URL` is set, the T-bill leg off until `cash_ticker` is set). The backup cron was live on the host since 13:18 UTC.
+- [ ] Go-live checklist items (a)–(e) in Phase 2.0 need the operator (live account and funding, the cash-sweep enrolment, the healthchecks.io URL in `.env` + API restart, the advisor line).
 
 ## Phase 2.9: The dip sleeve on the sector ETFs, the hand-picked list as a shadow list — prepared, NOT deployed (2026-10-29) — Decision 070
 Operator: a hand-picked, static list "seems temporary"; the day's tests showed any single-name list loses with the dip rule and the curated list's edge is 2022 → only. Built on the operator's go, deploy pending the operator's explicit go.
