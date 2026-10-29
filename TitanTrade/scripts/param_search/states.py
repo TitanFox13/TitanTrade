@@ -216,7 +216,7 @@ def main():
     run_universe("century", fd, rc, Fc, "1975-01-01", booksc)
 
 
-if __name__ == "__main__" and "--momcrash" not in sys.argv:
+if __name__ == "__main__" and "--momcrash" not in sys.argv and "--tilt" not in sys.argv:
     main()
 
 
@@ -276,3 +276,81 @@ def momcrash():
 
 if __name__ == "__main__" and "--momcrash" in sys.argv:
     momcrash()
+
+
+def tilt():
+    """Post-crash tilt (operator, 2026-10-29): "we know the book lags the year after a crash — why not change what we do?"
+    The five guards in `momcrash()` moved the momentum sleeve into the index; this moves it into the DIP sleeve, the part of
+    the book that wins in rebounds. Pre-registered hypotheses, written before any result:
+      T1  a tilt to dip 100 % for 6–12 months after a crash gains in the grinding rebounds (1932–33, 2009) and loses in the
+          V-shaped ones (2020, 2025), netting ≈ 0 ± 0.5 pp/yr on the century and negative on the decade;
+      T2  no trigger (the shock trigger expiring, the market 20 % off its low while 10 % below its high, the market
+          re-crossing its 200-day SMA after a long spell below) separates the two kinds of rebound;
+      T3  a placebo (the same number and length of tilt windows at random dates) spans the same gains.
+    Mechanics: exposure rules unchanged (insurance ×0.5, shock, min); on tilt days the core is w_tilt × dip + (1 − w_tilt) × mom
+    instead of 40 / 60. Decade (sector dip + SPMO, 2017 →, split 2022) and century (industries + top decile, split 1975)."""
+    import shorts
+    sets = []
+    cur = datasets.load("A_alpaca_names_2016"); sec = datasets.load("D_alpaca_sectors_2016"); dates = cur.dates; i0 = dates.index("2017-01-03")
+    _, _, spy_above, breadth = cur.pre(90, 150, 200)
+    SEC = fastbt.run(sec, LIVE, "2017-01-03", None)["_curve"]; d = dates[i0:]
+    v = datasets.alpaca("SPMO"); SP = np.array([v.get(t, np.nan) for t in d]); n = min(len(SEC), len(SP)); d = d[:n]; spy = cur.spy[i0:i0 + n]
+    bear = (master.prev(spy_above[i0:i0 + n][1:]) == 0.0) & (master.prev(breadth[i0:i0 + n][1:]) < 0.5)
+    sets.append(("decade", d, spy, {"dip": SEC[1:n] / SEC[:n - 1] - 1, "mom": SP[1:n] / SP[:n - 1] - 1, "mkt": spy[1:] / spy[:-1] - 1}, bear, "2022-01-01", None,
+                 [("2020reb", "2020-03-23", "2021-03-23"), ("2022reb", "2022-10-12", "2023-10-12"), ("2025reb", "2025-04-08", "2026-04-08")]))
+    ind = datasets.load("F_french_49ind_1926"); mom = datasets.french_levels("10_Portfolios_Prior_12_2_Daily.csv")
+    r0 = fastbt.run(ind, LIVE, "1927-07-01", None); fd = ind.dates[ind.dates.index(r0["start"]):]
+    dip = r0["_curve"]; mk = r0["_spy_curve"]; hi = np.array([mom["Hi PRIOR"].get(x, np.nan) for x in fd])
+    sets.append(("century", fd, mk, {"dip": dip[1:] / dip[:-1] - 1, "mom": np.nan_to_num(hi[1:] / hi[:-1] - 1), "mkt": mk[1:] / mk[:-1] - 1}, master.prev(master.sma_above(mk)[1:]) == 0.0, "1975-01-01",
+                 [("1927-07-01", "1950-01-01"), ("1950-01-01", "1975-01-01"), ("1975-01-01", "2000-01-01"), ("2000-01-01", "2026-09-01")],
+                 [("1932reb", "1932-06-01", "1933-06-01"), ("1938reb", "1938-03-31", "1939-03-31"), ("1975reb", "1974-10-03", "1975-10-03"), ("2009reb", "2009-03-09", "2010-03-09"), ("2020reb", "2020-03-23", "2021-03-23")]))
+    rng = np.random.default_rng(7)
+    for name, dd, lvl, r, bear, split, eras, eps in sets:
+        n = len(r["mkt"]); T = n + 1
+        shock = master.shock_flags(lvl, -0.07, 10, 20); e = shorts.exposure(bear, shock)
+        lo = np.full(T, np.nan); hi_ = np.full(T, np.nan)
+        for i in range(252, T):
+            lo[i] = lvl[i] / lvl[i - 251:i + 1].min() - 1; hi_[i] = lvl[i] / lvl[i - 251:i + 1].max() - 1
+        lo, hi_ = master.prev(lo[1:]), master.prev(hi_[1:])
+        above = master.prev(master.sma_above(lvl)[1:])
+        def arm(flag, hold):
+            out = np.zeros(n, dtype=bool); k = 0
+            for i in range(n):
+                if flag[i]: k = hold
+                out[i] = k > 0; k = max(0, k - 1)
+            return out
+        shock_end = np.concatenate([[False], shock[:-1] & ~shock[1:]])                       # the day the shock hold expires
+        rebound = np.nan_to_num((lo > 0.20) & (hi_ < -0.10))
+        below_run = np.zeros(n, dtype=int)
+        for i in range(1, n):
+            below_run[i] = below_run[i - 1] + 1 if above[i] == 0.0 else 0
+        cross = np.concatenate([[False], (above[1:] == 1.0) & (below_run[:-1] >= 60)])          # back above the SMA after ≥ 60 sessions below
+        triggers = {"shock expired": shock_end, "rebound state (20% off low, 10% below high)": rebound, "re-cross SMA200 after 60+ sessions below": cross}
+        base = e * (0.4 * r["dip"] + 0.6 * r["mom"]); sb = master.score(base, r["mkt"], dd, split, eras)
+        def episodes(rr):
+            c = np.concatenate([[1.0], np.cumprod(1 + rr)]); m = np.concatenate([[1.0], np.cumprod(1 + r["mkt"])]); out = []
+            for _, a, b in eps:
+                if a < dd[0] or b > dd[-1]: out.append(float("nan")); continue
+                ia = next(k for k, x in enumerate(dd) if x >= a); ib = next(k for k, x in enumerate(dd) if x >= b); out.append(c[ib] / c[ia] - m[ib] / m[ia])
+            return out
+        print(f"\n=== post-crash tilt — {name}: recommended book {sb['excess']:+.1%} (IS {sb['is']:+.1%} / OOS {sb['oos']:+.1%}), DD {sb['dd']:.0%}, Sharpe {sb['sharpe']:.2f}; episodes = book − market over the rebound year")
+        print(f"{'trigger / hold / tilt':70} {'excess':>7} {'gain':>6} {'IS':>6} {'OOS':>6} | {'DD':>5} {'Sh':>5} | {'tilted':>6} {'wins':>4} | " + " ".join(f"{x[0]:>8}" for x in eps) + " | placebo gain med [p10…p90]")
+        print(f"{'none (recommended book)':70} {sb['excess']:+7.1%} {'':>6} {sb['is']:+6.1%} {sb['oos']:+6.1%} | {sb['dd']:5.0%} {sb['sharpe']:5.2f} | {'0%':>6} {'':>4} | " + " ".join(f"{x:+8.1%}" for x in episodes(base)))
+        for tname, flag in triggers.items():
+            for hold in (126, 252):
+                for w in (1.0, 0.7):
+                    on = arm(flag, hold); wt = np.where(on, w, 0.4)
+                    rr = e * (wt * r["dip"] + (1 - wt) * r["mom"]); s = master.score(rr, r["mkt"], dd, split, eras)
+                    starts = int(flag.sum())
+                    gains = []
+                    for _ in range(20):
+                        f2 = np.zeros(n, dtype=bool); f2[rng.choice(n, size=max(starts, 1), replace=False)] = True
+                        on2 = arm(f2, hold); w2 = np.where(on2, w, 0.4)
+                        gains.append(master.score(e * (w2 * r["dip"] + (1 - w2) * r["mom"]), r["mkt"], dd, split, eras)["excess"] - sb["excess"])
+                    g = np.array(gains)
+                    print(f"{tname + f' / {hold} d / dip {w:.0%}':70} {s['excess']:+7.1%} {s['excess'] - sb['excess']:+6.1%} {s['is']:+6.1%} {s['oos']:+6.1%} | {s['dd']:5.0%} {s['sharpe']:5.2f} | {np.mean(on):6.0%} {starts:4d} | "
+                          + " ".join(f"{x:+8.1%}" for x in episodes(rr)) + f" | {np.median(g):+5.1%} [{np.percentile(g, 10):+5.1%}…{np.percentile(g, 90):+5.1%}]")
+
+
+if __name__ == "__main__" and "--tilt" in sys.argv:
+    tilt()
