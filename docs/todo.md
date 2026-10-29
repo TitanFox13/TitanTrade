@@ -33,6 +33,15 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
 - [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
 
+## Phase 2.14: Put-writing and the collar indices — roadmap B1 run, nothing adopted (2026-10-29) — Decision 074
+The next pick after E2, on the operator's go. Hypotheses O1–O5 and the drop rules committed before the run (`cf51d75`, `scripts/param_search/putwrite.py`); results and tables in Decision 074. Nothing live changed.
+- [x] **O1** — the put-write index (daily only from 2007) lagged the market by 4.0 pp/yr (−7 since 2017); the 30-delta buy-write kept pace over 40 years in the first half only; the protective put cost 3.1 pp/yr in every decade for a quarter less drawdown, the collar 5.7 for half; on the decade every index loses 2.9–18 pp/yr to SPY.
+- [x] **O2 fails** — an option-writing sleeve is a Sharpe tool, not a return tool: BXMD in the dip sleeve's place over 40 years +1.57 vs +1.54 at Sharpe 0.84 vs 0.77 and a worse worst year; on the decade −1.6 … −1.9 pp/yr for nothing; the writing index is a mild diversifier (correlation −0.06 … +0.15 with the sleeves) that does not earn its place.
+- [x] **O3 fails** — the idle half in a protective put: +0.3 vs bills over 40 years with the drawdown 12 points deeper (−48 vs −36); on the decade +3.45 vs +1.36 at −22.8 vs −20.0 (the era's preference for less insurance; still over the 2-point bar); the permanent put costs 3.1 pp/yr for −42 % against the free signals' 0.7 for −39 %.
+- [x] **O4** — the bought protection protects as much as the rules in the fall and loses far more in the rebound year (2009 −37, 2020 −44 vs −26 / −16).
+- [x] Roadmap B1 ✅, Track D "put-writing" closed with numbers, C3 "options" answered; README row; `datasets.cboe`; one insight.
+- [ ] **Next**: B2 — quality over a century (French profitability / investment sorts, AQR QMJ), on the operator's go.
+
 ## Phase 2.13: The international book — roadmap E2 run, no book, no blend (2026-10-29) — Decision 073
 The handover's first task, on the operator's go. Hypotheses I1–I7 and the drop rules committed before the run (`eb94dbc`, `scripts/param_search/intl.py`); results and tables in Decision 073. Nothing live changed.
 - [x] **I1 holds** — French regional WML 1990 →: Developed ex-US +7.4 pp/yr (t 4.7, both halves), Europe +9.9, Asia-Pacific ex-Japan +10.8, Japan +0.6 (none, as pre-registered); the premium is stronger ex-US than in the US (+5.3) over the same 36 years.

@@ -122,6 +122,28 @@ it cannot decide return, and the drawdown leg as first written (≤ 0.7 × SPY i
 ≥ 10 % drawdown) fails the design's own backtest 3 times in 5, because in a fast 10–19 %
 dip the insurance and the shock trigger barely engage, by design.
 
+### Bought Protection Is Paid For Twice (Decision 074)
+Forty years of Cboe's protective-put index say what a monthly put costs: 3 points a
+year in every decade, for a drawdown a quarter smaller than the market's. The book's
+two free signals — the 200-day line with breadth, and a 7 % fall in ten sessions — cost
+0.7 on the market and left a smaller drawdown. In the crash itself the put protected as
+much as the rules; in the rebound year it lost far more (−37 in 2009, −44 in 2020
+against the market, versus the rules' −26 and −16), because the premium is still being
+paid while the market is already up. Parking the de-risked half in the put instead of
+cash does not help either: a 5 % out-of-the-money put leaves you three quarters long,
+so the drawdown is twelve points deeper for a third of a point of return. Protection
+that is paid for in premium is paid for again in the rebound; a rule that steps aside
+and steps back pays once.
+
+### Option Writing Is a Sharpe Tool, Not a Return Tool (Decision 074)
+The put-write index's published claim — the S&P's return at two thirds of its
+volatility — held from 1986 to 2006 and not since: on the twenty years with daily data
+it lagged by 4 points a year, by 7 in the last decade. Inside the book an option-writing
+sleeve smooths the ride (Sharpe 0.77 → 0.84 over forty years) and adds no return,
+and its excess is slightly negatively correlated with both sleeves — a diversifier
+that does not earn its place. A sleeve that raises the Sharpe without raising the
+return only matters to a book that can lever, and this one cannot.
+
 ### Two Books That De-risk Together Are One Bet (Decision 073)
 An ex-US copy of the live book was built on its own index: country ETFs for the dip
 sleeve, an ex-US momentum ETF, insurance and the shock trigger read off ACWX. The two

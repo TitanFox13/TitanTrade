@@ -1,5 +1,64 @@
 # Important Decisions Log
 
+## Decision 074: Put-writing and the collar indices — tested on 40 years of Cboe data, nothing adopted; option writing is a Sharpe tool not a return tool, and bought protection costs more than the two free signals (roadmap B1, operator's go, 2026-10-29)
+**Date**: 2026-10-29
+**Why**: brainstorm #32 ("sell a put at the dip level") and the collar-as-insurance idea were untestable until Decision 072 fetched Cboe's option-strategy benchmarks. Done the Decision 062 way: hypotheses O1–O5 and the drop rules written into `scripts/param_search/putwrite.py` and **committed before any code ran** (`cf51d75`); loader `datasets.cboe`. Indices (total return on the S&P 500): BXMD (buy-write, 30-delta call), BXY, CMBO, CNDR, BFLY, RXM, PPUT (long S&P + 5 % OTM put) daily from 1986-07; BXMC 1990 →; BXM 2003 →; **PUT (the cash-secured put-write) daily only from 2007** (Decision 072's "1991 →" was sparse points); WPUT 2006 →; CLL (collar 95 / 110) 2008-09 →. Windows: 40y 1986-07 → 2026-08 (split 2006-07, four decades), 20y 2007 → 2026-08 (split 2017), CLL 2008-09 → (split 2017-07), the ETF decade 2017 → 2026-10 (split 2022, through 2025 beside full). Market = Kenneth French's VW market on the long windows (the century book's market; ≈ 0.3 pp/yr from the S&P 500), SPY on the decade. Book = `carry.sets()` (the century book: dip on 49 industries 40 / top momentum decile 60; the decade book: sector dip 40 / SPMO 60), exposure = min(insurance ×0.5, shock ×0.5), idle capital at 0 unless stated. **Nothing live changes.**
+
+**Verdict on the pre-registered rules: O2 (an option-writing sleeve) fails on every window and every weight; O3 (a put or collar as the insurance) fails on every window → no sleeve, no put insurance.** The expectations written before the run were right on the shape and wrong on two numbers: PUT did *not* keep pace with the market since 2007 (−4.0 pp/yr, not ±1), and the writing index is mildly *diversifying* (correlation −0.06 … +0.15 with the dip sleeve's excess, not +0.2 … +0.4) — which still did not rescue the return bar.
+
+**O1 — the indices alone vs the market** (excess CAGR pp/yr; IS / OOS at the window's midpoint; σ/σm = volatility relative to the market):
+
+| index (window) | excess | IS / OOS | σ/σm | DD vs market | Sharpe vs market | worst yr | decades 1986–96 / 96–06 / 06–16 / 16–26 |
+|---|---|---|---|---|---|---|---|
+| **PUT** put-write (2007 →) | **−4.01** | −1.3 / −7.0 | 0.69 | −37 vs −55 | 0.57 vs 0.63 | −21 | |
+| WPUT weekly put-write (2007 →) | −6.87 | −2.3 / −11.8 | 0.62 | −29 vs −55 | 0.41 | −31 | |
+| BXM at-the-money buy-write (2007 →) | −5.17 | −3.1 / −7.4 | 0.72 | −40 vs −55 | 0.48 | −26 | |
+| **BXMD** 30-delta buy-write (1986 →) | **−0.43** | +1.8 / −2.6 | 0.88 | −47 vs −55 | **0.72 vs 0.67** | −18 | +1.7 / +1.9 / −0.6 / −4.7 |
+| BXY 2 % OTM buy-write (1988 →) · BXMC (1990 →) | −1.08 · −1.59 | +0.9 / −3.0 · +1.0 / −4.2 | 0.90 · 0.74 | −45 · −42 | 0.70 · 0.76 | | |
+| CMBO · CNDR · BFLY · RXM (1986 →) | −1.73 · −5.72 · −7.50 · −3.12 | | 0.76 · 0.44 · 0.63 · 0.64 | −43 · −20 · −55 · −31 | 0.72 · 0.69 · 0.37 · 0.72 | | all four negative in 2006–26 |
+| **PPUT** protective put (1986 →) | **−3.08** | −3.2 / −2.9 | 0.75 | **−42 vs −55** | 0.64 vs 0.67 | −19 | −2.6 / −3.8 / −2.8 / −3.1 |
+| **CLL** collar (2008-09 →) | **−5.69** | −8.0 / −3.3 | 0.64 | **−25 vs −46** | 0.59 vs 0.69 | −29 | |
+
+On the ETF decade vs SPY every index loses 2.9 … 18 pp/yr (PUT −6.8, BXMD −4.4, PPUT −2.9, CLL −3.4), the two protective ones with the best Sharpes (0.98 / 0.97 vs 0.89) and half the drawdown. Readings: the published "put-write ≈ the S&P at two thirds of the volatility" was true of 1986–2006 and has not been true since — on the twenty years we have daily, PUT lagged by 4 points a year and by 7 in the last decade; the buy-write that keeps some upside (a 30-delta call) is the only writing index that kept pace over 40 years, and only in the first half; buying protection every month (PPUT) cost 3 points a year in every decade for a drawdown a quarter smaller; the collar cost 5.7 for half the drawdown.
+
+**O2 — an option-writing sleeve beside the book** (the sleeve scaled by the exposure rules like the rest; "corr." = the index's excess over the market against the dip sleeve's / momentum's excess):
+
+| window, OPT (corr. dip / mom) | book 40 / 60 | dip 20 / mom 60 / OPT 20 | dip 40 / mom 40 / OPT 20 | dip 0 / mom 60 / OPT 40 | OPT replacing momentum | OPT alone under the rules |
+|---|---|---|---|---|---|---|
+| 40y, BXMD (−0.06 / −0.16) | +1.54 (+3.7 / −0.6), DD −35.6, Sh 0.77, worst −15; decades +2.9 / +4.4 / −0.3 / −0.9 | +1.58 (+3.5 / −0.4), DD −35.2, **Sh 0.80**, worst −18; +3.3 / +3.8 / +0.7 / −1.5 | +0.62, Sh 0.79 | +1.57 (+3.3 / −0.2), DD −38.0, **Sh 0.84**, worst −22; +3.6 / +3.1 / +1.7 / −2.1 | −1.44 | −1.55, Sh 0.87, DD −31.6 |
+| 20y, PUT (−0.14 / −0.10) | +0.06 (+1.2 / −1.2), DD −35.6, Sh 0.66 | −0.00 (+1.9 / −2.0), DD −32.2, Sh 0.70 | −1.14 | −0.14 (+2.5 / −3.0), DD −28.7, Sh 0.74 | −3.86 | −4.34, Sh 0.77 |
+| decade, PUT (+0.15 / 0.00) | +1.36 (+0.3 / +2.5), DD −20.0, Sh 1.10; → 2025 +0.80 | −0.22 (−2.0 / +1.6), DD −19.3, Sh 1.07; −0.80 | −0.53, Sh 1.11 | −1.81 (−4.3 / +0.7), Sh 1.03 | −4.42 | −7.58 |
+
+Fails everywhere on the pre-registered bar (return better in both halves and every era, Sharpe no lower). What the table says instead: **option writing is a Sharpe tool, not a return tool.** Over 40 years a BXMD sleeve in place of the dip sleeve is a wash on return (+1.57 vs +1.54) with the Sharpe 0.77 → 0.84 and a worse worst year (−22 vs −15); over 20 years PUT in the dip sleeve's place is flat on return with the Sharpe 0.66 → 0.70; on the decade every PUT variant costs 1.6 … 1.9 pp/yr for nothing. The surprise is the correlation: the writing index's excess is slightly *negatively* correlated with the dip sleeve's and with momentum's on the long windows, so it is a different bet, not a copy — a diversifier that does not earn its place. (Trading it needs Alpaca options approval and SPY options rolled monthly; the index assumes VWAP fills, a retail fill is worse — so the real-money version is below every number here.)
+
+**O3 — a protective put or a collar as the insurance instead of cash** (the idle 1 − e share held in the index; "on the market" isolates the mechanism from the sleeves):
+
+| window | on the market: rules + cash · + bills · + PPUT idle · PPUT permanent (· CLL idle · CLL permanent) | on the book: cash (the engine) · bills · the market · no insurance · PPUT idle (· CLL idle) |
+|---|---|---|
+| 40y (de-risked 25 %, bills 3.0 %) | −0.73 (DD −39) · −0.33 (−37) · **−0.05 (DD −49)** · −3.08 (−42) | **+1.54 (DD −35.6)** · +1.94 (−34.9) · +2.28 (−54) · +2.65 (−56) · **+2.24 (DD −48.0)**; decades +3.3 / +5.3 / −0.4 / +0.7 |
+| CLL window 2008-09 → (22 %, 1.4 %) | −0.55 (−25) · −0.41 (−25) · +0.39 (−36) · −2.64 (−26) · CLL −0.24 (−34) · −5.69 (−25) | −0.80 (−27.8) · −0.66 (−27.6) · −0.24 (−46) · −0.11 (−46) · +0.15 (−36.4) · CLL −0.48 (−34.3) |
+| decade (16 %, 2.5 %) | −2.27 (−21) · −2.11 (−21) · −0.26 (−25) · −2.85 (−22) · CLL −0.36 (−25) · −3.43 (−17) | +1.36 (−20.0) · +1.54 (−19.9) · +3.73 (−33) · +4.53 (−32) · **+3.45 (−22.8)**, +2.8 / +4.1, Sh 1.11 · CLL +3.35 (−23.8) |
+
+Fails on every window on the drawdown leg (at most 2 points deeper than cash). The return side is as expected — the idle half in a protective put earns +0.7 vs cash and +0.3 vs bills over 40 years (it stays in the rebounds the cash misses) — but the drawdown is **12 points deeper over 40 years (−48 vs −36)** and 6–9 points deeper on the collar window, because a 5 % out-of-the-money put rolled monthly leaves the holder three quarters long: "idle in PPUT" is not de-risking, it is staying in with a small floor. On the decade the same line reads +3.45 vs +1.36 with the drawdown only 2.8 points deeper — the decade's known preference for less insurance (every loosening paid in 2017–2026, Decision 068 addendum) and still over the 2-point bar. **The permanent hedge is the clearest number of the day: buying a put every month for 40 years cost 3.1 pp/yr and left a −42 % drawdown; the book's two free signals cost 0.7 on the market (1.1 on the book vs no insurance) and left −39 / −36.** The rules beat the bought protection on both legs.
+
+**O4 — the crash leg** (book minus the market, peak → trough / the rebound year after the trough; market absolute):
+
+| | 1987 | 2000–02 | 2008 | 2020 | 2022 |
+|---|---|---|---|---|---|
+| market | −33 / +28 | −49 / +39 | −55 / +75 | −34 / +87 | −25 / +21 |
+| **book (idle in cash)** | **+11 / −17** | **+17 / −0** | **+21 / −26** | **+12 / −16** | **+11 / −11** |
+| book + BXMD 20 from the dip sleeve | +11 / −15 | +14 / −4 | +23 / −28 | +13 / −27 | +10 / −9 |
+| book, idle in PPUT | +7 / −13 | +11 / +7 | +8 / −12 | +9 / −1 | +4 / −6 |
+| PPUT permanently | +13 / −18 | +12 / −18 | +13 / −37 | +22 / −44 | +4 / −10 |
+| CLL permanently | n/a | n/a | n/a | +19 / −50 | +8 / −10 |
+| BXMD permanently | +4 / +6 | +13 / +2 | +8 / −5 | +2 / −27 | +3 / +0 |
+
+The bought protection protects about as much as the rules in the fall (+12 … +22 vs +11 … +21) and loses far more in the rebound year (−37 / −44 in 2009 / 2020 vs −26 / −16): a put is paid for twice, in premium every month and in the rebound it is still short. Putting the idle half into the put instead of cash halves the fall protection (+4 … +11) and halves the rebound cost (−1 … −13): the same trade-off the insurance already makes, moved along the line, not improved.
+
+**Decision.** Nothing changes. Roadmap B1 done; Track D's "put-writing" door is closed with numbers; C3 "options" is answered: no option-writing sleeve (a Sharpe tool at a return cost, below the both-halves-and-every-era bar everywhere), no put or collar insurance (deeper drawdowns than cash for the same return, and the permanent hedge loses to the free signals on both legs). What was learned and kept: the put-write index has lagged the market by 4 points a year since 2007 and the published claim is a 1986–2006 result; bought protection is paid back in the rebound year; the writing indices are mild diversifiers of both sleeves, which is worth knowing if a Sharpe-first book is ever wanted. What would reopen it: a put-writing *entry* (sell the put at the dip level and take assignment) needs single-name or SPY option chains, which the library does not hold (historicaloptiondata.com, ~$100 / year, Decision 072) — and the result here says the premium collected is not the missing return. **Next pick: B2** (quality over a century — French profitability and investment sorts, AQR QMJ).
+
+**Scripts / docs**: `scripts/param_search/putwrite.py` (pre-registration `cf51d75`, then the code), `datasets.cboe`, the harness README row; roadmap B1 ✅ / D closed / C3 answered; todo Phase 2.14; one insight; handover note.
+
 ## Decision 073: The international book — tested, not built; the ex-US momentum premium is real, the dip rule on country ETFs is not a floor, and a blend gives back return for almost no protection (roadmap E2, operator's go, 2026-10-29)
 **Date**: 2026-10-29
 **Why**: the operator's second fear (a weaker US market after a political change, and a weaker dollar for a CZK-based investor) is the one risk a US-only book cannot hedge, and every number behind the live book is American. Roadmap E2 asked whether an ex-US copy of the book exists and whether blending it in helps. Done the Decision 062 way: hypotheses I1–I7 and the drop rules written into `scripts/param_search/intl.py` and **committed before any code ran** (`eb94dbc`); the ex-US book built exactly like the US one (the live dip rule on the 20 single-country ETFs, 3 × 25 % slots, ACWX as the residual and the index, insurance from the region's own breadth — ACWX below its 200-day SMA and fewer than half of the 20 countries above theirs — the shock trigger on ACWX, exposure = min); IMTM named as the book's momentum vehicle, IDMO as the alternative; decade 2017-01-03 → 2026-10-12 split 2022-01-01, every headline also through 2025-12-31; two placebos for the blend; costs as everywhere in the harness. Data: French regional daily factors 1990 → (USD), 39 ex-US ETFs 2016 → (Alpaca SIP, dividend-adjusted), FRED DEXUSEU. Loader `datasets.french_regional`. **Nothing live changes.**

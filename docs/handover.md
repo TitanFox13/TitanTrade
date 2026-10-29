@@ -66,7 +66,7 @@ Exit side: longer targets, no target, longer clocks, trailing stops, ATR stops. 
 
 ## 8. Your first task: the international book (roadmap E2)
 
-*Done 2026-10-29 evening → Decision 073: no ex-US book, no blend (I1 and I2 held, I3–I5 failed); E3 closed, E4 priced; the next pick is B1. The section below is kept as written for the record.*
+*Done 2026-10-29 evening → Decision 073: no ex-US book, no blend (I1 and I2 held, I3–I5 failed); E3 closed, E4 priced; a foreign strategy of its own recorded as E6 and parked at the back on the operator's call. B1 run the same evening → Decision 074: no option-writing sleeve, no put / collar insurance. The next pick is B2 (quality over a century). The section below is kept as written for the record.*
 
 The operator's second fear is a weaker US market and a weaker dollar, and the book's century of evidence is US-only. The data is in hand; nothing has run. Before running anything:
 

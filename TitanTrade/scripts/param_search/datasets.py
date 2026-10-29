@@ -13,7 +13,8 @@ Data lives in ``data/param_search/`` (git-ignored; archived on titanserver under
 | F_french_49ind_1926   | Kenneth French 49 industry portfolios, value-weighted daily total returns → index levels | French market factor (Mkt-RF + RF) | 1926 → | none |
 
 Not a ``load`` key: ``alpaca(sym, "intl")`` reads the 39 region / country ETFs (roadmap E1, 2016 →, dividend-adjusted) and
-``french_regional(region, kind)`` Kenneth French's regional daily factors (``external/french_intl/``, USD, 1990 →).
+``french_regional(region, kind)`` Kenneth French's regional daily factors (``external/french_intl/``, USD, 1990 →);
+``cboe(name)`` a Cboe index history from the external library (``external/cboe/``, option-strategy benchmarks 1986 →, VIX family).
 """
 import datetime
 import json
@@ -104,6 +105,19 @@ def french_regional(region, kind):
     cols, rows = _french_section(f"{S}/external/french_intl/{region}_3_Factors_Daily.csv", ",Mkt-RF")
     im, ir = cols.index("Mkt-RF"), cols.index("RF")
     return {d: (rows[d][im] + rows[d][ir]) / 100 for d in sorted(rows) if rows[d][im] is not None}
+
+
+def cboe(name):
+    """Cboe daily index history (``external/cboe/<NAME>_History.csv``, MM/DD/YYYY) → {date: close}; the VIX-family files
+    carry OHLC (the last column is the close), the strategy indices one column."""
+    out = {}
+    for line in open(f"{S}/external/cboe/{name}_History.csv").read().splitlines()[1:]:
+        p = line.strip().split(",")
+        if len(p) < 2 or not p[0][:1].isdigit():
+            continue
+        m, d, y = p[0].split("/")
+        out[f"{y}-{m}-{d}"] = float(p[-1])
+    return out
 
 
 def sp500_2016_symbols():
