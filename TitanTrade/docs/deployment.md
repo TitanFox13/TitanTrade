@@ -16,7 +16,7 @@ uv run --extra test python -m pytest tests/ -q
 
 ## Server Deployment (Docker)
 
-Production runs on `titanserver` in `/home/TitanTrade/TitanTrade` (repo `TitanFox13/TitanTrade` on GitHub).
+Production runs on `titanserver`: the repository is checked out at `/home/TitanTrade` (repo `TitanFox13/TitanTrade` on GitHub) and the package, compose file, `data/` and `state/` are in `/home/TitanTrade/TitanTrade` — run `git` and `docker compose` from there.
 
 **Prerequisites**: Docker + Compose, `.env` with the keys below and `CLOUDFLARE_TUNNEL_TOKEN`.
 
@@ -113,7 +113,7 @@ Volumes: `./state` and `./logs` on both; `./data` on `api` (watchlist edits thro
 
 ## Backups
 
-`scripts/backup_state.sh` snapshots `state/` (trade log, plan, strategy, fill ledger, cooldowns, peak, archive) and `data/watchlist.json` into `/home/TitanTrade/backups/titantrade-state-<UTC stamp>.tar.gz`, keeping the last 30. Host cron on titanserver (Decision 071): `30 21 * * * /home/TitanTrade/TitanTrade/TitanTrade/scripts/backup_state.sh >> /home/TitanTrade/backups/backup.log 2>&1` — after the 20:30 UTC daily summary. Restore on a host with the checkout: `tar xzf /home/TitanTrade/backups/<archive> -C /home/TitanTrade/TitanTrade/TitanTrade` (then `docker compose up -d api`). Off-server copies are a manual pull: `ssh titanserver 'base64 -w0 /home/TitanTrade/backups/<archive>' | base64 -d > <archive>` (`scp` fails there).
+`scripts/backup_state.sh` snapshots `state/` (trade log, plan, strategy, fill ledger, cooldowns, peak, archive) and `data/watchlist.json` into `/home/TitanTrade/backups/titantrade-state-<UTC stamp>.tar.gz`, keeping the last 30. Host cron on titanserver (Decision 071): `30 21 * * * /home/TitanTrade/TitanTrade/scripts/backup_state.sh >> /home/TitanTrade/backups/backup.log 2>&1` — after the 20:30 UTC daily summary. Restore on a host with the checkout: `tar xzf /home/TitanTrade/backups/<archive> -C /home/TitanTrade/TitanTrade` (then `docker compose up -d api`). Off-server copies are a manual pull: `ssh titanserver 'base64 -w0 /home/TitanTrade/backups/<archive>' | base64 -d > <archive>` (`scp` fails there).
 
 ## The server-down runbook (Decision 071)
 
