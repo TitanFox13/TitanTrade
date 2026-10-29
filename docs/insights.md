@@ -84,6 +84,24 @@ positive in one half of the century and negative in the other, and the
 decade holds three episodes. The state tells you which kind of year to brace
 for; the design already holds a sleeve for each kind.
 
+### A Mirror Rule Can Only Act Where the Original Binds (Decision 068 addendum)
+The shock trigger's hold is combined with the two-signal insurance by min(), and in
+every rebound of the decade the insurance was the binding rule: SPY under its 200-day
+SMA with breadth under half. Releasing the shock hold on a +7 % rebound changed nothing
+in 2018, 2020, 2022 or 2025, and where it did act, the bear-market rallies of 1932 and
+2008, it re-exposed the book into the next leg down. A fast rule's territory is the
+complement of the slow rule's; its mirror inherits that scope, not the whole crash.
+
+### A Quarter Cannot Judge a Return Edge (the luck meter, Decision 068 addendum)
+The book tracks SPY with a 9 %/yr tracking error. A true +1.4 pp/yr would need about
+170 years to reach a t-statistic of 2; over one quarter the book fails "≥ SPY − 2 pp/yr"
+43 % of the time and beats SPY only 53 % of the time *when it is exactly as good as the
+backtest*. The century, not the decade, is where the evidence lives (t = 3.16; bootstrap
+band +1.9 … +5.2 against −2.8 … +5.1). A go/stop rule can decide behaviour and drawdown;
+it cannot decide return, and the drawdown leg as first written (≤ 0.7 × SPY in every
+≥ 10 % drawdown) fails the design's own backtest 3 times in 5, because in a fast 10–19 %
+dip the insurance and the shock trigger barely engage, by design.
+
 ### You Cannot Detect the Epoch, You Can Detect the Fall (Decision 067)
 Every slow "which regime are we in" rule we tried (trend, breadth, a three-state
 mix, the sleeve's own momentum) gave back return and cut no drawdown, over a
