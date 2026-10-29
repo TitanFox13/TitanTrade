@@ -19,7 +19,8 @@ DEFAULTS = dict(dip_pct=0.10, dip_lookback_days=60, trend_sma_days=200, slot_pct
                 trail_pct=None,   # optional trailing stop below the high-water mark, armed once above entry
                 rank="deepest",  # candidate order when slots are free: "deepest" dip first (live) or "shallowest"
                 dip_max=None,     # optional upper bound on the dip: skip names that fell more than this (crash filter)
-                stop_cooldown_days=0)  # after a stop exit the name is ineligible for this many sessions (0 = live 72 h ≈ 3)
+                stop_cooldown_days=0,  # after a stop exit the name is ineligible for this many sessions (0 = live 72 h ≈ 3)
+                rank_matrix=None)  # optional T × N matrix to rank candidates by instead of the price dip (e.g. the dip relative to SPY)
 
 
 class Market:
@@ -201,7 +202,8 @@ def run(mkt: Market, params: dict | None = None, start: str | None = None, end: 
             if free > 0:
                 cand = np.nonzero(signal_ok[i] & (v_name <= 0) & (cool_until < i))[0]
                 if len(cand):
-                    key = dip_m[i, cand] if p.get("rank") == "shallowest" else -dip_m[i, cand]
+                    rk = dip_m if p.get("rank_matrix") is None else p["rank_matrix"]
+                    key = rk[i, cand] if p.get("rank") == "shallowest" else -rk[i, cand]
                     order = cand[np.argsort(key, kind="stable")]
                     pending = [int(j) for j in order[:free]]
     curve = np.array(curve)

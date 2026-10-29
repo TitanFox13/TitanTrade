@@ -15,7 +15,7 @@ from `TitanTrade/`; `-I` because the data files are downloaded, untrusted input)
 
 | Script | What |
 |---|---|
-| `fastbt.py` | Vectorised engine with the same semantics as `titantrade.backtest.mechanical` (`validate.py`: same trade set, equity to 1e-8); optional, default-off `trail_pct` (trailing stop armed once above entry), `rank` ("deepest" / "shallowest"), `dip_max` (crash filter), `eligible` (T × N mask), `stop_cooldown_days` (post-stop exclusion); a name whose series ends is settled at its last price (`delist` exit) |
+| `fastbt.py` | Vectorised engine with the same semantics as `titantrade.backtest.mechanical` (`validate.py`: same trade set, equity to 1e-8); optional, default-off `trail_pct` (trailing stop armed once above entry), `rank` ("deepest" / "shallowest"), `dip_max` (crash filter), `eligible` (T × N mask), `stop_cooldown_days` (post-stop exclusion), `rank_matrix` (rank candidates by another T × N matrix); a name whose series ends is settled at its last price (`delist` exit) |
 | `search.py` | Stage 1: 6,000-point entry/exit grid, insurance off, four datasets (Alpaca names/sectors 2016 →, Yahoo names/sectors 1999 →) |
 | `analyze1.py` | Plateau scoring (median over one-step neighbours), marginal effects, cross-dataset ranks |
 | `stage2.py` | Insurance (SMA × breadth × scale) × sizing (slot × max slots) around the chosen centres |
@@ -36,5 +36,6 @@ from `TitanTrade/`; `-I` because the data files are downloaded, untrusted input)
 | `rotation.py` | Decision 067 addendum: rotation sleeves — sector rotation (36 cells), multi-asset rotation, Faber GTAA 5, century industry rotation — alone and as the sleeve beside the dip book, vs SPMO; `--timing` = rebalance frequency (daily → annual), rank tolerance bands, trend-break and shock triggers |
 | `carry.py` | Decision 068 addendum (brainstorm #1): T-bill carry on de-risked capital — the recommended book with the idle half (and, for reference, the 5 % reserve) earning Kenneth French's daily RF; `sets()` and `exposure()` are the reusable recommended-book builders (decade + century) |
 | `release.py` | Decision 068 addendum (brainstorm #2): shock early release — a +5 / +7 / +10 % move over 5 / 10 sessions or a 10 / 20-session high ends the shock hold; hold-10 / hold-5 references; placebo = random releases inside the holds (rejected) |
+| `dipfilters.py` | Decision 068 addendum (brainstorm #31 / #4 / #5): `--dow` the point-in-time Dow 30 as a hindsight-free quality list + placebo of 20 random 30-name S&P subsets; `--relative` the dip on P / SPY (eligibility + `rank_matrix`); `--gap` the fast-dip filters (worst session in 20, dip age) — all three rejected |
 | `luck.py` | Decision 068 addendum (brainstorm #3): the luck meter — deflated Sharpe (N and N_eff), probability of backtest overfitting (CSCV, `--pbo-blocks`), stationary block bootstrap of the excess, go/stop power and the drawdown leg, on the master grid's hindsight-free pool |
 Read the results in `docs/decisions.md` Decision 062 before re-running; pick plateaus, hold out time, charge costs.

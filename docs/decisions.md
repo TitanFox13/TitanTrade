@@ -138,6 +138,45 @@ Readings. (a) **The decade proves nothing by itself**, with or without deflation
 
 **Recommendation to the operator (their call; rule text in todo Phase 2.0):** rewrite the go/stop rule as (i) *behaves like the backtest* — the fill-vs-backtest ledger (brainstorm #15) and the plan's actions matching the rules, judged at every checkup; (ii) *drawdown* — in any SPY drawdown ≥ 10 % the book falls no further than SPY, and in any ≥ 20 % no further than 0.7 × SPY; (iii) *return* — no quarterly or yearly return test at all: the return edge is a century claim and a decade cannot confirm or refute it; report the running excess with its bootstrap band instead. The live benchmark's verdict line should say so under 3 years rather than "adding / losing value". Nothing changed yet.
 
+### Decision 068 addendum — three more dip-sleeve tests: the Dow 30 as a quality list, the dip relative to SPY, the fast-dip filter — all three rejected (operator's pick, 2026-10-29)
+`scripts/param_search/dipfilters.py` (`--dow`, `--relative`, `--gap`; hypotheses in the docstring before the first run; `fastbt.py` gained a default-off `rank_matrix` option, equivalence re-verified: same trade set, equity to 6e-9). Live rule, insurance ×0.5, decade from 2017-01-03 split 2022, century split 1990, vs SPY and vs the equal-weight hold of each universe. References in the same run: **A** curated 15 +4.0 (IS −8.4 / OOS +17.8), **D** sectors +0.4 (+0.6 / +0.3), **E** S&P 500 point-in-time 3 × 25 % −0.2 (−1.9 / +1.6), **F** industries −0.0 (+0.9 / −1.8).
+
+**1. The Dow 30, point-in-time (brainstorm #31)** — the 2016-01-04 list and its ten changes through 2024-11 (public record); placebo = 20 random 30-name subsets of the 2016 S&P 500 under the S&P membership mask.
+
+| universe | excess vs SPY (IS / OOS) | vs EW of the universe | DD, Sharpe | trades, win, median, stops |
+|---|---|---|---|---|
+| Dow 30, 3 × 25 % | **−7.9 (−7.3 / −8.5)** | −5.2 (EW Dow −2.7 vs SPY) | −31 %, 0.50 | 123, 51 %, +0.6, 34 |
+| Dow 30, 5 × 15 % | −9.5 (−9.9 / −9.2) | −6.9 | −28 %, 0.44 | 196, 52 %, +0.7, 58 |
+| Dow 30, insurance off | −5.5 (−5.7 / −5.4) | −2.9 | −36 %, 0.57 | 123 |
+| placebo: 20 random 30-name S&P subsets | median **−2.7**, p10 −8.3, p90 −0.6, 1 of 20 positive | | | |
+
+D1 fails (negative in both halves, below the sector floor), D2 fails the other way round — the Dow sits at the *bottom* of the placebo spread, and the placebo itself says it all: **any 30-name list of S&P names loses with this rule** (19 of 20 random lists, median −2.7). D3 holds (five slots worse). Reading: "a short list of quality names" was the wrong diagnosis of Decision 065. The dip rule's edge lives in exactly two places, the 11 diversified sector ETFs (no single-name blow-ups, 79 % winners, 6 stops in ten years) and the operator's 15 names after 2022; every list of individual large caps, the Dow included, feeds the rule single-name breaks it cannot tell from dips (51 % winners, median trade +0.6 %). **The curated list's +4 is the list, not a reproducible property of big established names.** Rejected; closed door: a hindsight-free single-name universe for the dip rule, of any size.
+
+**2. The dip relative to SPY (brainstorm #4)** — eligibility and ranking on P / SPY, 6 / 8 / 10 %, and "both" (absolute 8 % and relative 8 %):
+
+| universe | absolute 8 % (live) | relative 6 / 8 / 10 % | both |
+|---|---|---|---|
+| A curated | +4.0 (−8.4 / +17.8) | +4.0 / +3.9 / +1.4 | +4.3 (−5.8 / +15.4) |
+| **D sectors** | +0.4 (+0.6 / +0.3) | **−3.8 (−3.9 / −3.6) / −5.1 (−4.7 / −5.4) / −3.5 (−3.3 / −3.7)** | −1.0 (+0.1 / −2.0), 32 trades |
+| E S&P 500 PIT | −0.2 (−1.9 / +1.6), median trade −3.3 | −0.0 (−2.2 / +2.2) at every threshold, median −0.1, Sharpe 0.69 | −1.6 |
+| F industries | −0.0 (+0.9 / −1.8), Sharpe 0.64 | +0.4 (+1.2 / −1.0) / +0.2 (+1.1 / −1.6) / +1.0 (+2.3 / −1.4), Sharpe 0.71–0.76 | +0.8 (+1.4 / −0.3) |
+
+R1 fails hard on D: a sector 8 % below its high *relative to SPY* is a sector that is lagging the market — the anti-momentum trade, −4 to −5 pp/yr in both halves (Decision 066 again, from the other side). R2: the broad universe moves from −0.2 to 0.0 — the median trade improves, the book does not. R3: "both" is the best variant on A and F and still not positive in both halves anywhere hindsight-free. The rule needs a real fall in price, not a lag behind the index. Rejected.
+
+**3. The fast-dip filter (brainstorm #5)** — exclude names with a session worse than −5 / −8 / −12 % in the last 20, or require the dip to be ≥ 5 / 10 sessions old:
+
+| universe | live | no session < −5 / −8 / −12 % | dip ≥ 5 / ≥ 10 sessions old |
+|---|---|---|---|
+| A curated | +4.0 | −3.1 / +4.4 / +3.9 | +1.5 / −3.4 |
+| **D sectors** | +0.4 (+0.6 / +0.3) | **0.0 / +0.4 / +0.4** (ETFs do not gap: identical trades) | −1.6 / −3.0 |
+| E S&P 500 PIT, 3 × 25 % | −0.2, median −3.3, 94 stops | **+3.0 (+10.4 / −4.0)**, median +4.6, 57 stops / +2.8 (+6.1 / −0.5) / +0.3 | **+5.1 (+4.9 / +5.4)**, Sharpe 0.84 / −2.9 (+1.6 / −7.1) |
+| E, 10 × 7.5 % | −4.3 | −5.5 / −6.4 / −6.4 | −3.9 / −3.9 |
+| F industries | −0.0 (+0.9 / −1.8) | −0.5 / +0.1 / −0.3 | +0.5 (+1.5 / −1.4) / +0.3 (+1.1 / −1.2) |
+
+G1 holds on the surface of E — the −5 % filter does raise the median trade from −3.3 to +4.6 and cuts stops from 94 to 57 — and fails where it counts: the gain is in-sample only (+10.4 / −4.0), it vanishes at ten slots, and it never reaches the universes that matter (D identical, F ±0.5: G2 holds). G3's "dip at least five sessions old" is the one cell positive in both halves on E (+5.1), with its neighbour at ten sessions −2.9 and the same rule negative on D and F — a single cell, the 8–20 % band of Decision 065 again. **Nothing changes the hindsight-free floor** (D and F) by more than noise, which is the drop rule. Rejected. Note for the record only: if a broad single-name universe ever became the live one, the speed of the fall is the first thing to re-examine there (median trade and stop count move the right way); for the live list and the sector floor it is irrelevant.
+
+**Decision**: nothing changes. Three doors closed with numbers: a hindsight-free single-name list for the dip rule (any 30-name list loses, the Dow at the bottom of the placebo), the relative dip (the anti-momentum trade on sectors), and the speed-of-fall filter (nothing to filter on ETFs, in-sample only on 500 names). The dip sleeve stays the live rule on the live list with the sector floor as its hindsight-free expectation. Remaining open ideas from the catalogue are the lower-odds rows (value sleeve, residual momentum, member breadth, the entry-time model on the century); none is proposed.
+
 ## Decision 067: "Add the strategies together" — tested; the broad dip sleeve is dead, a momentum-ETF sleeve beside the dip book is the first hindsight-free combination that beats SPY in both halves. Proposal on the table, nothing live yet
 **Date**: 2026-10-27
 **Operator proposal**: keep the dip rule on the curated list, add a momentum sleeve on the S&P 500 and a 10-slot dip rule on the S&P 500, "adding the strategies together and hedging this way"; any amount of backtesting authorised. Tested as a portfolio of sleeves (`scripts/param_search/combo.py`, `etf_sleeve.py`): every sleeve is a full book with its own SPY residual and the two-signal insurance, so a weighted blend of sleeve curves is the combined book with the capital split by weight; walk-forward on the two new rules first; the curated sleeve (hindsight by construction) shown beside the sector-ETF dip sleeve as its hindsight-free floor; the same combination over the century on French data.

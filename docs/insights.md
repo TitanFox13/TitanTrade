@@ -84,6 +84,18 @@ positive in one half of the century and negative in the other, and the
 decade holds three episodes. The state tells you which kind of year to brace
 for; the design already holds a sleeve for each kind.
 
+### A Short List Is Not a Quality List (Decision 068 addendum)
+The dip rule on the point-in-time Dow 30 lost 8 points a year in both halves, and
+19 of 20 random 30-name lists drawn from the S&P 500 lost too. "A small edge on a
+short list of quality names" was the wrong diagnosis: the rule wins only on the 11
+diversified sector ETFs, which cannot have a single-name break, and on the
+operator's 15 names after 2022. Any list of individual large caps hands the rule
+breaks it cannot tell from dips. The curated list's edge is the list, not a property
+any rule reproduces. Corollaries from the same afternoon: a dip measured relative to
+the market is a lagging sector, the anti-momentum trade (−4 to −5 a year); and a
+filter on the speed of the fall has nothing to filter on ETFs and holds only
+in-sample on single names.
+
 ### A Mirror Rule Can Only Act Where the Original Binds (Decision 068 addendum)
 The shock trigger's hold is combined with the two-signal insurance by min(), and in
 every rebound of the decade the insurance was the binding rule: SPY under its 200-day
