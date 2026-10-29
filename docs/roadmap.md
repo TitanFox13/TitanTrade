@@ -70,6 +70,8 @@
 | Futures (trend, carry) | B3 → 🚫 trading | not on Alpaca; a second broker is a project of its own |
 | Shorting | 🚫 | Decision 067 addendum: WML = leverage on momentum, short-the-market = the insurance doubled, the anti-dip mirror loses as a real short |
 | Bonds, gold, commodities | B7, B8 | reopened on long data only |
+| **Crypto momentum sleeve** (Alpaca trades crypto; BTC / ETH daily is free from Coinbase, 2015 →) | 💡 explore, health warning | time-series momentum in crypto is a documented premium with 70–80 % volatility and 80 % drawdowns; the 2010s are one bubble-shaped sample. A sleeve of a few percent is the only size that could survive the drawdown leg; test with the discipline, expect a placebo-level result, record it either way |
+| **The volatility risk premium** (Cboe VPD / VPN indices 2004 →; short-VIX ETFs 2011 →) | 💡 explore, with B1 | selling volatility is the same family as put-writing with a worse tail (2018-02); B1's indices answer most of it; VPD / VPN to be added to the fetcher |
 
 ### C4 Judgment — where the human stays
 
@@ -88,6 +90,9 @@
 | Execution timing (10:15 vs 15:30 vs close; Alpaca minute bars) | 💡 low | turnover is ~60 % of equity a year: 10 bp = 0.06 pp/yr |
 | The go-live checklist (fund ≥ $25k, W-8BEN, the cash sweep or the SGOV leg, the heartbeat, the tax line) | 🔑 | Decision 071, todo Phase 2.0 |
 | A second broker (international single names, futures) | 💡 later | only if Track E or B3 produces something the first broker cannot trade |
+| **Tax-aware lots when live** | 💡 at go-live | ask Alpaca for the lot-selection method; the three-year test is per lot and FIFO sells the oldest lots first when the exposure rules cut SPMO (Decision 071) |
+| **Risk budgeting across books** | 💡 with E3 | a second book shares the account: the cash reserve, the overlay cap and the drawdown breaker must be per book or the two books starve each other |
+| **The benchmark once the book is not US-only** | 💡 with E3 | SPY is the yardstick today; a global book is judged against ACWI, and a CZK-based operator may want the yardstick in crowns |
 
 ## Track D — Closed doors the new data could reopen (and the ones it cannot)
 
@@ -118,11 +123,32 @@
 | E4 | **Currency**: the operator is CZK-based; USD-denominated ETFs embed the dollar; hedged variants exist (DBEF, HEDJ) | 💡 | a question of its own; the book's benchmark is SPY in USD today |
 | E5 | **Single foreign names** (European / Asian stocks) | 💡 far | needs another broker and point-in-time index membership per market; everything learned about single-name universes in the US (Decision 070) applies first |
 
-## Track F — Method and tooling
+## Track H — Data still worth collecting
+
+| item | status | why / how |
+|---|---|---|
+| **Tiingo** — 30 years of adjusted daily history for ETFs and names (free key, 50 symbols/hour) | 🔑 | B11: the sector floor through 2000–02 and 2008 on real ETFs; the 15 names 1999 →; the ETF parameter re-check on two more bears |
+| **Alpha Vantage** — historical earnings dates per symbol (free key, 25 requests/day) | 🔑 | B10: the earnings gate valued on a decade |
+| **MSCI country and regional index histories** (daily, 1970s →; the end-of-day tool is a manual download) | 🔑 manual | Track E over 1970 → instead of 1990 → / 2016 → |
+| **Cboe VIX premium indices (VPD, VPN) and VIX futures settlements (per-contract CSVs)** | 💡 add to the fetcher | the volatility-risk-premium exploration (C3); the futures term structure as a regime input, placebo-tested |
+| **Crypto daily (BTC, ETH) from Coinbase, 2015 →** | 💡 add to the fetcher | the crypto-sleeve exploration (C3) |
+| **FOMC meeting dates 1936 → (the Fed's site) and release calendars** | 💡 | the macro gate valued on history (A6 needs live data otherwise) |
+| **S&P 400 / 600 point-in-time membership** (public GitHub lists) | 💡 | only if a single-name universe ever returns (Decision 070 closed it; B9 could reopen it) |
+| **Alpaca minute bars 2016 →** (our own keys) | 💡 on demand | execution timing (C5), worth 0.06 pp/yr at this turnover |
+| **The full SEC financial-statement data sets 2009 →** (≈ 5 GB) | 💡 on demand | B9, only after B2 |
+| **What is not worth money today**: option chains ($100 / year) — only if B1 outgrows the Cboe indices; EODHD (€20 / month) — only if Tiingo's free tier is too slow | 🔑 later | |
+
+## Track F — Method, tooling and cleanup
 
 | item | status | note |
 |---|---|---|
+| **One engine for research and live: the two-sleeve book in the package backtester** | 💡 the most valuable cleanup | `backtest/mechanical.py` still models the dip-only book of Decision 061; the live design (SPMO leg, shock trigger, min(), 10 % slots, the 5 % band) exists only as a post-hoc blend of daily returns in the research harness, which assumes constant 40 / 60 weights rebalanced daily — not what the executor does. "Backtest what trades, trade what you backtested" (Decision 061's lesson) is currently broken for the sleeve. Path-exact two-sleeve backtester in the package → `backtest-mech` reproduces the live book, the fill ledger compares against the real path, and the research harness can call it instead of `master.book` |
+| **Deduplicate the harness** | 💡 small | twenty-five scripts rebuild the same series (`carry.sets()`, `master.decade()`, `regimes.main()` each load the decade and the century); `search.py` duplicates `datasets.py`; `analyze1.py` duplicates `analyze1_lib.py`. One `books.py` with the recommended-book builders, every script importing it. For the next agent, not for the numbers |
+| **Loaders for the external library** | 💡 on demand | one function per source in `datasets.py` as each test needs it (Cboe CSV, FRED CSV, CFTC annual.txt, Shiller / AQR xlsx via `--with openpyxl`); the manifest is the index |
+| **Reorder `docs/todo.md`** | 💡 cosmetic | phases 2.0 → 2.12 are interleaved from a day of appending; newest first, consistently, with the open items at the top |
+| **A plain-language "how to read a checkup" page** | 💡 docs | the operator asked for plain words first: one page that says what each number on the checkup means (the band, the median fill gap, the shadow comparison, the drawdown leg) and what would make it a problem |
 | The luck meter in every result (deflated Sharpe, bootstrap band, PBO) — fold into `master.score` | 💡 small | `luck.py` exists; make it automatic |
+| **A chaos test for broker anomalies** | 💡 ops | the CRWD split lesson (Decision 054): a test that feeds the executor a phantom price, a ±50 % equity jump, a cancelled stop, a 40310000 rejection, and checks nothing bare or doubled results. The guards exist; the drill that exercises them together does not |
 | Parsers for the new data (xlsx / xls / CFTC / Shiller) | 💡 on demand | `uv run --with openpyxl`; one loader per source in `datasets.py` as each test needs it |
 | The backtester / live equivalence check at every checkup (fill ledger, plan actions) | ✅ built, ⏳ | Decision 069 leg 1 |
 | The deploy procedure for config + code changes (build api → stop → swap → up → build CLI → retire the staged file) | ✅ | Decision 070 |
@@ -133,4 +159,4 @@ The order the evidence imposes: A1 checkups → A3 the first selloff (the drawdo
 
 ---
 
-**What I would run first, in order**: B1 (put-writing on the Cboe indices — the biggest untested idea with real data now in hand), E2 (the international book — the diversification case), B2 (quality over a century), then B5 / B6 / B7 as cheap afternoon tests. Everything else waits on a key, a decision, or live time.
+**What I would run first, in order** (revised 2026-10-29 after the operator's risk statement): E2 (the international book — the one fear the US-only book cannot hedge), B1 (put-writing and the collar indices — the explicit hedge, priced), B2 (quality over a century), then B5 / B6 / B7 as cheap afternoon tests; in parallel the one cleanup that matters, the two-sleeve book in the package backtester (Track F). Everything else waits on a key, a decision, or live time.
