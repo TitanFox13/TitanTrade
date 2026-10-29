@@ -84,6 +84,14 @@ positive in one half of the century and negative in the other, and the
 decade holds three episodes. The state tells you which kind of year to brace
 for; the design already holds a sleeve for each kind.
 
+### When the Placebo Beats Both Candidates, the Era Is Talking (Decision 068 addendum)
+Member breadth looked like a better insurance signal than sector breadth on the
+decade (+0.8 a year) until the placebo ran: a breadth series shuffled at random beat
+both real measures. The decade rewards any loosening of the insurance, so anything
+that fires it a little less looks smart. A placebo that beats the incumbent as well as
+the candidate is not a null result about the candidate; it says the test window has a
+preference of its own, and the comparison must be made on an era that does not.
+
 ### A Short List Is Not a Quality List (Decision 068 addendum)
 The dip rule on the point-in-time Dow 30 lost 8 points a year in both halves, and
 19 of 20 random 30-name lists drawn from the S&P 500 lost too. "A small edge on a

@@ -9,8 +9,8 @@ from `TitanTrade/`; `-I` because the data files are downloaded, untrusted input)
 - `yahoo/*.json` — Yahoo chart API `v8/finance/chart/<SYM>?period1=0&period2=<now>&interval=1d` (adjusted closes;
   SPY from 1993, sector ETFs from 1998, names from their listing dates). Yahoo rate-limits aggressively (429 for hours, per address); fetch one symbol every few seconds, one attempt, and back off 20 minutes on a 429.
 - `alpaca_hist/sp500_2016/*.json` — the S&P 500 as of 2016-01-04 (point-in-time list in `universes/`, from the public `fja05680/sp500` file), Alpaca SIP 2016 →, delisted names included.
-- `french/*.csv` — Kenneth French daily files: 49 industry portfolios, 10 prior-return (momentum 12-2, short-term 1-0, long-term 60-13) deciles, 25 size × momentum, the momentum factor and the daily factors file (market = Mkt-RF + RF), all 1926 →.
-- `alpaca_hist/historical_long/` also holds factor ETFs (MTUM, SPMO, USMV, QUAL, RSP), multi-asset ETFs (GLD, TLT, IEF, EEM, EFA, IWM, VNQ, DBC, LQD, HYG, SLV, SH) and industry ETFs (XBI, SMH, ITB, KRE, XOP, IBB), all 2016 →.
+- `french/*.csv` — Kenneth French daily files: 49 industry portfolios, 10 prior-return (momentum 12-2, short-term 1-0, long-term 60-13) deciles, 25 size × momentum, the momentum factor, the daily factors file (market = Mkt-RF + RF) and the book-to-market portfolios (`Portfolios_Formed_on_BE-ME_Daily.csv`, value = "Hi 30"), all 1926 →.
+- `alpaca_hist/historical_long/` also holds factor ETFs (MTUM, SPMO, USMV, QUAL, RSP), value ETFs (IVE, VTV, VLUE, IWD, RPV — fetched 2026-10-29 with `adjustment=all`; **every file in this folder is dividend-adjusted**, a split-only fetch does not mix with them), multi-asset ETFs (GLD, TLT, IEF, EEM, EFA, IWM, VNQ, DBC, LQD, HYG, SLV, SH) and industry ETFs (XBI, SMH, ITB, KRE, XOP, IBB), all 2016 →.
 - `alpaca_hist/sp500_2016/` also holds every member added 2016 → 2026 (742 names; `universes/sp500_union_2016_2026.json`), so screens can use each date's actual membership.
 
 | Script | What |
@@ -37,5 +37,11 @@ from `TitanTrade/`; `-I` because the data files are downloaded, untrusted input)
 | `carry.py` | Decision 068 addendum (brainstorm #1): T-bill carry on de-risked capital — the recommended book with the idle half (and, for reference, the 5 % reserve) earning Kenneth French's daily RF; `sets()` and `exposure()` are the reusable recommended-book builders (decade + century) |
 | `release.py` | Decision 068 addendum (brainstorm #2): shock early release — a +5 / +7 / +10 % move over 5 / 10 sessions or a 10 / 20-session high ends the shock hold; hold-10 / hold-5 references; placebo = random releases inside the holds (rejected) |
 | `dipfilters.py` | Decision 068 addendum (brainstorm #31 / #4 / #5): `--dow` the point-in-time Dow 30 as a hindsight-free quality list + placebo of 20 random 30-name S&P subsets; `--relative` the dip on P / SPY (eligibility + `rank_matrix`); `--gap` the fast-dip filters (worst session in 20, dip age) — all three rejected |
+| `breadth2.py` | Decision 068 addendum (#10): member breadth (point-in-time S&P 500) and 49-industry breadth as the insurance's second signal, thresholds 40–60 %, placebo = block-shuffled breadth (not adopted) |
+| `entrymodel.py` | Decision 068 addendum (#33): ridge on ten entry-time features over the century's dip trades and the S&P's, walk-forward both ways, placebo = shuffled outcomes (closed) |
+| `sleeveweight.py` | Decision 068 addendum (#8 / #9 / #12): volatility-managed momentum share (placebo = shuffled σ), industry-ETF rotation beside SPMO, gold 10 % (none adopted; the vol-managed share is a century-only effect) |
+| `seasons.py` | Decision 068 addendum (#11 / #36 / #13): Halloween in all twelve phases, dip-entry month on the century with shuffled months, a down-day entry and its mirror (rejected) |
+| `value.py` | Decision 068 addendum (#6): value ETFs (dividend-adjusted) and French book-to-market portfolios as a third sleeve, vehicles alone, correlations, five books (rejected) |
+| `resmom.py` | Decision 068 addendum (#7): residual momentum top 15 / 30 on the point-in-time S&P 500 vs raw momentum, SPMO and random picks (rejected) |
 | `luck.py` | Decision 068 addendum (brainstorm #3): the luck meter — deflated Sharpe (N and N_eff), probability of backtest overfitting (CSCV, `--pbo-blocks`), stationary block bootstrap of the excess, go/stop power and the drawdown leg, on the master grid's hindsight-free pool |
 Read the results in `docs/decisions.md` Decision 062 before re-running; pick plateaus, hold out time, charge costs.
