@@ -1,0 +1,136 @@
+# TitanTrade Roadmap
+
+*Written 2026-10-29 after the first day of the mechanical book's second design (Decision 070). A living document: every item here is either done, ready to test with data in hand, waiting on the operator, waiting on live time, or closed with the evidence named. Results go to `docs/decisions.md`; the state of each item is updated here when it moves.*
+
+**Status marks**: ✅ done · 🔬 ready to test (data in hand, pre-register and run) · 🔑 needs the operator (a key, a sign-up, a decision, money) · ⏳ needs live time · 🚫 closed — not to be re-proposed without the new evidence named in the row · 💡 idea, not yet designed.
+
+**The standard every test meets** (Decision 062 → 068): hypotheses in the script docstring before the first run; hindsight-free universes (the sector ETFs, the French century; point-in-time membership for any single-name list); in-sample / out-of-sample halves both ways and the four quarter-centuries; judged against SPY *and* the equal-weight hold of the universe; costs charged; every state-, label- or timing-based idea against a placebo with the same count and shape; a grid finds a family, never a cell; the luck meter (deflated Sharpe, bootstrap band) on anything that survives. Nothing goes live from research: a Decision with the numbers, then the operator's go.
+
+**The book today** (Decision 070): 60 % SPMO held · 40 % dip rule on the 11 sector ETFs (3 × 10 % slots, −12 % / +20 % / 60 trading days) with SPY as the residual · two-signal insurance ×0.5 · shock trigger ×0.5 · exposure = min · the hand-picked 15 names as a shadow list, tracked not traded · eight gates · broker-side GTC stops. Hindsight-free expectation: +1.4 pp/yr vs SPY in a decade like the last (both halves positive, worst relative year −11), +3.6 over a century with every quarter-century ahead, worst drawdown about a third smaller than the index's. The return edge is a century claim; the drawdown behaviour is the better-evidenced half.
+
+---
+
+## Track A — Live evidence (needs time, not ideas)
+
+| # | item | status | what "done" looks like |
+|---|---|---|---|
+| A1 | **Checkup every 1–2 weeks** — log sweep, scheduler, every dip position stop-covered and nowhere near its 90-day expiry, benchmark over the clean window with its band, the fill ledger's median gap, `backtest-mech --shadow` beside the live sleeve, `scripts/pull_backup.sh`, the record in decisions/todo | ⏳ | first one ≈ 2026-11-05; the Oct 29 executes, the Nov 1 curator proposal on the shadow list, the first ETF entry, the first ledger row |
+| A2 | **The go/stop rule** (Decision 069): behaviour (actions rule-prescribed, fills near the backtest's price), drawdown (never further than SPY in a ≥ 10 % drawdown, ≤ 0.7 × in a ≥ 20 % one), return reported with its band and never judged under 3 years | ⏳ | at least one SPY drawdown ≥ 10 % in the window |
+| A3 | **The first real selloff** — the insurance and the shock trigger live for the first time; the rebound after it (the design's known cost) | ⏳ | what the backtest says: the book falls less, then lags for a year |
+| A4 | **The shadow list's verdict** — the dip rule on the 15 names vs the live ETF sleeve, same window, year after year; is the operator's judgment skill or luck? | ⏳ | a multi-year record; the first number is meaningless |
+| A5 | **The curator's skill** — the monthly proposals for the shadow list, shadow-tracked vs outcome (brainstorm #16, a small build) | 💡 build | a ledger like the fill ledger, one row per proposal |
+| A6 | **The gates valued on live data** (brainstorm #17): earnings and macro blackouts vs what the blocked entries did | ⏳ | at 6 months of near-miss records; needs A2-style patience |
+
+## Track B — Tests the new data unlocks (Decision 072; all hindsight-free; operator's go per test)
+
+| # | item | status | expected / what would make it a Decision |
+|---|---|---|---|
+| B1 | **Put-writing vs the S&P**, 40 years of Cboe indices (PUT 1991 →, BXM 2002 →, BXMD / CNDR / RXM / CMBO / PPUT 1986 →, CLL 2008 →): the put-write index as a *sleeve* beside the book, and a *collar / protective-put index as the insurance* instead of de-risking to cash | 🔬 | published: PUT ≈ S&P return at 2/3 the volatility over decades. In the book: Sharpe up, return flat → a Decision only if it beats the 40/60 book in both halves and all four eras available. Trading it needs options on Alpaca (level 1–2) — a build of its own |
+| B2 | **Quality over a century** — French profitability (OP) and investment (INV) sorts daily 1963 →, AQR QMJ daily: does profitability carry a premium like momentum, does it crash differently, and does a dip rule on high-profitability portfolios behave like the sectors (diversified, no breaks) or like single names? | 🔬 | the quality question answered before any fundamentals pipeline. A Decision only if a quality sleeve adds to the book in both halves and the eras — the momentum-sleeve bar |
+| B3 | **Trend and carry over a century** — AQR Century of Factor Premia (monthly, 1920s →) and TSMOM factors: the trend-following family judged on the operator's own eras without futures data; is a trend premium diversifying for *this* book? | 🔬 | published Sharpe 0.7–0.8 gross; the catch is instruments: futures are not on Alpaca, so a surviving result becomes an ETF-proxy question (DBMF / KMLM from 2019) — probably knowledge, not a sleeve |
+| B4 | **Rates by era** — bills since 1954 (FRED) and French RF: the carry on idle cash and the insurance's cost priced on real rates per era; the T-bill leg's value when rates are 0 vs 5 % | 🔬 small | numbers for the go-live decision on the cash sweep vs the SGOV leg (Decision 071) |
+| B5 | **Credit and stress as a second insurance signal** — NFCI / ANFCI 1971 →, STLFSI 1993 →: a *different population* than breadth (member breadth failed because the decade wants less insurance; the century had no breadth of its own) | 🔬 | the breadth2 standard: a placebo (block-shuffled series) on both eras; prior low — "the era is talking" lesson |
+| B6 | **A VIX-based shock trigger** — VIX > X or a VIX jump instead of a −7 % fall; VIX 1990 → | 🔬 | the shock trigger's 81-cell robustness as the bar; prior: ≈ the price rule, maybe a day faster; a Decision only with a plateau and both eras (1990 → only, so one era) |
+| B7 | **Gold over a century** — datahub monthly 1833 → against the French market: a permanent 10 % gold sleeve was a decade-only test (Sharpe +0.08 for −0.3 return); the century says whether that was the 2020s | 🔬 small | reopens brainstorm #12 with hindsight-free data; a Decision only if the century agrees with the decade |
+| B8 | **Bonds as the de-risk destination** — Treasury yields since 1954 / 1962 → a constant-maturity total-return series: de-risk into bonds instead of cash; a bond sleeve (closed on the decade by 2022) | 🔬 | the multi-asset verdict (−5 … −10 on the decade) re-judged on 60 years; low prior in the 2020s rate regime |
+| B9 | **Fundamentals pipeline** (SEC financial-statement data sets 2009 →): a profitability filter for a *single-name* dip universe | 💡 after B2 | only if B2 finds that profitability separates dips from breaks; otherwise the single-name door stays closed (Dow 30 and 19 of 20 random lists lose) |
+| B10 | **Earnings dates history** (Alpha Vantage, free key): the earnings gate valued on a decade instead of six months of near misses | 🔑 then 🔬 | the gate costs or saves ≤ 0.2 pp/yr either way |
+| B11 | **Longer investable history** (Tiingo, free key): sector ETFs and the 15 names 1999 →, covering 2000–02 and 2008 on real ETFs | 🔑 then 🔬 | the sector floor and the insurance's cost on two more bears; the vol-managed share (C1) on investable data |
+
+## Track C — The freedom areas (where new ideas can still come from)
+
+### C1 Risk preference — the dials the evidence does not set
+
+| item | status | note |
+|---|---|---|
+| **Momentum weight 60 → 70** | 🔑 decision | +0.5 … +0.9 pp/yr on the decade, a bumpier ride (DD −21 vs −20, Sharpe −0.03); the century wants more momentum. A preference, measured |
+| **Insurance on / off** | 🔑 decision | off = +1.6 on the decade, −15 … −20 in a 1929 / 1973 / 2008. The operator keeps it on; revisit only with a stated drawdown tolerance |
+| **Volatility-managed momentum share** (Barroso–Santa-Clara, long-only) | 🚫 until B11 or a live momentum crash | the one century-only survivor (+0.3 … +0.4, beats its placebo, Sharpe 0.86 → 0.90), invisible on the decade; reopen when investable data covers a momentum crash |
+| **SPMO vs 30 / 30 SPMO + MTUM** | 🔑 decision | ~1 pp/yr this decade for diversification of index-construction risk; the century cannot separate them |
+| **Leverage to SPY's volatility** | 🚫 until live proof | +1.5 … +2 net *if* the live book keeps its Sharpe; scales every drawdown; never before years of live evidence |
+| **State the objective in one line** | 💡 | "the worst year I will hold through is −X vs SPY, the worst drawdown −Y": every dial above is set by that line, and the go/stop rule should carry it |
+
+### C2 Information — inputs beyond prices
+
+| item | status | note |
+|---|---|---|
+| Fundamentals (profitability, leverage, accruals) | B2 → B9 | the century sorts first, the pipeline only if they say yes |
+| Earnings dates and surprises | B10 | the gate, and whether a dip *into* earnings is different (Decision 066: nothing at entry predicts a trade, but earnings were not a feature) |
+| Option-implied information (VIX term structure, SKEW, VVIX) | B6, then 💡 | as a regime input it will meet the placebo; the analogue verdict stands until a pre-registered test beats it |
+| Positioning (CFTC) and leverage (FINRA margin) | 💡 low | "who is crowded" as a state variable → the states.py machinery with its placebo; prior low |
+| Sentiment surveys (AAII walled, NAAIM manual) | 💡 low | contrarian signals are weak and already priced in the literature's post-publication decay |
+| News / text | 🚫 | the LLM era's lesson (Decision 060): no skill at the horizon this book trades |
+
+### C3 Instruments
+
+| item | status | note |
+|---|---|---|
+| **Options** — put-writing as the dip entry, collars as the insurance | B1 | the indices answer the question; trading them is a separate build (Alpaca options) |
+| **International equities** | Track E | the one instrument class with a diversification case for *this* book |
+| Futures (trend, carry) | B3 → 🚫 trading | not on Alpaca; a second broker is a project of its own |
+| Shorting | 🚫 | Decision 067 addendum: WML = leverage on momentum, short-the-market = the insurance doubled, the anti-dip mirror loses as a real short |
+| Bonds, gold, commodities | B7, B8 | reopened on long data only |
+
+### C4 Judgment — where the human stays
+
+| item | status | note |
+|---|---|---|
+| The shadow list (A4) and the curator ledger (A5) | ⏳ / 💡 | measure the judgment, never bet the sleeve on it |
+| The universe as a parameter | ✅ principle | a watchlist change is a strategy change (Decision 065); the ETFs are the hindsight-free universe, the names the measured bet |
+| The operator's risk line (C1) | 🔑 | the one judgment the data cannot replace |
+
+### C5 Operations — where live systems fail
+
+| item | status | note |
+|---|---|---|
+| Backups (daily on the host, pulled off-server at every checkup), heartbeat (URL pending), the server-down runbook, the 90-day GTC expiry | ✅ / 🔑 URL | Decision 071 |
+| The fill ledger — live fills vs the backtest's price | ✅ built, ⏳ data | the behaviour leg of the go/stop rule |
+| Execution timing (10:15 vs 15:30 vs close; Alpaca minute bars) | 💡 low | turnover is ~60 % of equity a year: 10 bp = 0.06 pp/yr |
+| The go-live checklist (fund ≥ $25k, W-8BEN, the cash sweep or the SGOV leg, the heartbeat, the tax line) | 🔑 | Decision 071, todo Phase 2.0 |
+| A second broker (international single names, futures) | 💡 later | only if Track E or B3 produces something the first broker cannot trade |
+
+## Track D — Closed doors the new data could reopen (and the ones it cannot)
+
+| closed door | reopened by | status |
+|---|---|---|
+| Put-writing ("untestable here") | Cboe indices 1986 → | **reopened → B1** |
+| Gold 10 % (decade-only, 2020s-flattered) | datahub gold 1833 → + French market | **reopened → B7** |
+| Bonds / multi-asset de-risking (decade-only, 2022-hurt) | yields 1954 → | **reopened → B8**, low prior |
+| Volatility-managed momentum share (century-only survivor) | Tiingo 1999 → (B11), a live momentum crash | **parked → C1** |
+| Member breadth, credit as the insurance's second signal | NFCI 1971 → is a new population | **reopened → B5**, placebo-standard |
+| Shock trigger on VIX | VIX 1990 → | **reopened → B6** |
+| Quality / low-beta as vehicles (USMV, QUAL rejected) | French OP / INV sorts, AQR QMJ / BAB over 60–90 years | **reopened as B2** (a century, not an ETF decade) |
+| Value sleeve | AQR VME, French BM | 🚫 stays closed: long-only value is a drag in a bull decade and a wash over the century; the AMP diversification is long-short |
+| Any single-name dip universe (Dow 30, random lists, S&P 500) | fundamentals (B9) | 🚫 unless B2 says profitability separates dips from breaks |
+| Relative dip, fast-dip filter, down-day entry, entry month, Halloween | — | 🚫 no new data bears on them |
+| Residual momentum, industry rotation beside SPMO, let-winners-run, ATR stops, crash filters, stop cooldowns, own-momentum eligibility, ten market types, regime switching, post-crash tilt, momentum-crash guards, shorts, shock early release | — | 🚫 closed with numbers in Decisions 062–068; the new data does not touch the mechanism |
+| The entry-time model ("can AI pick the trades") | — | 🚫 closed on 1,156 century trades with a placebo |
+
+## Track E — Other markets (diversification)
+
+**The case.** The book is 100 % US equities; the operator is not. International equities are the one instrument class with a real diversification argument for this book: the lost decades differ (Japan 1990–2010, the US 2000–2010, Europe 2007–2017), momentum premia exist in every developed region (French's regional momentum factors), and country or region ETFs are *diversified baskets* — the only universe class on which the dip rule has ever been ≥ 0 (sectors), never single names. The honest caveats: equity correlations converge to 0.8–0.9 in crashes, so the diversification is in the decades, not in the week that hurts; US-listed international ETFs carry the dollar; and single foreign stocks are not on Alpaca.
+
+| # | item | status | note |
+|---|---|---|---|
+| E1 | **Data**: French regional factors and momentum daily (Developed ex-US, Europe, Japan, Asia-Pacific ex-Japan, Developed; Emerging monthly) 1990 →; 39 region / country ETFs on Alpaca 2016 → dividend-adjusted (`data/param_search/alpaca_hist/intl/`: ACWX VEU IEFA IEMG EFA EEM VGK EZU EWJ EPP AAXJ, 20 country funds, IMTM IDMO IQLT IVLU, hedged DBEF HEDJ, VWO VXUS VT) | ✅ 2026-10-29 | MSCI country index histories (longer, daily) are a manual download from MSCI's tool; Tiingo (B11) for 1999 → ETFs |
+| E2 | **Pre-registered test — the international book**: (a) the momentum premium by region on French data 1990 → (does holding regional momentum beat the regional market in both halves?); (b) a momentum ETF for ex-US (IMTM / IDMO, 2015 →) vs ACWX, as SPMO vs SPY was tested; (c) the dip rule on country ETFs (20 baskets) vs the equal-weight basket and vs ACWX — the sector-floor test on a new universe; (d) the correlation of an ex-US two-sleeve book's excess with the US book's; (e) the global blend: US book 50–70 / ex-US book 30–50, decade and 1990 → | 🔬 | a Decision only if the ex-US book beats its own index in both halves *and* the blend improves the drawdown or the Sharpe of the US book without giving back return beyond the placebo's spread |
+| E3 | **Build, if E2 survives**: a second book on Alpaca under the same engine — region ETFs as the dip universe, an ex-US momentum ETF as the sleeve, ACWX as the residual; the engine is universe-agnostic (config: `watchlist`, `momentum_ticker`, `core_ticker`), so this is mostly configuration plus a second plan/state namespace | 💡 after E2 | sizing: two books in one account need the slot and cap arithmetic to be per book |
+| E4 | **Currency**: the operator is CZK-based; USD-denominated ETFs embed the dollar; hedged variants exist (DBEF, HEDJ) | 💡 | a question of its own; the book's benchmark is SPY in USD today |
+| E5 | **Single foreign names** (European / Asian stocks) | 💡 far | needs another broker and point-in-time index membership per market; everything learned about single-name universes in the US (Decision 070) applies first |
+
+## Track F — Method and tooling
+
+| item | status | note |
+|---|---|---|
+| The luck meter in every result (deflated Sharpe, bootstrap band, PBO) — fold into `master.score` | 💡 small | `luck.py` exists; make it automatic |
+| Parsers for the new data (xlsx / xls / CFTC / Shiller) | 💡 on demand | `uv run --with openpyxl`; one loader per source in `datasets.py` as each test needs it |
+| The backtester / live equivalence check at every checkup (fill ledger, plan actions) | ✅ built, ⏳ | Decision 069 leg 1 |
+| The deploy procedure for config + code changes (build api → stop → swap → up → build CLI → retire the staged file) | ✅ | Decision 070 |
+
+## Track G — Toward real money
+
+The order the evidence imposes: A1 checkups → A3 the first selloff (the drawdown leg) → the go-live checklist (C5) → fund at ≥ $25k with the cash sweep or the SGOV leg → the return judged only after three years, with its band. Nothing in Tracks B–E changes that order; they change what the book *is* when it goes live, and each change restarts the clean window.
+
+---
+
+**What I would run first, in order**: B1 (put-writing on the Cboe indices — the biggest untested idea with real data now in hand), E2 (the international book — the diversification case), B2 (quality over a century), then B5 / B6 / B7 as cheap afternoon tests. Everything else waits on a key, a decision, or live time.

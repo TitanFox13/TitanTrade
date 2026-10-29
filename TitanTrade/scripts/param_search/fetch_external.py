@@ -46,6 +46,15 @@ SOURCES = {
                                            "25_Portfolios_ME_OP_5x5_Daily_CSV.zip", "25_Portfolios_ME_BM_5x5_Daily_CSV.zip",
                                            "10_Industry_Portfolios_Daily_CSV.zip", "30_Industry_Portfolios_Daily_CSV.zip",
                                            "Portfolios_Formed_on_BETA_CSV.zip", "Portfolios_Formed_on_ME_Prior_12_2_Daily_CSV.zip")},
+    # Kenneth French international library (Track E of the roadmap): regional factors and momentum, daily where published
+    "french_intl": {k: f"{FRENCH}{k}" for k in ("Developed_ex_US_3_Factors_Daily_CSV.zip", "Developed_ex_US_Mom_Factor_Daily_CSV.zip",
+                                                "Europe_3_Factors_Daily_CSV.zip", "Europe_Mom_Factor_Daily_CSV.zip",
+                                                "Japan_3_Factors_Daily_CSV.zip", "Japan_Mom_Factor_Daily_CSV.zip",
+                                                "Asia_Pacific_ex_Japan_3_Factors_Daily_CSV.zip", "Asia_Pacific_ex_Japan_Mom_Factor_Daily_CSV.zip",
+                                                "Emerging_5_Factors_CSV.zip", "Emerging_MOM_Factor_CSV.zip",
+                                                "Developed_3_Factors_Daily_CSV.zip", "Developed_Mom_Factor_Daily_CSV.zip",
+                                                "Europe_25_Portfolios_ME_Prior_12_2_Daily_CSV.zip", "Japan_25_Portfolios_ME_Prior_12_2_Daily_CSV.zip",
+                                                "Developed_ex_US_25_Portfolios_ME_Prior_12_2_Daily_CSV.zip")},
     # NAAIM exposure index page (the xlsx link is parsed from it), datahub gold monthly 1833 →
     "misc": {"naaim_page.html": "https://naaim.org/programs/naaim-exposure-index/",
              "gold_monthly.csv": "https://datahub.io/core/gold-prices/r/monthly.csv",

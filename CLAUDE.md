@@ -8,7 +8,7 @@ Mechanical equity trading system on Alpaca: two sleeves — a dip-in-uptrend ove
 TitanTrade/                 Python backend: data, signals, plan, risk gates, execution, API + scheduler
 TitanTrade/scripts/         Parameter-search harness (Decision 062)
 TitanTrade/legacy/          Frozen LLM-era modules, tests, scripts and docs — not importable (git tag v2-llm-pipeline)
-docs/                       Project-wide documentation (decisions, features, todo, architecture, insights)
+docs/                       Project-wide documentation (decisions, features, todo, roadmap, architecture, insights)
 ```
 
 The Flutter desktop app was deleted in Decision 063 (unused). The HTTP API is the only front end.
@@ -86,7 +86,7 @@ Dependency flow: leaf modules (broker, trade_state, pricing, cooldown, signals, 
 
 ## Documentation Rules
 
-1. Read ALL `.md` files before starting work (root `docs/`, `TitanTrade/docs/`, this file)
+1. Read ALL `.md` files before starting work (root `docs/`, `TitanTrade/docs/`, this file); `docs/roadmap.md` is the living plan — move an item's status there whenever a Decision changes it
 2. Update the relevant docs with every change, in the same commit
 3. New behaviour needs: a Decision in `docs/decisions.md`, the feature list in `docs/features.md`, a phase in `docs/todo.md`
 4. Tests must mock every external call — zero token spend, zero real orders
