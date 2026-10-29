@@ -33,6 +33,13 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
 - [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
 
+## Phase 2.11: The external data library (2026-10-29) — Decision 072
+Operator: find and store everything beyond prices that could matter, free first. `scripts/param_search/fetch_external.py` → `data/param_search/external/` (271 MB, 122 of 127 items, manifest), archived on titanserver (`archive/param_search/external/`, SEC zips excluded).
+- [x] Fetched: Cboe option-writing benchmarks 1986 → and the VIX family; FRED rates / curve / stress / macro / recessions since 1954; CFTC positioning 1986 →; Shiller 1871 →; AQR century of factor premia, TSMOM, QMJ, BAB, VME; French profitability / investment / size / 5-factor / industry daily sorts; FINRA margin; gold monthly; two SEC statement quarters.
+- [x] Walled / gone recorded: Stooq, Yahoo, LBMA, AAII, Cboe put/call archive, FRED Wilshire + gold; NAAIM needs a manual download.
+- [ ] **Operator (free keys, a minute each)**: Tiingo (the 1999 → ETF and name history), Alpha Vantage (historical earnings dates for the gate valuation); optional small spend: EODHD (~€20/mo) or historicaloptiondata.com (~$100/yr) if the put-writing question goes beyond the Cboe indices.
+- [ ] **Next tests this unlocks (each pre-registered, operator's call)**: (1) put-writing vs the S&P on 40 years of Cboe indices (PUT / BXM / PPUT / CLL inside the book); (2) a century of profitability deciles vs momentum (the quality question before any fundamentals pipeline); (3) AQR trend / carry premia on the operator's eras; (4) rates by era for the carry and insurance pricing.
+
 ## Phase 2.10: Go-live readiness — backups, heartbeat, the T-bill leg, the runbook (2026-10-29) — Decision 071
 Operator: "you can now do 2" (the readiness track). Findings and builds in Decision 071; nothing live changed, code not deployed.
 - [x] Found: Alpaca GTC stops expire after 90 days (`expires_at` on the book: Jan 11 / Jan 22); no backup of `state/` existed; $25k sizes every ETF slot at ≥ 13 shares, $10k is the floor; paper credits no dividends and live cash interest is unverified; taxes are in no number.
