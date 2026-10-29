@@ -86,3 +86,6 @@ titan_trade_app/coverage/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# off-server copies of the state archives (Decision 071)
+backups/
