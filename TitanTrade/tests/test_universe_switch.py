@@ -33,14 +33,11 @@ class TestConfig:
         assert t.watchlist == ETFS and t.shadow_watchlist == ["CRWD", "ANET"] and t.design == "070"
         assert TradingSettings().shadow_watchlist == [] and TradingSettings().design == "068"
 
-    def test_staged_decision_070_file_is_the_live_file_with_the_switch(self):
+    def test_live_watchlist_file_is_the_decision_070_book(self):
         from pathlib import Path
-        data = Path(__file__).resolve().parents[1] / "data"
-        live = json.loads((data / "watchlist.json").read_text())
-        staged = json.loads((data / "watchlist.decision070.json").read_text())
-        assert staged["watchlist"] == ETFS and staged["shadow_watchlist"] == live["watchlist"]
-        assert {k: v for k, v in staged["settings"]["mechanical"].items() if k != "design"} == live["settings"]["mechanical"]
-        assert staged["settings"]["mechanical"]["design"] == "070"
+        live = json.loads((Path(__file__).resolve().parents[1] / "data" / "watchlist.json").read_text())
+        assert live["watchlist"] == ETFS and len(live["shadow_watchlist"]) == 15 and "DXCM" in live["shadow_watchlist"]
+        assert live["settings"]["mechanical"]["design"] == "070" and live["settings"]["mechanical"]["momentum_weight"] == 0.6
 
 
 class TestPlan:

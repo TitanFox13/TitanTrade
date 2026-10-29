@@ -1,24 +1,10 @@
 {
-  "watchlist": [
-    "CRWD",
-    "ANET",
-    "LLY",
-    "DXCM",
-    "HCA",
-    "JPM",
-    "GS",
-    "DVN",
-    "WMT",
-    "URI",
-    "GE",
-    "DASH",
-    "DECK",
-    "FCX",
-    "EQIX"
-  ],
+  "watchlist": ["XLK", "XLV", "XLF", "XLE", "XLI", "XLY", "XLB", "XLRE", "XLP", "XLU", "XLC"],
+  "shadow_watchlist": ["CRWD", "ANET", "LLY", "DXCM", "HCA", "JPM", "GS", "DVN", "WMT", "URI", "GE", "DASH", "DECK", "FCX", "EQIX"],
   "settings": {
     "trading_mode": "paper",
     "mechanical": {
+      "design": "070",
       "dip_pct": 0.08,
       "dip_lookback_days": 90,
       "trend_sma_days": 150,

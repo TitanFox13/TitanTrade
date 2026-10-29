@@ -1,6 +1,6 @@
 # TitanTrade
 
-Mechanical equity trading system on Alpaca: two sleeves — a dip-in-uptrend overlay with broker-side stops on top of a SPY residual (40%; Decision 070 moves its universe from the hand-picked list to the 11 sector ETFs at the next deploy, the list becoming a tracked-only `shadow_watchlist`) and a momentum ETF held (SPMO, 60%) — with a two-signal insurance and a shock trigger scaling exposure, tuned on 10–99 years of history (Decisions 061–063, 068). Paper account; going live is gated (todo Phase 2.0). The only LLM call left is a monthly Claude universe proposal that places no orders.
+Mechanical equity trading system on Alpaca: two sleeves — a dip-in-uptrend overlay on the 11 sector ETFs with broker-side stops on top of a SPY residual (40%; Decision 070 — the hand-picked 15 names are the tracked-only `shadow_watchlist`) and a momentum ETF held (SPMO, 60%) — with a two-signal insurance and a shock trigger scaling exposure, tuned on 10–99 years of history (Decisions 061–063, 068). Paper account; going live is gated (todo Phase 2.0). The only LLM call left is a monthly Claude universe proposal that places no orders.
 
 ## Project Structure
 

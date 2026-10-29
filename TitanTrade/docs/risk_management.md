@@ -48,7 +48,7 @@ Evaluated in order for every NEW item (an entry that expired unfilled is simply 
 | `tp_pct` / `stop_pct` / `max_hold_days` | 0.20 / 0.12 / 60 | same |
 | `insurance_sma_days` / `insurance_breadth` / `insurance_scale` | 200 / 0.5 / 0.5 | same |
 | `core_ticker` / `core_rebalance_band_pct` | SPY / 0.05 | config.py |
-| `design` / `shadow_watchlist` | "068" / [] today; "070" / the 15 names in the staged Decision 070 file | `data/watchlist.json` |
+| `design` / `shadow_watchlist` | "070" / the 15 hand-picked names (tracked, not traded) | `data/watchlist.json` |
 | `MAX_DRAWDOWN_PCT` | 8.0 | risk_manager.py |
 | `SUSPECT_VALUE_DEVIATION_PCT` | 50.0 | risk_manager.py |
 | `MIN_CASH_RESERVE_PCT` | 5.0 | risk_manager.py |
