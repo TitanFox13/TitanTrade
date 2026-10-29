@@ -147,10 +147,10 @@ class TestEnsureGtcStopOnFill:
     @patch("titantrade.entries.cancel_order")
     @patch("titantrade.entries.get_open_orders")
     @patch("titantrade.entries.get_position", return_value={"symbol": "AAPL", "qty": "10"})
-    @patch("titantrade.entries.get_order", return_value={"status": "filled"})
+    @patch("titantrade.entries.get_order", return_value={"status": "filled", "filled_avg_price": "100.25"})
     def test_fill_replaces_held_leg_with_gtc_stop(self, mock_order, mock_pos, mock_oo, mock_cancel, mock_wait, mock_stop, fake_config):
         mock_oo.return_value = [{"id": "tp-leg", "type": "limit", "side": "sell"}, {"id": "held-stop", "type": "stop_limit", "side": "sell"}]
-        _ensure_gtc_stop_on_fill("AAPL", {"id": "parent"}, 95.0, fake_config)
+        assert _ensure_gtc_stop_on_fill("AAPL", {"id": "parent"}, 95.0, fake_config) == 100.25   # the fill ledger's price (069)
         mock_cancel.assert_any_call("tp-leg", fake_config)
         mock_wait.assert_any_call("held-stop", fake_config)
         mock_stop.assert_called_once_with("AAPL", 10.0, 95.0, fake_config)
@@ -160,7 +160,7 @@ class TestEnsureGtcStopOnFill:
     @patch("titantrade.entries.time.sleep", return_value=None)
     @patch("titantrade.entries.get_order", return_value={"status": "new"})
     def test_unfilled_entry_is_noop(self, mock_order, mock_sleep, mock_cancel, mock_stop, fake_config):
-        _ensure_gtc_stop_on_fill("AAPL", {"id": "parent"}, 95.0, fake_config)
+        assert _ensure_gtc_stop_on_fill("AAPL", {"id": "parent"}, 95.0, fake_config) is None
         mock_cancel.assert_not_called()
         mock_stop.assert_not_called()
 

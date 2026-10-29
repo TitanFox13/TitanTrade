@@ -55,9 +55,11 @@ def _ensure_gtc_stop_on_fill(
     parent_order: dict[str, Any] | None,
     stop_price: float,
     cfg: Config,
-) -> None:
+) -> float | None:
     """Poll a just-placed bracket entry for a fill; on fill, replace the
-    unreliable ``held`` bracket stop leg with a standalone GTC stop.
+    unreliable ``held`` bracket stop leg with a standalone GTC stop. Returns
+    the average fill price when the entry filled inside the poll window
+    (the fill ledger, Decision 069), else None.
 
     See the module-level note on ``_ENTRY_FILL_POLL_SECONDS`` for why this is
     needed. No-op when the entry doesn't fill within the poll window — the
@@ -66,12 +68,13 @@ def _ensure_gtc_stop_on_fill(
     available qty) so the position is not left silently bare.
     """
     if not isinstance(parent_order, dict) or not parent_order.get("id"):
-        return
+        return None
     if not stop_price or stop_price <= 0:
-        return
+        return None
     parent_id = parent_order["id"]
 
     status = None
+    od: dict[str, Any] | None = None
     waited = 0.0
     while waited < _ENTRY_FILL_POLL_SECONDS:
         od = get_order(parent_id, cfg)
@@ -88,7 +91,11 @@ def _ensure_gtc_stop_on_fill(
             f"left in place; next-cycle heal will establish the GTC stop "
             f"if/when it fills."
         )
-        return
+        return None
+    try:
+        fill_price: float | None = float((od or {}).get("filled_avg_price") or 0) or None
+    except (TypeError, ValueError):
+        fill_price = None
 
     # Filled: the bracket stop leg is 'held' and won't protect. Cancel the OCO
     # legs (releasing the qty), settle, then place a visible GTC stop. The TP
@@ -96,10 +103,10 @@ def _ensure_gtc_stop_on_fill(
     # reinstates a TP if appropriate; the stop is the safety-critical leg.
     position = get_position(ticker, cfg)
     if not position:
-        return
+        return fill_price
     qty = float(position.get("qty", 0))
     if qty <= 0 or _is_fractional(qty):
-        return
+        return fill_price
 
     open_orders = get_open_orders(ticker, cfg)
     for o in open_orders:
@@ -124,6 +131,7 @@ def _ensure_gtc_stop_on_fill(
             f"CRITICAL: {ticker} entry filled but GTC stop placement failed: "
             f"{exc} — next-cycle heal will retry"
         )
+    return fill_price
 
 
 def open_buy_commitment(cfg: Config, exclude_ticker: str | None = None) -> float:
@@ -311,12 +319,13 @@ def handle_entry(
         ticker=ticker, qty=shares, entry_limit_price=entry_price,
         stop_loss_price=stop_price, take_profit_price=target_price, cfg=cfg,
     )
-    _ensure_gtc_stop_on_fill(ticker, parent, stop_price, cfg)
+    fill_price = _ensure_gtc_stop_on_fill(ticker, parent, stop_price, cfg)
 
     trade = _trade_record(
         ticker=ticker, action="BUY", shares=shares, price=entry_price,
         trigger="entry", reasoning=item.get("reason", ""),
         stop_price=stop_price, target_price=target_price, order_type="bracket",
+        fill_price=fill_price if isinstance(fill_price, (int, float)) else None,
         dip_pct=item.get("dip_pct"), risk_flags=check.get("flags", []),
         gate_results=check.get("gate_results", {}),
         context=_build_trade_context(ticker, data_bundle),

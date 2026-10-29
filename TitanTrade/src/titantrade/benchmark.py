@@ -153,6 +153,8 @@ def compute_metrics(
     active = [a - b for a, b in zip(rp, rm)]
     std_active = _std(active)
     ir = (_mean(active) / std_active * math.sqrt(periods_per_year)) if std_active > 0 else None
+    tracking_error = std_active * math.sqrt(periods_per_year)
+    excess_annual = _mean(active) * periods_per_year
 
     total_p = _prod_growth(rp)
     total_m = _prod_growth(rm)
@@ -175,6 +177,8 @@ def compute_metrics(
         "sharpe_strategy": _r(sharpe_p, 2),
         "sharpe_spy": _r(sharpe_m, 2),
         "info_ratio": _r(ir, 2),
+        "tracking_error_annual_pct": _r(tracking_error * 100, 2),
+        "excess_annual_pct": _r(excess_annual * 100, 2),
         "correlation": _r(corr, 3),
         "r_squared": _r(r2, 3),
         "vol_strategy_annual_pct": _r(std_p * math.sqrt(periods_per_year) * 100, 2),
@@ -195,19 +199,37 @@ def compute_metrics(
 # Below this many daily returns, beta / alpha / Sharpe are noise (a 4-day window
 # once "proved" +80%/yr alpha). The verdict and the ratios are withheld.
 MIN_VERDICT_DAYS = 20
+# Decision 069: the return edge is a century claim; at the book's ~9%/yr tracking
+# error a +1.4 pp/yr edge needs ~170 years to reach t = 2, so under three years the
+# verdict reports the excess with its band and judges nothing.
+MIN_RETURN_VERDICT_DAYS = 3 * TRADING_DAYS_PER_YEAR
+
+
+def excess_band_pp(metrics: dict[str, Any]) -> float | None:
+    """Half-width of the 90% band on the annualised excess: 1.645 × tracking error / √years."""
+    te, n = metrics.get("tracking_error_annual_pct"), metrics.get("n_days")
+    if te is None or not isinstance(n, int) or n < 2:
+        return None
+    return round(1.645 * te / math.sqrt(n / TRADING_DAYS_PER_YEAR), 2)
 
 
 def classify(metrics: dict[str, Any]) -> str:
     """One-line plain-English verdict from a metrics dict.
 
     Encodes the framing from the strategy review: the question is alpha and
-    Sharpe, not raw return. Positive alpha + Sharpe >= SPY = adding value.
+    Sharpe, not raw return. Positive alpha + Sharpe >= SPY = adding value —
+    but only once the window can carry a return verdict at all (Decision 069).
     """
     if metrics.get("insufficient_data"):
         return "Insufficient data — need at least a few trading days of history."
     n = metrics.get("n_days")
     if isinstance(n, int) and n < MIN_VERDICT_DAYS:
         return f"Too few trading days ({n} of {MIN_VERDICT_DAYS}) for a verdict — the ratios are a sample, not a result."
+    if isinstance(n, int) and n < MIN_RETURN_VERDICT_DAYS:
+        ex, band = metrics.get("excess_annual_pct"), excess_band_pp(metrics)
+        detail = f": excess {ex:+.1f} pp/yr, 90% band ±{band:.1f}" if ex is not None and band is not None else ""
+        return (f"Too short to judge the return ({n} of {MIN_RETURN_VERDICT_DAYS} trading days){detail} — "
+                "β and Sharpe describe the ride, not the edge.")
 
     alpha = metrics.get("alpha_annual_pct")
     sp, sm = metrics.get("sharpe_strategy"), metrics.get("sharpe_spy")
@@ -440,10 +462,15 @@ def format_summary_line(metrics: dict[str, Any] | None) -> str | None:
             return None
         return f"{n}d ret {tp:+.1f}% vs SPY {tm:+.1f}% (too few days for ratios)"
 
+    short = isinstance(n, int) and n < MIN_RETURN_VERDICT_DAYS
     parts: list[str] = []
     if beta is not None:
         parts.append(f"β {beta:.2f}")
-    if alpha is not None:
+    if short:
+        ex, band = metrics.get("excess_annual_pct"), excess_band_pp(metrics)
+        if ex is not None and band is not None:
+            parts.append(f"excess {ex:+.1f} ±{band:.1f} pp/yr (too short to judge)")
+    elif alpha is not None:
         parts.append(f"α {alpha:+.1f}%/yr")
     if sp is not None and sm is not None:
         parts.append(f"Sharpe {sp:.2f} vs SPY {sm:.2f}")
@@ -474,6 +501,9 @@ def print_report(metrics: dict[str, Any]) -> None:
     print(f"  Total return    strategy {_fmt(metrics['total_return_strategy_pct'], '%'):>10}"
           f"   SPY {_fmt(metrics['total_return_spy_pct'], '%'):>10}")
     print(f"  Excess (vs SPY) {_fmt(metrics['excess_return_pct'], '%'):>10}")
+    band = excess_band_pp(metrics)
+    print(f"  Excess (ann.)   {_fmt(metrics.get('excess_annual_pct'), ' pp/yr'):>10}"
+          f"   90% band ±{_fmt(band)}   tracking error {_fmt(metrics.get('tracking_error_annual_pct'), '%')}")
     print("-" * 64)
     print(f"  Beta            {_fmt(metrics['beta']):>10}")
     print(f"  Alpha (ann.)    {_fmt(metrics['alpha_annual_pct'], '%'):>10}")

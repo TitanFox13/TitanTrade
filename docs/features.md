@@ -96,7 +96,13 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 - Beta, Jensen's alpha (annualized), Sharpe for both series, information ratio, up / down capture, correlation / R², volatility, total and excess return, max drawdown, a one-line verdict
 - Source: Alpaca portfolio-equity history (with the just-closed session appended from the 15Min history, 059) aligned to SPY SIP daily closes (058)
-- CLI `benchmark [days] [--since]`, `GET /api/benchmark`, `GET /api/benchmark/refresh?days=N|since=…`, a line on the daily summary. The daily refresh anchors at the strategy start (`strategy.json → started_at`, Decision 065) so the window never straddles two strategies; under 20 trading days the verdict and the ratios are withheld and only the returns are shown
+- CLI `benchmark [days] [--since]`, `GET /api/benchmark`, `GET /api/benchmark/refresh?days=N|since=…`, a line on the daily summary. The daily refresh anchors at the strategy start (`strategy.json → started_at`, Decision 065) so the window never straddles two strategies; under 20 trading days the verdict and the ratios are withheld and only the returns are shown; under 3 years (756 trading days) the verdict reads "too short to judge the return" with the annualised excess and its 90% band (1.645 × tracking error / √years) and the summary line shows that band in place of alpha (Decision 069)
+
+## Fill-vs-Backtest Ledger (Decision 069)
+
+- `state/fill_ledger.json`: one row per BUY entry — the fill price (captured from the bracket's `filled_avg_price` when the entry fills inside the poll window, else the bracket limit, flagged) against the close of the session it filled in, the price the backtest would have paid; `gap_pct` positive = the live book paid more
+- Appended by the daily summary once the session's SIP bar is published (entries up to 10 days old are retried); rows are never edited; `GET /api/fill-ledger` serves the rows with the median / mean / worst gap; the Discord summary shows the median and today's rows
+- The behaviour leg of the go/stop rule reads the median gap at every checkup
 
 ## Backtesting & Parameter Search
 
@@ -106,11 +112,11 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 ## HTTP API
 
-`/api/health`, `/api/portfolio`, `/api/plan`, `/api/trades`, `/api/near-misses`, `/api/costs`, `/api/universe-proposal`, `/api/post-mortem`, `/api/benchmark`, `/api/benchmark/refresh`, `/api/settings`, `PUT /api/settings/mode`, `/api/watchlist` (GET / PUT), `/api/scheduler`, `/api/scheduler/{id}`, `POST /api/scheduler/{id}/trigger`, `PUT /api/scheduler/{id}/enabled`. See [TitanTrade/docs/api_reference.md](../TitanTrade/docs/api_reference.md).
+`/api/health`, `/api/portfolio`, `/api/plan`, `/api/trades`, `/api/near-misses`, `/api/costs`, `/api/universe-proposal`, `/api/post-mortem`, `/api/benchmark`, `/api/benchmark/refresh`, `/api/fill-ledger`, `/api/settings`, `PUT /api/settings/mode`, `/api/watchlist` (GET / PUT), `/api/scheduler`, `/api/scheduler/{id}`, `POST /api/scheduler/{id}/trigger`, `PUT /api/scheduler/{id}/enabled`. See [TitanTrade/docs/api_reference.md](../TitanTrade/docs/api_reference.md).
 
 ## Test Suite (zero token spend)
 
-243 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
+256 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
 
 | File | Covers |
 |------|--------|
@@ -122,7 +128,8 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 | `test_broker.py` | stop placement races, bracket whole-share guard, market hours, cancel polling |
 | `test_core_allocation.py`, `test_cooldown.py`, `test_trade_state.py`, `test_alerts.py` | core rebalance, cooldown records + override, trade log / archival / record builders, observability alerts |
 | `test_scheduler.py`, `test_api_settings.py`, `test_trading_mode.py`, `test_notifier.py` | scheduler wiring and API, settings endpoints, credential selection, Discord embeds + daily summary |
-| `test_market_data.py`, `test_benchmark.py`, `test_indicators.py`, `test_retry.py`, `test_logger.py` | data facade, benchmark maths, ATR, retry policy, logging |
+| `test_market_data.py`, `test_benchmark.py`, `test_indicators.py`, `test_retry.py`, `test_logger.py` | data facade, benchmark maths incl. the 3-year return guard, ATR, retry policy, logging |
+| `test_fill_ledger.py` | gap maths, Eastern session date, idempotent update with missing bars, the API endpoint and the summary field |
 
 ```bash
 cd TitanTrade && uv run --extra test python -m pytest tests/ -q

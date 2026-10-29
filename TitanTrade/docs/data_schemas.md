@@ -110,7 +110,7 @@ A stock that failed to fetch carries `"error"` and empty inputs; the plan treats
 {"trades": [{
   "id": "trade_3f9a1c2e", "ticker": "URI", "action": "BUY", "shares": 26.0, "price": 1068.4, "total_value": 27778.4,
   "timestamp": "2026-10-13T14:16:41+00:00", "trigger": "entry", "reasoning": "11.2% below its 90-day high, above its 150-day SMA",
-  "stop_price": 940.19, "target_price": 1282.08, "order_type": "bracket", "dip_pct": 0.112,
+  "stop_price": 940.19, "target_price": 1282.08, "order_type": "bracket", "fill_price": 1065.0, "dip_pct": 0.112,
   "risk_flags": [], "gate_results": {"earnings": {"passed": true, "detail": "…"}, "…": "…"},
   "context": {"close": 1065.0, "high_lookback": 1199.5, "sma_trend": 1010.2, "atr_14": 24.1,
               "earnings_days_away": 12, "sector": "Industrials", "spy_return_5d": 1.2, "sector_breadth": 0.4545}
@@ -119,7 +119,7 @@ A stock that failed to fetch carries `"error"` and empty inputs; the plan treats
 
 | `trigger` | Written by |
 |-----------|-----------|
-| `entry` (records before Decision 064 may carry `bracket_resubmission`) | entries (BUY) |
+| `entry` (records before Decision 064 may carry `bracket_resubmission`) | entries (BUY); `price` is the bracket limit (live × 1.003), `fill_price` the average fill when the entry filled inside the poll window, else `null` (069) |
 | `target`, `holding_limit` | executor via the settled close (SELL) |
 | `orphan_close`, `gap_down_protection` | protection (SELL) |
 | `core_rebalance` | core_allocation (BUY / SELL of SPY) |
@@ -149,7 +149,7 @@ Entries blocked by ≤ 2 gates: `{"near_misses": [{"id": "nm_…", "timestamp", 
 ```json
 {
   "insufficient_data": false, "n_days": 13, "beta": 0.841, "alpha_annual_pct": 32.46,
-  "sharpe_strategy": 0.46, "sharpe_spy": -1.44, "info_ratio": 3.97, "correlation": 0.883, "r_squared": 0.78,
+  "sharpe_strategy": 0.46, "sharpe_spy": -1.44, "info_ratio": 3.97, "tracking_error_annual_pct": 9.1, "excess_annual_pct": 4.0, "correlation": 0.883, "r_squared": 0.78,
   "vol_strategy_annual_pct": 18.72, "vol_spy_annual_pct": 19.66,
   "total_return_strategy_pct": 0.36, "total_return_spy_pct": -1.54, "excess_return_pct": 1.9,
   "up_capture": 0.98, "down_capture": 0.71, "up_days": 7, "down_days": 6,
@@ -159,7 +159,16 @@ Entries blocked by ≤ 2 gates: `{"near_misses": [{"id": "nm_…", "timestamp", 
 }
 ```
 
-`verdict` reads "Too few trading days (N of 20)…" and the daily-summary line shows returns only while `n_days` < 20 (Decision 065). Beta = cov / var of daily returns vs SPY; alpha = Jensen's, annualized; `down_capture < up_capture` is the defensive signature; drawdowns ≤ 0. Equity comes from Alpaca's portfolio history (the just-closed session appended from the 15Min series), SPY from SIP daily closes, aligned by trading date.
+`verdict` reads "Too few trading days (N of 20)…" and the daily-summary line shows returns only while `n_days` < 20 (Decision 065); while `n_days` < 756 (3 years) it reads "Too short to judge the return (N of 756 trading days): excess ±x pp/yr, 90% band ±y…" and the summary line shows `excess_annual_pct` ± the band (1.645 × `tracking_error_annual_pct` / √years) instead of alpha (Decision 069). Beta = cov / var of daily returns vs SPY; alpha = Jensen's, annualized; `down_capture < up_capture` is the defensive signature; drawdowns ≤ 0. Equity comes from Alpaca's portfolio history (the just-closed session appended from the 15Min series), SPY from SIP daily closes, aligned by trading date.
+
+## 11b. Fill Ledger (`state/fill_ledger.json`, Decision 069)
+
+```json
+{"rows": [{"trade_id": "trade_3f9a1c2e", "ticker": "URI", "date": "2026-10-13", "fill_price": 1065.0, "fill_known": true,
+           "backtest_close": 1060.0, "gap_pct": 0.472}]}
+```
+
+One row per BUY entry, appended by the daily summary once the session's SIP bar is published (entries up to 10 days old are retried; rows are never edited). `date` is the Eastern session of the order; `fill_price` is the trade's `fill_price` when captured (`fill_known` true), else the bracket limit; `backtest_close` is that session's close, the price the backtest fills at; `gap_pct` = fill / close − 1 in %, positive = paid more. `GET /api/fill-ledger` adds `summary` (`n`, `median_gap_pct`, `mean_gap_pct`, `worst_gap_pct`, `fills_known`).
 
 ## 12. Other
 

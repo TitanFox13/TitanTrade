@@ -33,7 +33,7 @@ The backend has two faces: a CLI (one-off commands via `docker compose run`) and
 `protection.check_gap_down_protection` then `executor.ensure_stop_coverage` (a GTC stop for any whole-share HOLD position without one).
 
 ### 5. Daily summary (16:30 ET weekdays) and curate (first Sunday 15:00 ET)
-Discord summary with the plan section + benchmark refresh anchored at `mechanical.benchmark_window_start()` (`window_started_at`, else `started_at`; Decisions 065 / 068); the Claude universe proposal and post-mortem.
+Discord summary with the plan section + benchmark refresh anchored at `mechanical.benchmark_window_start()` (`window_started_at`, else `started_at`; Decisions 065 / 068) + the fill ledger update (`fill_ledger.update_fill_ledger`: every recent BUY entry gets its session close from SIP bars, Decision 069); the Claude universe proposal and post-mortem.
 
 ---
 
@@ -60,6 +60,7 @@ config.py, logger.py, retry.py
 ├── executor.py          <- execute_trades orchestrator, stop coverage, held exits (uses all of the above)
 ├── curator.py           <- Claude universe proposal + post-mortem (uses market_data, cost_logger, notifier)
 ├── benchmark.py         <- metrics vs SPY (broker portfolio history + SIP bars)
+├── fill_ledger.py       <- fill vs the backtest's price per entry (trade log + SIP bars)
 ├── backtest/            <- data_loader (SIP bars), mechanical (backtester + walk-forward on signals.py)
 ├── notifier.py          <- Discord embeds + daily summary
 ├── scheduler.py         <- APScheduler jobs → the commands in __main__
@@ -85,6 +86,7 @@ No module imports `executor`. `executor.py` re-exports the broker functions it c
 | `alert_state.json` | Alert dedup | alerts |
 | `costs.json` | Claude token spend | cost_logger (curator) |
 | `benchmark_metrics.json` | Metrics vs SPY | benchmark |
+| `fill_ledger.json` | Fill vs session close per entry, median gap (069) | fill_ledger (daily summary) |
 | `universe_proposal.json`, `post_mortem.json` | Monthly curation | curator |
 | `backtest_mechanical.json` | Last backtest | backtest-mech |
 | `sector_cache.json` | ticker → sector | market_context |

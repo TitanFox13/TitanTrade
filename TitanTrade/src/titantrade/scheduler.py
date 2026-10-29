@@ -107,6 +107,16 @@ def _run_daily_summary() -> str:
         compute_benchmark(load_config(), lookback_days=90, since=started[:10] if started else None)
     except Exception:
         log.exception("Benchmark refresh failed — daily summary will use stale/no metrics")
+    # Decision 069: the fill ledger needs the session's close, published by now (SIP).
+    try:
+        from .config import load_config
+        from .fill_ledger import update_fill_ledger
+
+        added = update_fill_ledger(load_config())
+        if added:
+            log.info(f"Fill ledger: {added} row(s) added")
+    except Exception:
+        log.exception("Fill ledger update failed — daily summary continues")
 
     from .notifier import send_daily_summary
     return send_daily_summary()

@@ -290,6 +290,7 @@ class TestDailySummaryWindow:
         from titantrade.scheduler import _run_daily_summary
         (tmp_state_dir / "strategy.json").write_text(json.dumps({"strategy": "mechanical", "started_at": "2026-10-13T12:43:24+00:00"}))
         with patch("titantrade.benchmark.compute_benchmark") as bench, \
+             patch("titantrade.fill_ledger.update_fill_ledger", return_value=0), \
              patch("titantrade.notifier.send_daily_summary", return_value="daily summary sent"), \
              patch("titantrade.config.load_config", return_value=object()):
             assert _run_daily_summary() == "daily summary sent"
@@ -299,6 +300,7 @@ class TestDailySummaryWindow:
         from unittest.mock import patch
         from titantrade.scheduler import _run_daily_summary
         with patch("titantrade.benchmark.compute_benchmark") as bench, \
+             patch("titantrade.fill_ledger.update_fill_ledger", return_value=0), \
              patch("titantrade.notifier.send_daily_summary", return_value="ok"), \
              patch("titantrade.config.load_config", return_value=object()):
             _run_daily_summary()

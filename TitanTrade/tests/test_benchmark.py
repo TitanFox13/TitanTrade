@@ -68,7 +68,7 @@ class TestComputeMetrics:
         assert m["up_days"] == 2
         assert m["down_days"] == 2
         # Positive alpha + higher Sharpe than SPY → "adding value".
-        assert "Adding value" in bm.classify({**m, "n_days": 30})   # ratios need ≥ 20 days (Decision 065)
+        assert "Adding value" in bm.classify({**m, "n_days": 800})   # a return verdict needs 3 years (Decision 069)
 
     def test_flat_benchmark_beta_undefined(self):
         spy = [100, 100, 100, 100]  # zero variance
@@ -76,7 +76,7 @@ class TestComputeMetrics:
         m = bm.compute_metrics(strat, spy)
         assert m["beta"] is None
         assert m["alpha_annual_pct"] is None
-        assert "Beta undefined" in bm.classify({**m, "n_days": 30})
+        assert "Beta undefined" in bm.classify({**m, "n_days": 800})
 
     def test_insufficient_data(self):
         assert bm.compute_metrics([100.0], [100.0])["insufficient_data"] is True
@@ -130,7 +130,7 @@ class TestFormatSummaryLine:
     def test_renders_key_metrics(self):
         line = bm.format_summary_line({
             "insufficient_data": False, "beta": 0.78, "alpha_annual_pct": 12.3,
-            "sharpe_strategy": 1.4, "sharpe_spy": 0.9, "n_days": 30,
+            "sharpe_strategy": 1.4, "sharpe_spy": 0.9, "n_days": 800,
             "total_return_strategy_pct": 1.8, "total_return_spy_pct": -1.5,
         })
         assert "β 0.78" in line
@@ -372,5 +372,34 @@ class TestShortWindowGuard:
         line = bm.format_summary_line(m)
         assert line == "4d ret -1.1% vs SPY -1.5% (too few days for ratios)"
         m["n_days"] = bm.MIN_VERDICT_DAYS
-        assert "Adding value" in bm.classify({**m, "n_days": 30})   # ratios need ≥ 20 days (Decision 065)
-        assert "α +80.9%/yr" in bm.format_summary_line(m)
+        assert "Adding value" in bm.classify({**m, "n_days": 800})   # a return verdict needs 3 years (Decision 069)
+        assert "α +80.9%/yr" in bm.format_summary_line({**m, "n_days": 800})
+
+
+class TestReturnVerdictUnderThreeYears:
+    """Decision 069: under 3 years the verdict reports the excess with its 90% band and judges nothing."""
+    M = {"n_days": 63, "beta": 0.6, "alpha_annual_pct": 12.0, "sharpe_strategy": 1.4, "sharpe_spy": 0.9,
+         "total_return_strategy_pct": 2.0, "total_return_spy_pct": 1.0, "excess_annual_pct": 4.0, "tracking_error_annual_pct": 9.0}
+
+    def test_band_is_1645_te_over_root_years(self):
+        assert bm.excess_band_pp(self.M) == pytest.approx(1.645 * 9.0 / 0.5, abs=0.01)   # 63 days = a quarter
+
+    def test_verdict_reports_the_band_and_judges_nothing(self):
+        v = bm.classify(self.M)
+        assert v.startswith("Too short to judge the return (63 of 756 trading days): excess +4.0 pp/yr, 90% band ±29.6")
+        assert "Adding value" not in v
+        assert "Adding value" in bm.classify({**self.M, "n_days": 756})
+
+    def test_summary_line_shows_the_band_not_alpha(self):
+        line = bm.format_summary_line(self.M)
+        assert "excess +4.0 ±29.6 pp/yr (too short to judge)" in line
+        assert "α" not in line and "β 0.60" in line and "Sharpe 1.40 vs SPY 0.90" in line
+
+    def test_old_metrics_without_the_band_still_say_too_short(self):
+        v = bm.classify({k: v for k, v in self.M.items() if k not in ("excess_annual_pct", "tracking_error_annual_pct")})
+        assert v.startswith("Too short to judge the return (63 of 756 trading days) —")
+
+    def test_compute_metrics_carries_excess_and_tracking_error(self):
+        rm = [0.02, -0.01, 0.015, -0.02]
+        m = bm.compute_metrics(_levels(100, [0.5 * r + 0.001 for r in rm]), _levels(100, rm))
+        assert m["tracking_error_annual_pct"] > 0 and m["excess_annual_pct"] is not None

@@ -79,6 +79,7 @@ def tmp_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "titantrade.cooldown",
         "titantrade.mechanical", "titantrade.curator",
         "titantrade.trade_state", "titantrade.alerts", "titantrade.benchmark",
+        "titantrade.fill_ledger",
     ):
         monkeypatch.setattr(f"{mod}.STATE_DIR", state, raising=False)
     return state

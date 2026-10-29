@@ -327,6 +327,19 @@ def send_daily_summary() -> str:
             "inline": False,
         })
 
+    # --- Fill vs backtest (Decision 069, behaviour leg) ---
+    from .fill_ledger import load_ledger, summary
+    rows = load_ledger().get("rows", [])
+    ledger = summary(rows)
+    if ledger.get("n"):
+        todays_rows = [r for r in rows if r.get("date") == datetime.now(timezone.utc).strftime("%Y-%m-%d")]
+        fields.append({
+            "name": "Fill vs backtest",
+            "value": f"{ledger['n']} entries, median gap {ledger['median_gap_pct']:+.2f}%"
+                     + (" | today: " + ", ".join(f"{r['ticker']} {r['gap_pct']:+.2f}%" for r in todays_rows) if todays_rows else ""),
+            "inline": False,
+        })
+
     # --- Trading mode ---
     from .config import load_watchlist
     settings = load_watchlist()

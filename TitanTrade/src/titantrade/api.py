@@ -132,6 +132,15 @@ def post_mortem() -> dict:
     return _state_or_404("post_mortem.json")
 
 
+@app.get("/api/fill-ledger")
+def fill_ledger() -> dict:
+    """Fill vs the backtest's price per entry (Decision 069) with the median gap."""
+    from .fill_ledger import load_ledger, summary
+
+    rows = load_ledger().get("rows", [])
+    return {"summary": summary(rows), "rows": rows}
+
+
 # --- Benchmark -----------------------------------------------------------------
 
 @app.get("/api/benchmark")

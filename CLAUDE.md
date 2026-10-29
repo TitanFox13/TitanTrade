@@ -34,7 +34,7 @@ uv run --with numpy python scripts/param_search/search.py           # Parameter 
 cd TitanTrade && uv run --extra test python -m pytest tests/ -q
 ```
 
-`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 243 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens. Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
+`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 256 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens. Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
 
 ### Docker (production)
 
@@ -54,7 +54,7 @@ Deploy = `git pull && docker compose build api titantrade && docker compose up -
 - **Executor** (`executor.py` with `entries.py`, `protection.py`, `core_allocation.py`): orphan close → gap check → residual SPY core, then the SPMO sleeve → stop-out cooldowns → NEW entries (one near-market bracket, GTC stop on fill) → HOLD management (stop coverage, +target / holding-limit exits through a cancel-settle-close).
 - **Curator** (`curator.py`, Claude, monthly): universe proposal + post-mortem, advisory only.
 - **API + scheduler** (`api.py`, `scheduler.py`): FastAPI serving the state files at trade.praguefun.cz (Cloudflare tunnel); APScheduler jobs from `data/schedule.json` run inside the API container.
-- **Benchmark** (`benchmark.py`): beta / alpha / Sharpe / capture vs SPY over the clean window (`strategy.json → window_started_at`, else `started_at`), refreshed by the daily summary; ratios and the verdict are withheld under 20 trading days.
+- **Benchmark** (`benchmark.py`): beta / alpha / Sharpe / capture vs SPY over the clean window (`strategy.json → window_started_at`, else `started_at`), refreshed by the daily summary; ratios and the verdict are withheld under 20 trading days; under 3 years the verdict reports the annualised excess with its 90% band and judges nothing (Decision 069).
 
 ## Key Files
 
@@ -71,6 +71,7 @@ Deploy = `git pull && docker compose build api titantrade && docker compose up -
 | `src/titantrade/pricing.py` | Near-market entry + stop / target levels, bracket sanity checks, ATR lookup, earnings block |
 | `src/titantrade/cooldown.py` | 72 h re-entry cooldown after a stop-out; override after 24 h at ≥ 1% above the exit |
 | `src/titantrade/trade_state.py` | Trade log + near-miss store (archival), opening-buy lookups, record builders |
+| `src/titantrade/fill_ledger.py` | Fill-vs-backtest ledger (Decision 069): each entry's fill against the session close the backtest would have paid; appended by the daily summary |
 | `src/titantrade/alerts.py` | Discord alerts: stuck in cash, ticker churn |
 | `src/titantrade/data_fetcher.py`, `market_context.py` | Data bundle; sector cache, sector breadth, SPY context |
 | `src/titantrade/curator.py` | Monthly Claude universe proposal + post-mortem (`_call_claude`, cost-logged) |
@@ -106,5 +107,6 @@ Dependency flow: leaf modules (broker, trade_state, pricing, cooldown, signals, 
 | `costs.json` | cost_logger (curator token spend) |
 | `sector_cache.json` | market_context (ticker → sector, Finnhub) |
 | `benchmark_metrics.json` | benchmark (refreshed by daily_summary) |
+| `fill_ledger.json` | fill_ledger (daily_summary; one row per entry, never edited) |
 | `universe_proposal.json`, `post_mortem.json` | curate |
 | `backtest_mechanical.json` | backtest-mech |
