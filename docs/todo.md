@@ -36,7 +36,7 @@ Operator's call after the component audit: "fully convert with all the points ma
 ## Phase 2.10: Go-live readiness — backups, heartbeat, the T-bill leg, the runbook (2026-10-29) — Decision 071
 Operator: "you can now do 2" (the readiness track). Findings and builds in Decision 071; nothing live changed, code not deployed.
 - [x] Found: Alpaca GTC stops expire after 90 days (`expires_at` on the book: Jan 11 / Jan 22); no backup of `state/` existed; $25k sizes every ETF slot at ≥ 13 shares, $10k is the floor; paper credits no dividends and live cash interest is unverified; taxes are in no number.
-- [x] Built: `scripts/backup_state.sh` + host cron 21:30 UTC on titanserver (30 archives kept) with a restore check; `HEALTHCHECK_PING_URL` heartbeat after the daily summary; the T-bill leg `cash_ticker` (off) as a third core leg with sell-first / buy-last ordering; the server-down runbook in deployment.md. 272 tests, ruff clean.
+- [x] Built: `scripts/backup_state.sh` + host cron 21:30 UTC on titanserver (30 archives kept; installed 13:18 UTC, first archive restore-checked byte-identical); `HEALTHCHECK_PING_URL` heartbeat after the daily summary; the T-bill leg `cash_ticker` (off) as a third core leg with sell-first / buy-last ordering; the server-down runbook in deployment.md. 272 tests, ruff clean.
 - [ ] **Deploy the code on the operator's go** (both images; no config change) — until then the heartbeat and the leg are in the repo only. The backup cron is live on the host already.
 - [ ] Go-live checklist items (a)–(g) in Phase 2.0 need the operator (live account, sign-ups, funding, advisor).
 
