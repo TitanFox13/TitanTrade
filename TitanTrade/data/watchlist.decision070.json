@@ -1,0 +1,27 @@
+{
+  "watchlist": ["XLK", "XLV", "XLF", "XLE", "XLI", "XLY", "XLB", "XLRE", "XLP", "XLU", "XLC"],
+  "shadow_watchlist": ["CRWD", "ANET", "LLY", "DXCM", "HCA", "JPM", "GS", "DVN", "WMT", "URI", "GE", "DASH", "DECK", "FCX", "EQIX"],
+  "settings": {
+    "trading_mode": "paper",
+    "mechanical": {
+      "design": "070",
+      "dip_pct": 0.08,
+      "dip_lookback_days": 90,
+      "trend_sma_days": 150,
+      "max_hold_days": 60,
+      "tp_pct": 0.2,
+      "stop_pct": 0.12,
+      "slot_pct": 0.25,
+      "max_slots": 3,
+      "insurance_sma_days": 200,
+      "insurance_breadth": 0.5,
+      "insurance_scale": 0.5,
+      "momentum_ticker": "SPMO",
+      "momentum_weight": 0.6,
+      "shock_drop_pct": 0.07,
+      "shock_lookback_days": 10,
+      "shock_hold_days": 20,
+      "shock_scale": 0.5
+    }
+  }
+}

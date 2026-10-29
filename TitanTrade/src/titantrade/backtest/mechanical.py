@@ -228,7 +228,11 @@ def main(argv: list[str]) -> None:
     data_dir = args[0] if args else "data/historical"
     opt = lambda k, d=None: argv[argv.index(k) + 1] if k in argv else d  # noqa: E731
     start, end, split = opt("--start"), opt("--end"), opt("--split")
-    tickers = list(cfg.trading.watchlist)
+    shadow = "--shadow" in argv
+    tickers = list(cfg.trading.shadow_watchlist if shadow else cfg.trading.watchlist)
+    if shadow and not tickers:
+        print("No shadow_watchlist in data/watchlist.json")
+        return
     data = load_historical_data(tickers + ["SPY"] + list(cfg.trading.sector_etfs), data_dir)
     spy = data.pop("SPY", [])
     sectors = {t: data.pop(t) for t in list(cfg.trading.sector_etfs) if t in data}
@@ -237,7 +241,7 @@ def main(argv: list[str]) -> None:
     if res.get("error"):
         print(res["error"])
         return
-    print(f"Mechanical backtest {res['start']} → {res['end']} ({res['days']} sessions), {len(data)} names, {len(sectors)} sector ETFs")
+    print(f"Mechanical backtest {res['start']} → {res['end']} ({res['days']} sessions), {len(data)} names{' (the shadow list)' if shadow else ''}, {len(sectors)} sector ETFs")
     print(f"  SPY buy-and-hold : {_fmt(res['spy'])}")
     print(f"  strategy         : {_fmt(res['metrics'])}  exits {res['metrics']['exits']}  avg exposure {res['avg_exposure']}  risk-off days {res['risk_off_days']}")
     out = {"summary": {k: v for k, v in res.items() if k not in ("trades", "equity_curve")}, "trades": res["trades"]}

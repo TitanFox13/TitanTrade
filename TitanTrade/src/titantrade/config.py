@@ -72,6 +72,11 @@ class TradingSettings:
         "GE", "DASH", "DECK", "FCX", "EQIX",
     ])
     trading_mode: str = "paper"
+    # Decision 070: the hand-picked list is tracked, not traded — the curator
+    # curates it and `backtest-mech --shadow` measures it over the live window.
+    shadow_watchlist: list[str] = field(default_factory=list)
+    # The design id of the book; a change re-stamps the benchmark's clean window.
+    design: str = "068"
 
     # Entry: close >= dip_pct below the dip_lookback_days high, above the trend SMA
     dip_pct: float = 0.08
@@ -132,6 +137,7 @@ MECHANICAL_FIELDS = {
     "core_ticker", "core_rebalance_band_pct",
     "momentum_ticker", "momentum_weight",
     "shock_drop_pct", "shock_lookback_days", "shock_hold_days", "shock_scale",
+    "design",
 }
 
 
@@ -152,6 +158,7 @@ def load_watchlist() -> TradingSettings:
     overrides = {k: v for k, v in mech.items() if k in MECHANICAL_FIELDS}
     return TradingSettings(
         watchlist=data.get("watchlist", TradingSettings().watchlist),
+        shadow_watchlist=list(data.get("shadow_watchlist") or []),
         trading_mode=mode,
         **overrides,
     )

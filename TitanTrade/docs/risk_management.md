@@ -21,7 +21,7 @@ Evaluated in order for every NEW item (an entry that expired unfilled is simply 
 5. **Position size** — the slot is `overlay_slot_pct` = `slot_pct × (1 − momentum_weight)` × equity, reduced to the cash and overlay headroom, floored to whole shares; anything below `MIN_POSITION_NOTIONAL` ($500) is blocked as dust (054). No ATR, confidence or VIX scaling (061).
 6. **Sector exposure** — the trade may not push one sector above 50% of equity.
 7. **Macro blackout** — no entry within 6 h of a high-impact release: FOMC, NFP / jobs, CPI, core PCE, GDP (046 whitelist).
-8. **Correlation** — blocked when the average 60-day correlation with held positions exceeds 0.75 (hidden concentration across sectors).
+8. **Correlation** — blocked when the average 60-day correlation with held positions exceeds 0.75 (hidden concentration across sectors). Single names only: a ticker in `sector_etfs` is a diversified basket and passes with "not applied" (Decision 070 — the sector floor was measured without the gate, which would have blocked ~1 in 5 second slots on the ETFs' real correlations).
 
 ## Broker-Side Protection
 
@@ -34,7 +34,7 @@ Evaluated in order for every NEW item (an entry that expired unfilled is simply 
 - **Gap-down protection** (035/053/054): an unfilled stop-limit after an overnight gap → cancel, settle, market sell. The live quote is cross-checked first; a gap > 30% below the stop checks the corporate-actions feed and skips + alerts on a recent split.
 - **Stop-out cooldown** (056/059): a filled sell stop starts a 72 h re-entry cooldown stamped at the fill time with the fill price (`record_stop_out_cooldowns`, idempotent). Re-entry before 72 h needs ≥ 24 h *and* a current price ≥ 1% above that exit (`cooldown_override_allowed`): of 23 early re-entries Jul–Sep 2026, the 10 that came in flat all lost, the 13 that came in ≥ 1% above kept every winner. Records without an exit price get the full 72 h.
 - **Expired entries** (Decision 064): a bracket that does not fill by the close expires; the ticker keeps its NEW item while the dip signal holds and the next run places a fresh near-market bracket through the same gates. No separate resubmission scan and no attempt cap — the mechanical entry is a near-market limit that fills the same session almost always.
-- **Orphan close** (`protection.close_orphaned_positions`): any non-core position without a plan item is sold at the first market-open run (legacy positions after the conversion, or a name removed from the watchlist).
+- **Orphan close** (`protection.close_orphaned_positions`): any non-core position without a plan item is sold at the first market-open run (positions opened before the strategy start). A name removed from the watchlist after it was bought keeps its HOLD item and exits by its own stop / target / clock (Decision 070) — a watchlist edit never force-sells.
 - **Never bare**: every failure path that cancels a stop restores one.
 
 ## Parameters
@@ -48,6 +48,7 @@ Evaluated in order for every NEW item (an entry that expired unfilled is simply 
 | `tp_pct` / `stop_pct` / `max_hold_days` | 0.20 / 0.12 / 60 | same |
 | `insurance_sma_days` / `insurance_breadth` / `insurance_scale` | 200 / 0.5 / 0.5 | same |
 | `core_ticker` / `core_rebalance_band_pct` | SPY / 0.05 | config.py |
+| `design` / `shadow_watchlist` | "068" / [] today; "070" / the 15 names in the staged Decision 070 file | `data/watchlist.json` |
 | `MAX_DRAWDOWN_PCT` | 8.0 | risk_manager.py |
 | `SUSPECT_VALUE_DEVIATION_PCT` | 50.0 | risk_manager.py |
 | `MIN_CASH_RESERVE_PCT` | 5.0 | risk_manager.py |

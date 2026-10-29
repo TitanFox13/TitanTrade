@@ -13,7 +13,10 @@
   legacy positions awaiting close — the dashboard summary.
 
 Positions opened before ``state/strategy.json``'s ``started_at`` are legacy:
-they get no item, and the executor's orphan close sells them at the open.
+they get no item, and the executor's orphan close sells them at the open. A
+position opened under the strategy whose name was since removed from the
+watchlist keeps its HOLD item (stop, target, clock) and gets no new entry
+(Decision 070) — a watchlist edit never force-sells.
 """
 from __future__ import annotations
 
@@ -65,10 +68,11 @@ def _ensure_strategy_started(now: datetime, cfg: Config | None = None) -> str:
         doc = {"strategy": "mechanical", "started_at": now.isoformat(), "decision": "061"}
         log.warning(f"Mechanical strategy started at {doc['started_at']} — positions opened before this are legacy")
         changed = True
-    if cfg and cfg.trading.momentum_weight > 0 and not doc.get("window_started_at"):
-        doc.update(window_started_at=now.isoformat(), design="068",
-                   sleeve={"ticker": cfg.trading.momentum_ticker, "weight": cfg.trading.momentum_weight})
-        log.warning(f"Two-sleeve book (Decision 068) starts at {doc['window_started_at']} — benchmark window reset")
+    if cfg and cfg.trading.momentum_weight > 0 and (not doc.get("window_started_at") or doc.get("design") != cfg.trading.design):
+        doc.update(window_started_at=now.isoformat(), design=cfg.trading.design,
+                   sleeve={"ticker": cfg.trading.momentum_ticker, "weight": cfg.trading.momentum_weight},
+                   dip_universe=list(cfg.trading.watchlist))
+        log.warning(f"Design {cfg.trading.design} starts at {doc['window_started_at']} — benchmark window reset")
         changed = True
     if changed:
         with open(STATE_DIR / STRATEGY_FILE, "w") as f:
@@ -190,9 +194,16 @@ def build_plan(
                 held_mech.append(ticker)
             else:
                 legacy.append(ticker)
-    for ticker in held:
-        if ticker not in cfg.trading.watchlist and not _is_core_ticker(ticker, cfg):
-            legacy.append(ticker)   # removed from the watchlist → orphan close
+    for ticker, pos in held.items():
+        if ticker in cfg.trading.watchlist or _is_core_ticker(ticker, cfg):
+            continue
+        if is_mechanical_position(ticker, started_at):
+            # Removed from the watchlist after it was bought (Decision 070): it
+            # keeps its stop, target and clock and simply gets no new entry.
+            items.append(_hold_item(ticker, pos, cfg))
+            held_mech.append(ticker)
+        else:
+            legacy.append(ticker)   # opened before the strategy start → orphan close
 
     occupied = len(held_mech) + len({t for t in pending_buy_tickers if t not in held_mech})
     free_slots = max(0, cfg.trading.max_slots - occupied)

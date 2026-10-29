@@ -84,7 +84,7 @@ Manage via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/s
 | `cloudflared` | Tunnel exposing `api:8000` at `trade.praguefun.cz` | yes |
 | `titantrade` | CLI runner | no (one-off) |
 
-Volumes: `./state` and `./logs` on both; `./data` on `api` (watchlist edits through the API persist on the host). The `titantrade` image copies `data/` at build time — rebuild after watchlist or schedule changes. `legacy/` and `scripts/` are not copied.
+Volumes: `./state` and `./logs` on both; `./data` on `api` (watchlist edits through the API persist on the host). The `titantrade` image copies `data/` at build time — rebuild after watchlist or schedule changes. **Because `./data` is bind-mounted, a committed change to `data/watchlist.json` goes live at `git pull`, before any rebuild**: a universe or parameter change that must land together with code is committed as a staged file (`data/watchlist.decision070.json`) and copied over `watchlist.json` on the server as a deploy step (Decision 070). `legacy/` and `scripts/` are not copied.
 
 ### Housekeeping on titanserver
 - Never `docker image prune -a` (it removes the base images the compose build relies on); `docker builder prune` and removing dangling images are fine.

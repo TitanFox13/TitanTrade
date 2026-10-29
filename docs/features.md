@@ -4,7 +4,7 @@
 
 Every trading decision is a rule on prices; parameters are the Decision 062 plateau, read from `data/watchlist.json` → `settings.mechanical` at every run.
 
-- **Entry**: a watchlist name closes ≥ 8% below its 90-day high while above its 150-day SMA. Candidates ranked deepest dip first fill the free slots (3 × 10% of equity = 25% of the 40% dip sleeve, flat sizing; `momentum_weight: 0` restores 25% slots). One bracket order at the live price + 0.3% with a −12% stop and a +20% target, through the eight gates. Whole shares only — a slot below one share is skipped.
+- **Entry**: a watchlist name closes ≥ 8% below its 90-day high while above its 150-day SMA. The watchlist is the dip universe: the hand-picked 15 names today, the 11 sector ETFs once Decision 070 is deployed (`data/watchlist.decision070.json`), with the names kept as `shadow_watchlist` — fetched, curated and backtested (`backtest-mech --shadow`), never traded. Candidates ranked deepest dip first fill the free slots (3 × 10% of equity = 25% of the 40% dip sleeve, flat sizing; `momentum_weight: 0` restores 25% slots). One bracket order at the live price + 0.3% with a −12% stop and a +20% target, through the eight gates. Whole shares only — a slot below one share is skipped.
 - **Exits**: the GTC stop-limit (−12%), the +20% target and the 60-trading-day holding limit; the latter two are evaluated against the broker position at every executor run. Nothing else sells a position.
 - **Core**: SPY is the dip sleeve's residual — exposure scale × 95% × (1 − momentum weight) − overlay − this run's planned slots — rebalanced within a 5% band. The core sells before entries need the cash and buys back after exits.
 - **Momentum sleeve** (068): SPMO held at 60% of the investable book (exposure scale × 95% × 60%), a second core leg rebalanced inside the same band after SPY; never an orphan, no stop, outside the overlay cap and the sector gate. The index does the rotating (semi-annual).
@@ -23,7 +23,7 @@ Every trading decision is a rule on prices; parameters are the Decision 062 plat
 5. **Position size**: the slot (`slot_pct` × (1 − momentum weight) = 10% of equity), reduced to the cash and overlay headroom; anything below $500 notional is blocked as dust (054)
 6. **Sector exposure**: ≤ 50% of equity in one sector after the trade (core legs excluded)
 7. **Macro blackout**: no entry within 6 h of FOMC / NFP / CPI / core PCE / GDP (046)
-8. **Correlation**: blocked when the average 60-day correlation with held positions exceeds 75%
+8. **Correlation**: blocked when the average 60-day correlation with held positions exceeds 75% — single names only; a sector ETF (`sector_etfs`) passes with "not applied" (Decision 070)
 
 A blocked entry that failed ≤ 2 gates is recorded in `state/near_misses.json` with the gate results and a market snapshot.
 
@@ -35,7 +35,7 @@ A blocked entry that failed ≤ 2 gates is recorded in `state/near_misses.json` 
 - **Settled close** (063): every exit — target, holding limit, orphan close — cancels each resting order, polls the cancel to a terminal state, re-reads the position, sells at market, and restores the stop if the sell fails. Introduced after three of seven legacy orphan closes were rejected with Alpaca 40310000 on 2026-10-13 and left positions bare
 - **Gap-down protection** (gapcheck, 035/053/054): an unfilled stop-limit after an overnight gap → cancel, settle, market-sell; the live quote is cross-checked first, and a gap > 30% below the stop is checked against the corporate-actions feed so a split is never sold as a crash
 - **Stop-out cooldown** (056/059): a broker stop fill starts a 72 h re-entry cooldown stamped at the fill time with the fill price; re-entry before 72 h needs ≥ 24 h *and* a price ≥ 1% above that exit (`cooldown_override_allowed`) — the flat re-buy was the churn
-- **Orphan close**: any non-core position without a plan item is sold at the first market-open run
+- **Orphan close**: any non-core position without a plan item is sold at the first market-open run; a position opened under the strategy whose name was since removed from the watchlist is *not* one — it keeps its HOLD item and exits by its own stop, target or clock (Decision 070)
 - **Expired entries**: a bracket that does not fill by the close expires with its legs; while the signal holds the ticker keeps its NEW item and the next run places a fresh bracket at the live price through the same gates (Decision 064 removed the separate resubmission scan)
 - **Never bare**: every failure path that cancels a stop restores one
 
@@ -116,7 +116,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 ## Test Suite (zero token spend)
 
-256 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
+266 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
 
 | File | Covers |
 |------|--------|
@@ -129,6 +129,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 | `test_core_allocation.py`, `test_cooldown.py`, `test_trade_state.py`, `test_alerts.py` | core rebalance, cooldown records + override, trade log / archival / record builders, observability alerts |
 | `test_scheduler.py`, `test_api_settings.py`, `test_trading_mode.py`, `test_notifier.py` | scheduler wiring and API, settings endpoints, credential selection, Discord embeds + daily summary |
 | `test_market_data.py`, `test_benchmark.py`, `test_indicators.py`, `test_retry.py`, `test_logger.py` | data facade, benchmark maths incl. the 3-year return guard, ATR, retry policy, logging |
+| `test_universe_switch.py` | shadow list and design in config, the staged Decision 070 file, HOLD survival of a removed name, the window re-stamp, ETF sectors, the correlation gate on ETFs, the curator on the shadow list, `--shadow` |
 | `test_fill_ledger.py` | gap maths, Eastern session date, idempotent update with missing bars, the API endpoint and the summary field |
 
 ```bash

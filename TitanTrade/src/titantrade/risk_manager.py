@@ -478,8 +478,13 @@ def pre_trade_check(
     else:
         _pass("macro_blackout", "No economic calendar data (skipped)")
 
-    # Gate 8: Correlation with the held names
-    if correlation_matrix and shares > 0:
+    # Gate 8: Correlation with the held names — single names only: a sector ETF
+    # is a diversified basket whose correlation with another is market beta,
+    # not hidden concentration (Decision 070; the sector floor was measured
+    # without this gate, and it would have blocked ~1 in 6 second slots).
+    if ticker in cfg.trading.sector_etfs:
+        _pass("correlation", "Sector ETF — diversified basket, correlation gate not applied")
+    elif correlation_matrix and shares > 0:
         held = [p.get("symbol", "") for p in positions]
         corr_allowed, avg_corr = check_correlation_limit(ticker, held, correlation_matrix)
         if not corr_allowed:

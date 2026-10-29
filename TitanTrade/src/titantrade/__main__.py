@@ -29,10 +29,10 @@ Commands:
   gapcheck         Gap-down protection + place missing stops
   curate           Monthly LLM universe proposal + post-mortem (advisory, no orders)
   benchmark [days] Performance vs SPY: beta, alpha, Sharpe (--since YYYY-MM-DD)
-  backtest-mech [dir] [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--split YYYY-MM-DD] [--grid]
+  backtest-mech [dir] [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--split YYYY-MM-DD] [--grid] [--shadow]
                    Backtest the strategy on data/historical (same rule code as live)
   download-history [dir] [--days N]
-                   Download OHLCV (watchlist + SPY + sector ETFs, SIP feed) for backtesting
+                   Download OHLCV (watchlist + shadow list + SPY + sector ETFs, SIP feed) for backtesting
 """
 
 
@@ -82,7 +82,7 @@ def main() -> None:
         cfg = load_config()
         args = [a for a in argv if not a.startswith("--")]
         download_historical_data(
-            cfg.trading.watchlist + list(cfg.trading.sector_etfs), cfg,
+            list(dict.fromkeys(cfg.trading.watchlist + cfg.trading.shadow_watchlist + list(cfg.trading.sector_etfs))), cfg,
             args[0] if args else "data/historical", days=int(_opt(argv, "--days", 750)),
         )
         return

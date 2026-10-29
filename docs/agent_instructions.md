@@ -12,11 +12,11 @@ Why this split: the October 2026 audit (Decision 060, Evidence 2–3) found that
 
 ## Universe proposal (`curator.run_universe_review`)
 
-**Input** (`build_universe_prompt`): the current watchlist with a brief per name — sector, dip state from the data bundle (close vs lookback high and trend SMA), ATR, 90-day trade statistics from the trade log (entries, exits, wins), and, on the scheduled run, recent headlines and the analyst-recommendation mix fetched at prompt time (`enrich=True`).
+**Input** (`build_universe_prompt`): the list under review — the `shadow_watchlist` (the operator's hand-picked names, tracked but not traded, Decision 070) when there is one, else the watchlist — with a brief per name — sector, dip state from the data bundle (close vs lookback high and trend SMA), ATR, 90-day trade statistics from the trade log (entries, exits, wins), and, on the scheduled run, recent headlines and the analyst-recommendation mix fetched at prompt time (`enrich=True`).
 
 **Prompt constraints**: at most 2 removals and 2 additions, each with a one-line reason; liquid US large caps only; JSON only — `{"remove": [{"ticker", "reason"}], "add": [{"ticker", "sector", "reason"}], "notes"}`.
 
-**Output**: `state/universe_proposal.json` (`generated_at`, `watchlist`, `proposal`, `raw`, `status: "advisory — apply through the watchlist editor"`), a Discord embed, and `GET /api/universe-proposal`. The operator applies accepted changes with `PUT /api/watchlist`; nothing is applied automatically.
+**Output**: `state/universe_proposal.json` (`generated_at`, `watchlist` = the list reviewed, `list` = `"shadow_watchlist"` or `"watchlist"`, `proposal`, `raw`, `status: "advisory — apply through the watchlist editor"`), a Discord embed, and `GET /api/universe-proposal`. The operator applies accepted changes with `PUT /api/watchlist`; nothing is applied automatically.
 
 ## Post-mortem (`curator.run_post_mortem`)
 

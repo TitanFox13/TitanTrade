@@ -5,9 +5,11 @@
 ```json
 {
   "watchlist": ["CRWD", "ANET", "LLY", "DXCM", "HCA", "JPM", "GS", "DVN", "WMT", "URI", "GE", "DASH", "DECK", "FCX", "EQIX"],
+  "shadow_watchlist": [],
   "settings": {
     "trading_mode": "paper",
     "mechanical": {
+      "design": "068",
       "dip_pct": 0.08, "dip_lookback_days": 90, "trend_sma_days": 150,
       "max_hold_days": 60, "tp_pct": 0.2, "stop_pct": 0.12,
       "slot_pct": 0.25, "max_slots": 3,
@@ -19,7 +21,7 @@
 }
 ```
 
-`settings.mechanical` may carry any of `config.MECHANICAL_FIELDS` (the keys above plus `sector_etfs`, `core_ticker`, `core_rebalance_band_pct`); missing keys use the `TradingSettings` defaults. `momentum_weight` sizes the SPMO sleeve and, through `TradingSettings.overlay_slot_pct` = `slot_pct × (1 − momentum_weight)`, the dip slots; `0` is the dip-only book. `TRADING_MODE` in the environment overrides `trading_mode`. `PUT /api/watchlist` rewrites `watchlist` and keeps `settings`.
+`shadow_watchlist` (Decision 070) is fetched into the bundle, curated by the monthly job and run by `backtest-mech --shadow`, never traded; `design` re-stamps the benchmark window when it changes (`data/watchlist.decision070.json` is the staged switch: the 11 sector ETFs as `watchlist`, the 15 names as the shadow list, design "070"). `settings.mechanical` may carry any of `config.MECHANICAL_FIELDS` (the keys above plus `sector_etfs`, `core_ticker`, `core_rebalance_band_pct`); missing keys use the `TradingSettings` defaults. `momentum_weight` sizes the SPMO sleeve and, through `TradingSettings.overlay_slot_pct` = `slot_pct × (1 − momentum_weight)`, the dip slots; `0` is the dip-only book. `TRADING_MODE` in the environment overrides `trading_mode`. `PUT /api/watchlist` rewrites `watchlist` and keeps `settings`.
 
 ## 2. Schedule (`data/schedule.json`)
 
@@ -55,7 +57,7 @@ A stock that failed to fetch carries `"error"` and empty inputs; the plan treats
 
 ## 4. Strategy (`state/strategy.json`)
 
-`{"strategy": "mechanical", "started_at": "2026-10-13T12:43:24+00:00", "decision": "061", "window_started_at": "2026-10-28T13:04:00+00:00", "design": "068", "sleeve": {"ticker": "SPMO", "weight": 0.6}}` — `started_at` is written once by the first signals run and never moves: a position whose opening BUY predates it is legacy (no plan item, sold by the orphan close). `window_started_at`, `design` and `sleeve` are stamped once by the first run with `momentum_weight > 0`; `mechanical.benchmark_window_start()` returns it (else `started_at`) as the benchmark's clean window.
+`{"strategy": "mechanical", "started_at": "2026-10-13T12:43:24+00:00", "decision": "061", "window_started_at": "2026-10-28T13:04:00+00:00", "design": "068", "sleeve": {"ticker": "SPMO", "weight": 0.6}, "dip_universe": ["…"]}` — `started_at` is written once by the first signals run and never moves: a position whose opening BUY predates it is legacy (no plan item, sold by the orphan close); a mechanical position whose name left the watchlist keeps its HOLD item (070). `window_started_at`, `design`, `sleeve` and `dip_universe` are re-stamped whenever the configured `settings.mechanical.design` differs from the stamped one (first stamped when `momentum_weight > 0`); `mechanical.benchmark_window_start()` returns it (else `started_at`) as the benchmark's clean window.
 
 ## 5. Plan (`state/plan.json`)
 

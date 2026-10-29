@@ -9,14 +9,14 @@ The backend has two faces: a CLI (one-off commands via `docker compose run`) and
 ## Pipeline
 
 ### 1. Fetch (`data_fetcher.py`, 09:00 ET weekdays and in `full`)
-- 250 daily bars per watchlist name from Alpaca → `signal_inputs` (last close, rolling high over `dip_lookback_days`, `trend_sma_days` SMA), ATR-14, the last 5 bars for display, a 60-day pairwise correlation matrix
+- 250 daily bars per watchlist name (and per `shadow_watchlist` name, for the curator — Decision 070) from Alpaca → `signal_inputs` (last close, rolling high over `dip_lookback_days`, `trend_sma_days` SMA), ATR-14, the last 5 bars for display, a 60-day pairwise correlation matrix
 - `market_context.build_market_context`: SPY close, 1/5/20-day returns and the last `shock_lookback_days + shock_hold_days + 1` closes (the shock trigger's window); `sector_breadth` — SPY and the 11 sector ETFs vs their `insurance_sma_days` SMA
 - Finnhub earnings (`earnings.build_earnings_context`: next date, days away, blocked flag); FRED release calendar + `data/fomc_dates.json`
 - Output: `state/data_bundle.json`
 
 ### 2. Signals (`mechanical.refresh_plan`, run by every `execute` and by `signals`)
 - Reads the bundle, the broker positions and open buy orders, the trade log, and `state/strategy.json` (written on the first run; its `started_at` separates mechanical positions from legacy ones; `window_started_at` / `design` are stamped once when the momentum sleeve is on — the benchmark's clean window)
-- `build_plan`: HOLD items for held mechanical positions (stop and target from the opening BUY in the trade log); the insurance state from `market_context.breadth` and the shock state (`signals.shock_state`) from `market_context.spy.closes`, combined as `exposure_scale = min(...)`; the sleeve target (`momentum_target_pct`); `signals.evaluate_dip` on every name not held or pending; candidates ranked deepest dip first fill `max_slots − held − pending` slots as NEW items (entry at the last close, stop −`stop_pct`, target +`tp_pct`); everything else goes on the watch list with its reason (no entries while risk-off or the shock is on); legacy positions are listed in `legacy_to_close`
+- `build_plan`: HOLD items for held mechanical positions (stop and target from the opening BUY in the trade log), including a name since removed from the watchlist (it exits by its own rules, never a forced sell — 070); the insurance state from `market_context.breadth` and the shock state (`signals.shock_state`) from `market_context.spy.closes`, combined as `exposure_scale = min(...)`; the sleeve target (`momentum_target_pct`); `signals.evaluate_dip` on every name not held or pending; candidates ranked deepest dip first fill `max_slots − held − pending` slots as NEW items (entry at the last close, stop −`stop_pct`, target +`tp_pct`); everything else goes on the watch list with its reason (no entries while risk-off or the shock is on); legacy positions are listed in `legacy_to_close`
 - Warns and flags `stale_inputs` when the bundle's lookback / SMA lengths differ from the parameters in force (re-run `fetch`)
 - Output: `state/plan.json`
 
@@ -33,7 +33,7 @@ The backend has two faces: a CLI (one-off commands via `docker compose run`) and
 `protection.check_gap_down_protection` then `executor.ensure_stop_coverage` (a GTC stop for any whole-share HOLD position without one).
 
 ### 5. Daily summary (16:30 ET weekdays) and curate (first Sunday 15:00 ET)
-Discord summary with the plan section + benchmark refresh anchored at `mechanical.benchmark_window_start()` (`window_started_at`, else `started_at`; Decisions 065 / 068) + the fill ledger update (`fill_ledger.update_fill_ledger`: every recent BUY entry gets its session close from SIP bars, Decision 069); the Claude universe proposal and post-mortem.
+Discord summary with the plan section + benchmark refresh anchored at `mechanical.benchmark_window_start()` (`window_started_at`, else `started_at`; Decisions 065 / 068) + the fill ledger update (`fill_ledger.update_fill_ledger`: every recent BUY entry gets its session close from SIP bars, Decision 069); the Claude universe proposal (on the shadow list when there is one) and post-mortem.
 
 ---
 
@@ -77,7 +77,7 @@ No module imports `executor`. `executor.py` re-exports the broker functions it c
 |------|---------|-----------|
 | `data_bundle.json` | Signal inputs, ATR, correlations, market context, earnings, macro calendar | fetch |
 | `plan.json` | NEW / HOLD items, watch, candidates, insurance, shock, exposure scale, sleeve target, slots, legacy positions | signals |
-| `strategy.json` | `started_at` of the mechanical strategy; `window_started_at` / `design` of the two-sleeve book | first signals run / first run with the sleeve on |
+| `strategy.json` | `started_at` of the mechanical strategy; `window_started_at` / `design` / `dip_universe` of the current design | first signals run / any run whose configured `design` differs |
 | `trade_log.json` | Every order placed (append-only, archived past 500) | executor |
 | `near_misses.json` | Entries blocked by ≤ 2 gates (archived past 200) | entries |
 | `portfolio.json` | Equity, cash, positions as the last run left them | executor |

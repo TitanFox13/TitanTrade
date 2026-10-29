@@ -114,6 +114,12 @@ def _trade_stats(trades: list[dict[str, Any]], days: int = 90) -> dict[str, dict
     return stats
 
 
+def curated_list(cfg: Config) -> list[str]:
+    """The list the curator works on: the shadow list (the operator's hand-picked
+    names, tracked but not traded — Decision 070) when there is one, else the watchlist."""
+    return list(cfg.trading.shadow_watchlist or cfg.trading.watchlist)
+
+
 def build_universe_prompt(cfg: Config, bundle: dict[str, Any], trades: list[dict[str, Any]], *, enrich: bool = False) -> tuple[str, str]:
     system = (
         "You curate the stock universe for a mechanical, rules-based strategy. The rules are fixed and you "
@@ -128,7 +134,7 @@ def build_universe_prompt(cfg: Config, bundle: dict[str, Any], trades: list[dict
         "answer. Reply with JSON only: {\"remove\": [{\"ticker\": str, \"reason\": str}], "
         "\"add\": [{\"ticker\": str, \"sector\": str, \"reason\": str}], \"notes\": str}."
     )
-    briefs = [_stock_brief(t, bundle.get("stocks", {}).get(t, {}) or {}, cfg if enrich else None) for t in cfg.trading.watchlist]
+    briefs = [_stock_brief(t, bundle.get("stocks", {}).get(t, {}) or {}, cfg if enrich else None) for t in curated_list(cfg)]
     user = json.dumps({
         "as_of": bundle.get("generated_at"),
         "spy": (bundle.get("market_context") or {}).get("spy"),
@@ -167,10 +173,12 @@ def run_universe_review(cfg: Config) -> dict[str, Any]:
     proposal = _extract_json(text)
     doc = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "watchlist": list(cfg.trading.watchlist),
+        "watchlist": curated_list(cfg),
+        "list": "shadow_watchlist" if cfg.trading.shadow_watchlist else "watchlist",
         "proposal": proposal,
         "raw": text if not proposal else None,
-        "status": "advisory — apply through the watchlist editor",
+        "status": "advisory — apply through the watchlist editor"
+                  + (" (the shadow list: tracked, not traded)" if cfg.trading.shadow_watchlist else ""),
     }
     with open(STATE_DIR / PROPOSAL_FILE, "w") as f:
         json.dump(doc, f, indent=2)

@@ -1,6 +1,6 @@
 # TitanTrade
 
-Mechanical equity trading system on Alpaca: two sleeves — a dip-in-uptrend overlay with broker-side stops on top of a SPY residual (40%) and a momentum ETF held (SPMO, 60%) — with a two-signal insurance and a shock trigger scaling exposure, tuned on 10–99 years of history (Decisions 061–063, 068). Paper account; going live is gated (todo Phase 2.0). The only LLM call left is a monthly Claude universe proposal that places no orders.
+Mechanical equity trading system on Alpaca: two sleeves — a dip-in-uptrend overlay with broker-side stops on top of a SPY residual (40%; Decision 070 moves its universe from the hand-picked list to the 11 sector ETFs at the next deploy, the list becoming a tracked-only `shadow_watchlist`) and a momentum ETF held (SPMO, 60%) — with a two-signal insurance and a shock trigger scaling exposure, tuned on 10–99 years of history (Decisions 061–063, 068). Paper account; going live is gated (todo Phase 2.0). The only LLM call left is a monthly Claude universe proposal that places no orders.
 
 ## Project Structure
 
@@ -23,7 +23,7 @@ uv run python -m titantrade full         # fetch → signals → execute
 uv run python -m titantrade gapcheck     # Gap-down protection + stop coverage for bare plan positions
 uv run python -m titantrade curate       # Monthly Claude universe proposal + post-mortem (advisory, no orders)
 uv run python -m titantrade benchmark [days] [--since YYYY-MM-DD]   # Beta / alpha / Sharpe / capture vs SPY
-uv run python -m titantrade backtest-mech [dir] [--start] [--end] [--split] [--grid]   # Same rule code on daily closes
+uv run python -m titantrade backtest-mech [dir] [--start] [--end] [--split] [--grid] [--shadow]   # Same rule code on daily closes; --shadow = the shadow list
 uv run python -m titantrade download-history [dir] [--days N]       # SIP daily bars: watchlist + SPY + 11 sector ETFs
 uv run --with numpy python scripts/param_search/search.py           # Parameter search (scripts/param_search/README.md)
 ```
@@ -34,7 +34,7 @@ uv run --with numpy python scripts/param_search/search.py           # Parameter 
 cd TitanTrade && uv run --extra test python -m pytest tests/ -q
 ```
 
-`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 256 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens. Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
+`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 266 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens. Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
 
 ### Docker (production)
 
@@ -98,7 +98,7 @@ Dependency flow: leaf modules (broker, trade_state, pricing, cooldown, signals, 
 |------|-----------|
 | `data_bundle.json` | fetch |
 | `plan.json` | signals (`mechanical.refresh_plan`, run before every execute) |
-| `strategy.json` | first signals run (`started_at`; positions opened earlier are legacy and get closed); `window_started_at` / `design` stamped once when the momentum sleeve is on (benchmark window) |
+| `strategy.json` | first signals run (`started_at`; positions opened earlier are legacy and get closed); `window_started_at` / `design` / `dip_universe` re-stamped whenever the configured `design` changes (benchmark window) |
 | `trade_log.json`, `near_misses.json` | executor (append-only; overflow archived to `state/archive/`) |
 | `portfolio.json` | executor (equity / cash / positions snapshot at the end of each run; read by the daily summary and the API fallback) |
 | `abort_cooldown.json` | entries (stop-out cooldowns with the exit price) |

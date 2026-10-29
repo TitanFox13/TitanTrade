@@ -58,10 +58,17 @@ def build_stock_data(ticker: str, cfg: Config) -> dict[str, Any]:
     }
 
 
+def bundle_names(cfg: Config) -> list[str]:
+    """Watchlist first, then any shadow-list name not already in it."""
+    return list(dict.fromkeys(list(cfg.trading.watchlist) + list(cfg.trading.shadow_watchlist)))
+
+
 def build_data_bundle(cfg: Config) -> dict[str, Any]:
-    """Assemble the bundle for all watchlist names."""
-    log.info(f"Building data bundle for {len(cfg.trading.watchlist)} stocks")
-    sectors = load_stock_sectors(cfg.trading.watchlist, cfg)
+    """Assemble the bundle for all watchlist names (and the shadow list, which
+    the curator reads — the plan only looks at the watchlist)."""
+    names = bundle_names(cfg)
+    log.info(f"Building data bundle for {len(names)} stocks")
+    sectors = load_stock_sectors(names, cfg)
 
     try:
         market_ctx = build_market_context(cfg)
@@ -69,13 +76,13 @@ def build_data_bundle(cfg: Config) -> dict[str, Any]:
         log.error(f"Market context fetch failed: {exc}")
         market_ctx = {"error": str(exc)}
     try:
-        earnings_ctx = build_earnings_context(cfg.trading.watchlist, cfg)
+        earnings_ctx = build_earnings_context(names, cfg)
     except Exception as exc:  # noqa: BLE001
         log.error(f"Earnings calendar fetch failed: {exc}")
         earnings_ctx = {}
 
     stocks: dict[str, Any] = {}
-    for ticker in cfg.trading.watchlist:
+    for ticker in names:
         try:
             stock = build_stock_data(ticker, cfg)
         except Exception as exc:  # noqa: BLE001
@@ -95,7 +102,7 @@ def build_data_bundle(cfg: Config) -> dict[str, Any]:
 
     market_ctx.pop("_spy_bars", None)
     closes_map = {t: [b["close"] for b in s.pop("ohlcv_full", [])] for t, s in stocks.items()}
-    tickers_list = [t for t in cfg.trading.watchlist if len(closes_map.get(t, [])) >= 60]
+    tickers_list = [t for t in names if len(closes_map.get(t, [])) >= 60]
     corr_matrix: dict[str, dict[str, float]] = {}
     for i, t1 in enumerate(tickers_list):
         for t2 in tickers_list[i + 1:]:

@@ -36,6 +36,14 @@ def _save_sector_cache(cache: dict[str, str]) -> None:
         json.dump(cache, f, indent=2)
 
 
+# The SPDR sector ETFs are their sector (Finnhub has no profile for an ETF).
+SECTOR_ETF_SECTORS = {
+    "XLK": "Technology", "XLV": "Health Care", "XLF": "Financials", "XLE": "Energy", "XLI": "Industrials",
+    "XLY": "Consumer Discretionary", "XLB": "Materials", "XLRE": "Real Estate", "XLP": "Consumer Staples",
+    "XLU": "Utilities", "XLC": "Communication Services",
+}
+
+
 def load_stock_sectors(tickers: list[str], cfg: Config) -> dict[str, str]:
     """Sectors for all tickers, fetching (Finnhub) and caching any unknown ones."""
     global _sector_cache
@@ -45,7 +53,7 @@ def load_stock_sectors(tickers: list[str], cfg: Config) -> dict[str, str]:
     if missing:
         log.info(f"Fetching sectors for {len(missing)} new tickers: {missing}")
         for ticker in missing:
-            _sector_cache[ticker] = market_data.get_sector(ticker, cfg)
+            _sector_cache[ticker] = SECTOR_ETF_SECTORS.get(ticker) or market_data.get_sector(ticker, cfg)
         _save_sector_cache(_sector_cache)
     return {t: _sector_cache.get(t, "Unknown") for t in tickers}
 
