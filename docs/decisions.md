@@ -1,5 +1,83 @@
 # Important Decisions Log
 
+## Decision 073: The international book — tested, not built; the ex-US momentum premium is real, the dip rule on country ETFs is not a floor, and a blend gives back return for almost no protection (roadmap E2, operator's go, 2026-10-29)
+**Date**: 2026-10-29
+**Why**: the operator's second fear (a weaker US market after a political change, and a weaker dollar for a CZK-based investor) is the one risk a US-only book cannot hedge, and every number behind the live book is American. Roadmap E2 asked whether an ex-US copy of the book exists and whether blending it in helps. Done the Decision 062 way: hypotheses I1–I7 and the drop rules written into `scripts/param_search/intl.py` and **committed before any code ran** (`eb94dbc`); the ex-US book built exactly like the US one (the live dip rule on the 20 single-country ETFs, 3 × 25 % slots, ACWX as the residual and the index, insurance from the region's own breadth — ACWX below its 200-day SMA and fewer than half of the 20 countries above theirs — the shock trigger on ACWX, exposure = min); IMTM named as the book's momentum vehicle, IDMO as the alternative; decade 2017-01-03 → 2026-10-12 split 2022-01-01, every headline also through 2025-12-31; two placebos for the blend; costs as everywhere in the harness. Data: French regional daily factors 1990 → (USD), 39 ex-US ETFs 2016 → (Alpaca SIP, dividend-adjusted), FRED DEXUSEU. Loader `datasets.french_regional`. **Nothing live changes.**
+
+**Verdict on the pre-registered rules: I1 and I2 hold, I3, I4 and I5 fail → no ex-US book, no blend, roadmap E3 closed.** The expected numbers written before the run were close on every count: the ex-US momentum premium (+3 … +8 expected, +7.4 found), the ETF (+1 … +3, IMTM +1.4 / IDMO +4.3), the give-back (2 … 4 pp/yr expected at 50–70 % US, 2.3 … 3.8 found), the drawdown gain (1 … 3 points expected, 0.8 … 1.3 found); the two misses were the dip rule on countries (0 … +1 expected, negative in the first half) and the books' correlation (0.1 … 0.3 expected, 0.58 found).
+
+**I1 — the momentum premium by region** (Kenneth French's WML, long winners / short losers, USD, daily 1990-11 → 2026-09, split 2008; the US from the same date):
+
+| region | ann. mean | 1990–2007 | 2008 → | t | Sharpe | 2009 | corr. with US WML |
+|---|---|---|---|---|---|---|---|
+| US (reference) | +5.3 | +10.0 | +1.1 | 2.1 | 0.35 | −51 | 1.00 |
+| **Developed ex-US** | **+7.4** | **+8.5** | **+6.4** | **4.7** | 0.77 | −35 | +0.53 |
+| Europe | +9.9 | +11.8 | +8.2 | 5.1 | 0.84 | −38 | +0.57 |
+| Japan | +0.6 | +1.2 | −0.0 | 0.3 | 0.04 | −33 | +0.14 |
+| Asia-Pacific ex-Japan | +10.8 | +12.5 | +9.3 | 5.6 | 0.92 | −38 | +0.20 |
+
+Holds. The premium is positive in both halves in every developed region except Japan (the documented exception, ≈ 0 as pre-registered), stronger and steadier *outside* the US than inside it over these 36 years, with the 2009 crash everywhere. Long-short and frictionless — the investable long-only share is smaller (I2).
+
+**I2 — an ex-US momentum ETF held outright vs its index** (excess CAGR pp/yr; IS → 2021 / OOS 2022 →; "→ 2025" = through 2025-12-31; r3 = rolling 3-year windows ahead):
+
+| held vs index | excess | IS / OOS | → 2025 | DD vs index DD | Sharpe | worst year | r3 |
+|---|---|---|---|---|---|---|---|
+| ACWX vs SPY (the ex-US decade in one line) | −5.91 | −8.7 / −3.0 | −6.20 | −35.3 vs −33.8 | 0.60 | −23.3 | 0 % |
+| IMTM vs ACWX | +1.39 | +2.1 / +0.7 | +1.85 | −30.7 vs −35.3 | 0.67 | −3.1 | 85 % |
+| IMTM vs EFA / IEFA | +1.58 / +1.46 | +2.0 / +1.1 · +1.6 / +1.3 | | | | | |
+| **IDMO vs ACWX** | **+4.34** | **+4.0 / +4.7** | +5.04 | −31.0 vs −35.3 | 0.79 | −2.8 | 100 % |
+| IDMO vs EFA / IEFA | +4.53 / +4.40 | +3.9 / +5.2 · +3.5 / +5.4 | | | | | |
+| SPMO vs SPY (the US sleeve, reference) | +5.23 | +2.1 / +8.4 | +4.46 | −31.2 vs −33.8 | 1.00 | −7.2 | 70 % |
+
+Holds for both vehicles, both halves, against all three indices, through 2025 as well. IDMO (S&P Developed ex-US momentum, Invesco) beat IMTM (MSCI World ex-USA momentum) by 3 points a year — index construction, as SPMO vs MTUM in the US (Decision 067). The ex-US decade itself was the worst in the record: ACWX lost 5.9 pp/yr to SPY, 8.7 in the first half.
+
+**I3 — the live dip rule on the 20 country ETFs** (3 × 25 %, ACWX residual, insurance ×0.5 from the region's own breadth; the sector-floor test on a new universe of baskets):
+
+| book | vs | excess | IS / OOS | → 2025 | DD vs index | Sharpe | trades | win | median | tp / stop / clock | risk-off |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| country dip book | ACWX | +0.29 | **−0.9** / +1.5 | **−1.49** | −27.7 vs −35.3 | 0.66 | 78 (8.0 / yr) | 62 % | +2.8 % | 13 / 10 / 55 | 24 % |
+| country dip book | EW basket of the 20 | −0.59 | **−1.4** / +0.2 | −2.53 | −27.7 vs −36.9 | | | | | | |
+| EW basket of the 20 | ACWX | +0.88 | +0.5 / +1.3 | +1.04 | −36.9 vs −35.3 | 0.63 | | | | | |
+| 11-sector dip book (the floor) | SPY | +0.44 | +0.6 / +0.3 | +0.55 | −25.3 vs −33.8 | 1.11 | 61 (6.3 / yr) | 79 % | +4.9 % | 7 / 6 / 48 | 13 % |
+
+Fails. Negative in the first half both ways, negative through 2025 both ways — the full-period +0.3 is 2026 alone. The rule's texture on countries is the single-name texture, not the sector one: 62 % winners and a +2.8 % median trade against 79 % and +4.9 % on the sectors, and the insurance was on for 24 % of sessions (ACWX spent long stretches under its 200-day SMA this decade) against 13 % for SPY. A basket universe is not automatically a floor: a country ETF's "dip within an uptrend" is often a currency or a policy move, which the rule cannot tell from a dip. The drawdown is cut (−27.7 vs −35.3), as the dip sleeve always does; the return is not there. The ex-US book and its parts, each vs ACWX: the dip sleeve alone (insurance off inside, as in the book) +1.34 (+1.8 / +0.8) but −0.40 through 2025; **the pre-registered book (dip 40 / IMTM 60, min) −0.50 (−0.7 / −0.3), DD −23.0, Sharpe 0.69**; the same with IDMO +2.65 (+3.2 / +2.1), DD −17.7, Sharpe 0.95; with no insurance and no shock +1.52 (+2.1 / +0.9), DD −30.7; IMTM 100 % under min(insurance, shock) −0.62. The exposure rules cost the ex-US book ≈ 2 pp/yr (de-risked 26 % of sessions: insurance 24 %, shock 8 %) against ≈ 1.7 for the US book (15.5 %) — the price of a decade spent half below the SMA.
+
+**I4 — do the two books bet on different things?** Daily correlations (full / IS / OOS): the books' *active* returns (each over its own index) **+0.58 / +0.66 / +0.50**; their total returns +0.75 / +0.78 / +0.72; SPY vs ACWX +0.85 / +0.89 / +0.80; the sector dip sleeve vs the country dip sleeve (active) **+0.04**; SPMO vs IMTM (active) +0.31; the US book vs IMTM held +0.76. Fails (< 0.5 expected). The reading is the lesson of the day: the *sleeves* are different bets (0.04 between the dip sleeves), but each book's active return is dominated by its exposure rules — while de-risked, active = −½ × its market — and the two markets are 0.85 correlated and de-risk at the same times. **Two books that de-risk together are one bet**: the diversification lives in the sleeves and is drowned by the insurance.
+
+**I5 — the global blend**, US book w / ex-US book (1 − w), rebalanced daily, vs SPY (give-back = excess vs SPY minus the US book's +1.36; "vs w-bench" = excess over w SPY + (1 − w) ACWX; P1 = ACWX held in the ex-US slot; P2 = three random country ETFs re-drawn yearly, 20 draws; the crash columns are the book minus SPY, peak to trough):
+
+| blend | vs SPY | IS / OOS | → 2025 | give-back | vs w-bench | DD | Sharpe | worst yr | r3 | covid / 2022 / 2025 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **US book alone (live)** | **+1.36** | +0.3 / +2.5 | +0.80 | — | +1.36 | **−20.0** | **1.10** | −11.3 | 59 % | +13.8 / +9.7 / +2.0 |
+| ex-US book alone (IMTM) · with IDMO | −6.41 · −3.27 | −9.4 / −3.4 · −5.5 / −1.0 | −6.82 · −3.43 | | −0.50 · +2.65 | −23.0 · −17.7 | 0.69 · 0.95 | −28.0 · −23.6 | 0 % · 7 % | +16.3 / +8.2 / +9.2 |
+| w 0.9 · P1 · P2 median [p10 … p90] | +0.62 · +0.69 · +0.67 [+0.48 … +1.13] | −0.7 / +1.9 · −0.6 / +2.0 | +0.07 · +0.16 | −0.75 · −0.68 | +1.17 · +1.24 | −19.7 · −21.3 · −21.7 | 1.09 · 1.07 · 1.08 | −11.7 · −11.3 | 48 % | +14.0 / +9.5 / +2.7 |
+| w 0.8 · P1 · P2 | −0.14 · −0.00 · +0.17 [−0.23 … +0.57] | −1.6 / +1.4 · −1.5 / +1.5 | −0.67 · −0.50 | −1.50 · −1.36 | +0.98 · +1.12 | −19.5 · −22.6 · −23.2 | 1.07 · 1.04 · 1.04 | −12.2 · −11.3 | 41 % | +14.3 / +9.4 / +3.4 |
+| **w 0.7** · P1 · P2 | **−0.90** · −0.70 · −0.91 [−1.88 … +0.09] | **−2.6 / +0.8** · −2.3 / +1.0 | −1.42 · −1.18 | **−2.26** · −2.06 | +0.79 · +0.99 | **−19.2** · −23.9 · −25.1 | **1.04** · 0.99 · 0.98 | −13.1 · −11.3 | 22 % | +14.5 / +9.3 / +4.1 |
+| w 0.6 · P1 · P2 | −1.67 · −1.41 · −1.05 | −3.6 / +0.3 · −3.2 / +0.4 | −2.17 · −1.86 | −3.03 · −2.78 | +0.61 · +0.86 | −19.0 · −25.2 · −25.3 | 1.01 · 0.94 · 0.94 | −14.2 · −11.4 | 15 % | +14.8 / +9.1 / +4.9 |
+| w 0.5 · P1 · P2 | −2.44 · −2.14 · −1.21 | −4.5 / −0.3 · −4.1 / −0.1 | −2.93 · −2.56 | −3.81 · −3.50 | +0.42 · +0.73 | −18.7 · −26.6 · −28.4 | 0.97 · 0.89 · 0.91 | −15.3 · −11.4 | 11 % | +15.0 / +9.0 / +5.6 |
+
+Fails at every weight. The give-back is slightly *worse* than simply holding ACWX in the slot (P1) everywhere and inside or below the random-country spread (the book blend beats the draws in 25–50 % of them); the Sharpe is below the US book's at every weight; the drawdown improves by 0.3 … 1.3 points (the US book's −20 % is already the ex-US book's class); and the crash weeks gain a point or two at most (covid +14.5 vs +13.8, 2022 +9.3 vs +9.7, 2025 +4.1 vs +2.0 at w 0.7) — the pre-registered caveat exactly. **No blend of any kind is positive vs SPY in both halves** (first halves −0.0 … −4.5): the decade in which the US beat the world by 6 points a year is not a decade in which a US investor is paid for leaving.
+
+*The decomposition, for the record (post hoc; IDMO was named in I2 as a vehicle, not as the pre-registered book):* at w 0.7 the ex-US slot filled with IMTM alone gives back −1.64 (DD −23.0), with the country dip sleeve alone −2.23 (DD −18.8), with the IDMO book −1.25 (vs SPY +0.12, −1.3 / +1.6, DD −18.6, Sharpe 1.14); **IDMO alone in a 10 % slot (w 0.9) is the one cell beside the live book: +1.22 vs SPY (−0.0 / +2.5), → 2025 +0.76, DD −20.9, Sharpe 1.12, worst year −10.7, r3 59 %** — a give-back of 0.15 pp/yr for a tenth of the book outside the US, and a first half of −0.0. The IDMO variant passes I5's arithmetic at every weight and still fails the project's both-halves bar; it is a *dial* like the momentum weight in roadmap C1 (a measured preference), not a result, and it is recorded so it is not re-discovered: if the operator ever wants ex-US exposure for the dollar's sake, the cheapest form the data supports is a slice of the momentum sleeve in an ex-US momentum ETF, pre-registered on longer data first (Tiingo, B11).
+
+**I7 — currency.** (a) The decade in euros (DEXUSEU; EUR/USD 1.04 → 1.12, the dollar drifting −0.7 %/yr): SPY 15.3 %/yr in dollars, 14.5 in euros; ACWX 9.4 / 8.6; **the US book 16.7 / 15.8** (euro halves 16.6 / 15.0, euro drawdown −23.7, euro Sharpe 1.00); the ex-US book 8.9 / 8.1; the 70 / 30 blend 14.4 / 13.6; 50 / 50 12.9 / 12.0. Every number moves by the same drift, so the ranking is unchanged. DBEF (currency-hedged EAFE) beat EFA by +2.27 pp/yr (+0.3 / +4.3; +1.89 through 2025) — the rate differential since 2022 paid the hedge, not a currency call; roadmap E4 reference. (b) **The US market vs the regional markets across the dollar's regimes** (French value-weighted markets, CAGR in USD / in euros):
+
+| window | US | Developed ex-US | Europe | Japan | Asia-Pacific ex-Japan |
+|---|---|---|---|---|---|
+| 1990-07 → 2008-01 (USD only) | +10.6 | +7.4 | +10.7 | +0.2 | +13.2 |
+| 2008-01 → 2026-09 | +11.6 / +13.0 | +5.2 / +6.6 | +4.8 / +6.3 | +6.2 / +7.7 | +4.4 / +5.9 |
+| 1999-01 → 2002-01, dollar up (1.18 → 0.90) | −0.2 / +9.1 | −4.1 / +4.9 | −5.8 / +3.0 | −4.6 / +4.3 | +5.4 / +15.2 |
+| **2002-01 → 2008-07, dollar down (0.90 → 1.60)** | **+3.7 / −4.9** | **+12.9 / +3.5** | +12.9 / +3.5 | +8.4 / −0.6 | +19.3 / +9.3 |
+| 2008-07 → 2022-09, dollar up (1.60 → 0.96) | +10.3 / +14.3 | +2.8 / +6.5 | +2.4 / +6.1 | +3.2 / +7.0 | +3.5 / +7.3 |
+| 2022-09 → 2026-09, dollar down (0.96 → 1.17) | +22.6 / +16.8 | +19.4 / +14.6 | +19.8 / +14.9 | +21.5 / +16.5 | +13.1 / +8.6 |
+| 1999-01 → 2026-09, the whole euro era | +9.2 / +9.2 | +6.6 / +6.7 | +6.2 / +6.4 | +6.0 / +6.2 | +8.6 / +8.8 |
+
+The fear is real in history and bounded in size: in the dollar's 2002–08 fall a euro investor in US stocks *lost* 4.9 %/yr for six and a half years while developed ex-US made +3.5 in euros (a 8.4-point gap) — that was a weak dollar *and* a US lost decade together; in the 2022–26 dollar fall the US still won. Over the whole euro era the dollar round-tripped (1.18 → 1.13) and the US beat developed ex-US by 2.5 pp/yr in both currencies; over 1990–2026 the US won both halves (+3.2 and +6.4). CZK is not in the library; the euro is the proxy.
+
+**Decision.** Nothing changes. Roadmap E2 is done, E3 (the second book) is closed with the numbers above, E4 is priced once and stays a go-live question (a USD/CZK hedge is a forward, which Alpaca does not offer). What was learned and kept: the ex-US momentum premium is real, old and investable (IDMO); the dip rule needs sectors, not countries; two books under the same exposure rules are one bet in the week that hurts; and the dollar risk the operator named has, in history, cost a euro investor about 8 points a year against ex-US for one six-year stretch and nothing over the full era. What reopens E3: a hindsight-free country-ETF history covering 2000–02 and 2008 (Tiingo, B11) on which the dip rule is ≥ 0 in both halves, or a pre-registered test of the IDMO dial on that data. **Next pick: B1** (put-writing and the collar indices on 40 years of Cboe data).
+
+**Scripts / docs**: `scripts/param_search/intl.py` (pre-registration commit `eb94dbc`, then the code), `datasets.french_regional`, the harness README row; roadmap E2 ✅ / E3 🚫 / E4 priced; todo Phase 2.13; two insights. Raw output kept in the session scratchpad only (the tables above are the record).
+
 ## Decision 072: The external data library — everything beyond prices that the research can use, free first (operator, 2026-10-29)
 **Date**: 2026-10-29
 **Operator**: "we have prices but there is so much more that influences trading … think of what we want and try to find it all and store it somewhere; completely free ideally, a small amount is acceptable." Done the project's way: an inventory of what each open question needs, a probe of the free sources, one fetcher with a manifest (`scripts/param_search/fetch_external.py`), the files stored under `data/param_search/external/<source>/` (git-ignored) and archived on titanserver under `/home/TitanTrade/archive/param_search/external/` (the SEC zips excluded there — re-downloadable). 122 of 127 items on the first pass, 271 MB, no key and no payment needed for any of it.

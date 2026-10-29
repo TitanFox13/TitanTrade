@@ -66,6 +66,8 @@ Exit side: longer targets, no target, longer clocks, trailing stops, ATR stops. 
 
 ## 8. Your first task: the international book (roadmap E2)
 
+*Done 2026-10-29 evening → Decision 073: no ex-US book, no blend (I1 and I2 held, I3–I5 failed); E3 closed, E4 priced; the next pick is B1. The section below is kept as written for the record.*
+
 The operator's second fear is a weaker US market and a weaker dollar, and the book's century of evidence is US-only. The data is in hand; nothing has run. Before running anything:
 
 1. **Write the hypotheses into `scripts/param_search/intl.py`'s docstring**, the Decision 062 way. The pre-registered shape, to be sharpened by you: (a) the momentum premium exists in every developed region on French's data 1990 → (Developed ex-US, Europe, Japan, Asia-Pacific ex-Japan: the `Mom` factor is positive in both halves, split 2008); (b) an ex-US momentum ETF held outright (IMTM, IDMO, 2015 →) beats its index (ACWX / VEU) in both halves, as SPMO beat SPY (+5.2); (c) the dip rule on the 20 country ETFs, 3 × 25 %, insurance from the region's own breadth, is ≥ 0 vs ACWX and vs the equal-weight basket in both halves — the sector-floor test on a new universe of baskets; (d) the correlation of an ex-US two-sleeve book's daily excess with the US book's is below 0.5; (e) the global blend (US book 50–70 / ex-US book 30–50) improves the drawdown or the Sharpe of the US book without giving back more return than a placebo (a random region weighting with the same mean) would; (f) through 2025-12-31 beside the full period; (g) a currency note: the same results in euro terms over the dollar's 2002–08 fall and 2008–22 rise (FRED DEXUSEU is in the library).

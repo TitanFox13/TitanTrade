@@ -122,6 +122,26 @@ it cannot decide return, and the drawdown leg as first written (≤ 0.7 × SPY i
 ≥ 10 % drawdown) fails the design's own backtest 3 times in 5, because in a fast 10–19 %
 dip the insurance and the shock trigger barely engage, by design.
 
+### Two Books That De-risk Together Are One Bet (Decision 073)
+An ex-US copy of the live book was built on its own index: country ETFs for the dip
+sleeve, an ex-US momentum ETF, insurance and the shock trigger read off ACWX. The two
+dip sleeves' active returns correlated 0.04 — different bets, as hoped. The two *books'*
+active returns correlated 0.58, because while a book is de-risked its active return is
+minus half its market, the two markets are 0.85 correlated, and they fall at the same
+times. The insurance that protects each book makes the pair the same bet in the week
+that hurts; the diversification lives in the sleeves and is drowned by the exposure
+rules. A second book under the same rules buys protection in the decades, not in the
+crash, and this decade priced that at 2–4 pp/yr for one point of drawdown.
+
+### A Basket Is Not Automatically a Floor (Decision 073)
+The dip rule is ≥ 0 only on the 11 sector ETFs, and the reason given was that baskets
+cannot have single-name breaks. Twenty single-country ETFs are baskets too, and the rule
+lost on them in the first half and through 2025 (62 % winners, a +2.8 % median trade,
+against 79 % and +4.9 % on the sectors). A country's dip inside an uptrend is as often a
+currency or a policy move as a reversion, and the rule cannot tell them apart. The
+sector floor is a property of US sectors, not of diversified baskets in general; every
+new universe gets the floor test, whatever it is made of.
+
 ### You Cannot Detect the Epoch, You Can Detect the Fall (Decision 067)
 Every slow "which regime are we in" rule we tried (trend, breadth, a three-state
 mix, the sleeve's own momentum) gave back return and cut no drawdown, over a

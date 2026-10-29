@@ -11,6 +11,9 @@ Data lives in ``data/param_search/`` (git-ignored; archived on titanserver under
 | C_yahoo_sectors_1999  | 11 SPDR sector ETFs (Yahoo adj. close)    | SPY            | 1999 → | none |
 | E_sp500_2016          | S&P 500 members as of 2016-01-04 (502 with Alpaca bars, delisted names included) | SPY | 2016 → | none (point-in-time list) |
 | F_french_49ind_1926   | Kenneth French 49 industry portfolios, value-weighted daily total returns → index levels | French market factor (Mkt-RF + RF) | 1926 → | none |
+
+Not a ``load`` key: ``alpaca(sym, "intl")`` reads the 39 region / country ETFs (roadmap E1, 2016 →, dividend-adjusted) and
+``french_regional(region, kind)`` Kenneth French's regional daily factors (``external/french_intl/``, USD, 1990 →).
 """
 import datetime
 import json
@@ -89,6 +92,18 @@ def french_industries():
             levels[c] *= 1 + r / 100
             out[c][d] = levels[c]
     return out
+
+
+def french_regional(region, kind):
+    """Daily decimal returns from French's regional files: ``kind`` "mom" → WML, "mkt" → Mkt-RF + RF;
+    ``region`` = Developed_ex_US / Europe / Japan / Asia_Pacific_ex_Japan / Developed (the zips unpacked in place)."""
+    if kind == "mom":
+        cols, rows = _french_section(f"{S}/external/french_intl/{region}_MOM_Factor_Daily.csv", ",WML")
+        i = cols.index("WML")
+        return {d: rows[d][i] / 100 for d in sorted(rows) if rows[d][i] is not None}
+    cols, rows = _french_section(f"{S}/external/french_intl/{region}_3_Factors_Daily.csv", ",Mkt-RF")
+    im, ir = cols.index("Mkt-RF"), cols.index("RF")
+    return {d: (rows[d][im] + rows[d][ir]) / 100 for d in sorted(rows) if rows[d][im] is not None}
 
 
 def sp500_2016_symbols():
