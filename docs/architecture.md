@@ -24,7 +24,7 @@ APScheduler (api container, America/New_York)
 ├─ 15:30 Mon–Fri   execute        (same)
 ├─ 16:30 Mon–Fri   daily_summary  notifier (Discord) + benchmark refresh
 ├─ Sun 16:00       full           fetch → signals → execute
-└─ 1st Sun 15:00   curate         curator (Claude) → universe_proposal.json, post_mortem.json
+└─ (disabled)      curate         curator (Claude) → universe_proposal.json, post_mortem.json — retired from the schedule, Decision 082; manual only
 
    data_bundle.json ──┐
    broker positions ──┼──► mechanical.build_plan ──► plan.json
@@ -73,4 +73,4 @@ See [TitanTrade/docs/risk_management.md](../TitanTrade/docs/risk_management.md).
 
 ## The LLM's Place
 
-Claude runs once a month (`curate`) and proposes universe changes plus a post-mortem of the month's trades. The proposal is written to `state/universe_proposal.json`, posted to Discord, and applied by the operator through `PUT /api/watchlist`. It cannot place, size or close an order. See [docs/agent_instructions.md](agent_instructions.md).
+None on the schedule. Trading has been fully mechanical since Decision 061; the monthly curation call that remained was retired in Decision 082 (2026-10-30). `curate` still exists as a manual command: on demand Claude proposes changes to the shadow list plus a post-mortem of recent trades, written to `state/universe_proposal.json` and posted to Discord, applied only by the operator through `PUT /api/watchlist`. It cannot place, size or close an order. See [docs/agent_instructions.md](agent_instructions.md).

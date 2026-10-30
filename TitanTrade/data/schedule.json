@@ -14,7 +14,7 @@
     },
     {
       "id": "monthly_curate",
-      "name": "Monthly Universe Review + Post-Mortem (LLM, no orders)",
+      "name": "Monthly Universe Review + Post-Mortem (LLM, no orders) \u2014 retired from the schedule, Decision 082",
       "command": "curate",
       "cron": {
         "day_of_week": "sun",
@@ -22,7 +22,7 @@
         "hour": 15,
         "minute": 0
       },
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "weekday_fetch",

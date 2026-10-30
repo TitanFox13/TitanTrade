@@ -72,7 +72,7 @@ All jobs run inside the `api` container (Decision 028), from `data/schedule.json
 | `weekday_execute_preclose` | 15:30 Mon–Fri | signals + execute |
 | `daily_summary` | 16:30 Mon–Fri | Discord summary + benchmark refresh over the strategy's window (058/059/065) |
 | `sunday_full` | 16:00 Sun | fetch → signals → execute |
-| `monthly_curate` | 15:00 first Sunday | Claude universe proposal + post-mortem (no orders) |
+| `monthly_curate` | disabled (Decision 082) | Claude universe proposal + post-mortem — manual `curate` only |
 
 Manage via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/scheduler/{id}/enabled`.
 
@@ -133,5 +133,5 @@ Volumes: `./state` and `./logs` on both; `./data` on `api` (watchlist edits thro
 
 - **Logs**: `logs/` (bind-mounted); `docker compose logs api` for the scheduler. Grep `ERROR|CRITICAL|Traceback` at each checkup; expected WARNINGs are documented in the checkup notes of `docs/decisions.md`.
 - **Discord**: per-job completion / failure embeds; the 16:30 ET daily summary (equity, positions, the plan, benchmark line); observability alerts (stuck in cash, churn, suspect data, split-suspect gap, cooldown override, core rebalance).
-- **API**: `/api/health`, `/api/scheduler` (last result per job), `/api/plan`, `/api/benchmark`, `/api/fill-ledger`, `/api/curator-ledger`.
-- **Checkup routine** (every 1–2 weeks): log sweep → scheduler job results → open positions all stop-covered (and none within a week of its GTC `expires_at`) → `compute_benchmark` over the clean window vs SPY → the fill ledger's median gap → the curator ledger's score (`/api/curator-ledger`; nothing to read under 12 proposals) → `backtest-mech --shadow --start <window_started_at>` beside the live sleeve → `scripts/pull_backup.sh` → (live) the cash sweep APY vs SGOV's yield, switch `cash_ticker` on if the sweep lags ≥ 0.5 pp → record in `docs/decisions.md` and `docs/todo.md`.
+- **API**: `/api/health`, `/api/scheduler` (last result per job), `/api/plan`, `/api/benchmark`.
+- **Checkup routine** (every 1–2 weeks): log sweep → scheduler job results → open positions all stop-covered (and none within a week of its GTC `expires_at`) → `compute_benchmark` over the clean window vs SPY → the fill ledger's median gap → `backtest-mech --shadow --start <window_started_at>` beside the live sleeve → `scripts/pull_backup.sh` → (live) the cash sweep APY vs SGOV's yield, switch `cash_ticker` on if the sweep lags ≥ 0.5 pp → record in `docs/decisions.md` and `docs/todo.md`.

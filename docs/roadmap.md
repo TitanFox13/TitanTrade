@@ -16,11 +16,11 @@
 
 | # | item | status | what "done" looks like |
 |---|---|---|---|
-| A1 | **Checkup every 1–2 weeks** — log sweep, scheduler, every dip position stop-covered and nowhere near its 90-day expiry, benchmark over the clean window with its band, the fill ledger's median gap, `backtest-mech --shadow` beside the live sleeve, `scripts/pull_backup.sh`, the record in decisions/todo | ⏳ first done 2026-10-30 (clean) | the first checkup under design 070 ran six days early on the operator's call: 0 errors, every job completed, every stop in place, SPMO at 26 % filling from freed cash, 0 trades in the window, the shadow backtest and the backup pull working; pending for the next (≈ 2026-11-12): the Nov 1 curator proposal, the first ETF entry and ledger row, the benchmark wording at 20 days; watch DXCM's clock vs its stop's expiry (≈ Jan 21 / 22) |
+| A1 | **Checkup every 1–2 weeks** — log sweep, scheduler, every dip position stop-covered and nowhere near its 90-day expiry, benchmark over the clean window with its band, the fill ledger's median gap, `backtest-mech --shadow` beside the live sleeve, `scripts/pull_backup.sh`, the record in decisions/todo | ⏳ first done 2026-10-30 (clean) | the first checkup under design 070 ran six days early on the operator's call: 0 errors, every job completed, every stop in place, SPMO at 26 % filling from freed cash, 0 trades in the window, the shadow backtest and the backup pull working; pending for the next (≈ 2026-11-12): the first ETF entry and ledger row, the benchmark wording at 20 days (the Nov 1 curator proposal no longer comes — Decision 082); watch DXCM's clock vs its stop's expiry (≈ Jan 21 / 22) |
 | A2 | **The go/stop rule** (Decision 069): behaviour (actions rule-prescribed, fills near the backtest's price), drawdown (never further than SPY in a ≥ 10 % drawdown, ≤ 0.7 × in a ≥ 20 % one), return reported with its band and never judged under 3 years | ⏳ | at least one SPY drawdown ≥ 10 % in the window |
 | A3 | **The first real selloff** — the insurance and the shock trigger live for the first time; the rebound after it (the design's known cost) | ⏳ | what the backtest says: the book falls less, then lags for a year |
 | A4 | **The shadow list's verdict** — the dip rule on the 15 names vs the live ETF sleeve, same window, year after year; is the operator's judgment skill or luck? | ⏳ | a multi-year record; the first number is meaningless |
-| A5 | **The curator's skill** — the monthly proposals for the shadow list, shadow-tracked vs outcome (brainstorm #16, a small build) | ✅ built 2026-10-30 (Decision 082, pre-registered first; the deploy on the operator's go, before Sunday's curate job for row one) → ⏳ first reading at 12 proposals ≈ autumn 2027 | a ledger like the fill ledger, one row per proposal, additions and removals against the list's equal weight and SPY at 21 / 63 / 126 / 252 sessions; no reading under 12 proposals, a verdict at 24 |
+| A5 | **The curator's skill** — the monthly proposals for the shadow list, shadow-tracked vs outcome (brainstorm #16, a small build) | 🚫 **moot — the monthly curator was retired 2026-10-30 (Decision 082)**: the ledger was pre-registered and built, then removed when the operator chose to switch the call off rather than measure it | no LLM runs on the schedule; `curate` stays a manual, advisory command; the shadow list is static unless the operator edits it |
 | A6 | **The gates valued on live data** (brainstorm #17): earnings and macro blackouts vs what the blocked entries did | ⏳ | at 6 months of near-miss records; needs A2-style patience |
 
 ## Track B — Tests the new data unlocks (Decision 072; all hindsight-free; operator's go per test)
@@ -79,7 +79,7 @@
 
 | item | status | note |
 |---|---|---|
-| The shadow list (A4) and the curator ledger (A5) | ⏳ / 💡 | measure the judgment, never bet the sleeve on it |
+| The shadow list (A4) and the curator ledger (A5) | ⏳ / 🚫 (the curator retired, Decision 082) | measure the operator's judgment, never bet the sleeve on it; the LLM no longer proposes names |
 | The universe as a parameter | ✅ principle | a watchlist change is a strategy change (Decision 065); the ETFs are the hindsight-free universe, the names the measured bet |
 | The operator's risk line (C1) | 🔑 | the one judgment the data cannot replace |
 

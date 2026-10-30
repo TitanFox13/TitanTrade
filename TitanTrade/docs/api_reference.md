@@ -58,7 +58,6 @@ All market-data functions fail open (`[]` / `None` / `{}`) on a missing key or e
 | `/api/benchmark` | GET | Last computed metrics vs SPY |
 | `/api/benchmark/refresh` | GET | Recompute now (`?days=N` or `?since=YYYY-MM-DD`) |
 | `/api/fill-ledger` | GET | `{summary: {n, median_gap_pct, mean_gap_pct, worst_gap_pct, fills_known}, rows: [...]}` from `state/fill_ledger.json` (Decision 069) |
-| `/api/curator-ledger` | GET | `{summary: {proposals, additions, removals, horizons: {"21": {additions: {n, median_vs_list_pp, beat_list, p_luck}, removals: {…}}, …}, verdict}, rows: [...]}` from `state/curator_ledger.json` (Decision 082) |
 | `/api/settings` | GET | `{trading_mode, mechanical, live_keys_configured}` |
 | `/api/settings/mode` | PUT | `{"trading_mode": "paper" \| "live"}`; 400 when live keys are missing |
 | `/api/watchlist` | GET / PUT | `data/watchlist.json`; PUT body `{"watchlist": [...]}` (settings preserved) |

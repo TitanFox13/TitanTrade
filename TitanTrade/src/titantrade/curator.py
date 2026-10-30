@@ -182,12 +182,6 @@ def run_universe_review(cfg: Config) -> dict[str, Any]:
     }
     with open(STATE_DIR / PROPOSAL_FILE, "w") as f:
         json.dump(doc, f, indent=2)
-    try:
-        from titantrade.curator_ledger import record_proposal
-
-        record_proposal(doc)   # Decision 082: the proposal's row; outcomes follow at the daily summaries
-    except Exception as exc:  # noqa: BLE001
-        log.warning(f"Curator ledger: proposal not recorded ({exc})")
     removes = ", ".join(r.get("ticker", "?") for r in proposal.get("remove", [])) or "none"
     adds = ", ".join(a.get("ticker", "?") for a in proposal.get("add", [])) or "none"
     log.info(f"Universe proposal: remove [{removes}] add [{adds}]")

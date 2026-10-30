@@ -118,16 +118,6 @@ def _run_daily_summary() -> str:
             log.info(f"Fill ledger: {added} row(s) added")
     except Exception:
         log.exception("Fill ledger update failed — daily summary continues")
-    # Decision 082: the curator ledger's horizons, once their session's close is published.
-    try:
-        from .config import load_config
-        from .curator_ledger import update_curator_ledger
-
-        filled = update_curator_ledger(load_config())
-        if filled:
-            log.info(f"Curator ledger: {filled} horizon(s) filled")
-    except Exception:
-        log.exception("Curator ledger update failed — daily summary continues")
 
     from .notifier import send_daily_summary
     result = send_daily_summary()

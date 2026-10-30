@@ -1,10 +1,10 @@
 # Agent Instructions — the Curator
 
-Since Decision 061 the LLM is out of the trading loop. One Claude job remains, and it cannot touch an order.
+Since Decision 061 the LLM is out of the trading loop. **Since Decision 082 (2026-10-30) no LLM job runs on the schedule either**: the monthly curation below is retired (`monthly_curate` disabled in `data/schedule.json`) and exists only as the manual `curate` command, advisory and cost-logged. It cannot touch an order.
 
 | Agent | Model | Cadence | Task |
 |-------|-------|---------|------|
-| The Curator | Claude Opus 4.8 (`CLAUDE_MODEL`, adaptive thinking) | First Sunday of the month, 15:00 ET (`monthly_curate`) | Universe-curation proposal + plain-language post-mortem |
+| The Curator | Claude Opus 4.8 (`CLAUDE_MODEL`, adaptive thinking) | Manual only — `curate` (the `monthly_curate` schedule entry is disabled, Decision 082) | Universe-curation proposal + plain-language post-mortem |
 
 Why this split: the October 2026 audit (Decision 060, Evidence 2–3) found that the analyst's selection, direction and confidence outputs carried no signal at the horizon the system trades, while the operator's universe and the mechanical layer produced the return. Universe curation is the one place where the LLM's breadth of knowledge is still worth a monthly call.
 
@@ -17,8 +17,6 @@ Why this split: the October 2026 audit (Decision 060, Evidence 2–3) found that
 **Prompt constraints**: at most 2 removals and 2 additions, each with a one-line reason; liquid US large caps only; JSON only — `{"remove": [{"ticker", "reason"}], "add": [{"ticker", "sector", "reason"}], "notes"}`.
 
 **Output**: `state/universe_proposal.json` (`generated_at`, `watchlist` = the list reviewed, `list` = `"shadow_watchlist"` or `"watchlist"`, `proposal`, `raw`, `status: "advisory — apply through the watchlist editor"`), a Discord embed, and `GET /api/universe-proposal`. The operator applies accepted changes with `PUT /api/watchlist`; nothing is applied automatically.
-
-**Scored**: every proposal gets a row in the curator ledger (Decision 082, `curator_ledger.py`): its additions and removals against the list's equal-weight return and SPY at 21 / 63 / 126 / 252 sessions, filled by the daily summary; `GET /api/curator-ledger`. No reading under 12 proposals, a verdict at 24 — whether the monthly call earns its keep.
 
 ## Post-mortem (`curator.run_post_mortem`)
 
