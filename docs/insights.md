@@ -130,7 +130,11 @@ than the premium is worth. Weighted by size the same picks beat SPY by two to th
 and that is the trap from the other side: a profitability ratio over book equity ranks the
 buyback giants first, so "the most profitable" and "the biggest winners of this decade"
 are the same names. A sleeve test has to say how it would be weighted, and then show the
-premium is not the weighting.
+premium is not the weighting. Stage 2 showed exactly that: the weighted picks were Apple,
+Nvidia and Lilly — the five largest names were 54 to 72 percent of the portfolio — and
+once no name could exceed 5 percent the gain was gone in every construction, while the
+alpha left after a size control was never larger than its noise. A cap-weighted top list
+of a few giants is not a strategy; it is a bet on those giants with a label on it.
 
 ### Point in Time Means First Reported (Decision 076)
 The SEC's free filing data is point-in-time only if you read it that way. Three mistakes

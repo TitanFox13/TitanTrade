@@ -42,7 +42,9 @@ Operator: "if the data says it is profitable, diversifies and stands the test of
 - [x] **S4 fails** — the cell picked in-sample (gross profitability, N 30) is the worst out of sample (+7.3 → −9.2); the OP family is consistent (4 of 12 cells positive in both halves, all OP / OIE).
 - [x] **S5 fails** — the sleeve costs the book 0.6 … 0.9 pp/yr for the same Sharpe. **S6** — 39–42 % turnover; $100 / $400 per name at $25k / $100k against the $500 dust floor.
 - [x] Roadmap Track H: stage 1 ✅, stage 2 (the value-weighted picks, confound first) 💡, the paid long-history item not worth buying unless stage 2 survives; README rows; `screens.simulate(score_matrix, weights)`; two insights.
-- [ ] **Next**: the operator's call — stage 2 (an afternoon, data in hand, prior ≈ 40 %) or the roadmap's B5 / B6 / B7.
+- [x] **Stage 2 run the same day (operator: "stage 2"; `qualpick2.py`, checks T1–T6 committed first, `64af97c`)**: the weighted picks were Apple, Nvidia and Lilly (top-5 share 54–72 %; the top-30 57 % Apple in 2026); after SPMO and a size tilt no alpha survives (t −0.5 … +1.2); capped at 5 % every variant loses out of sample (−1.7 … −4.1 vs SPY), the within-size and over-assets constructions included; the fifty largest names alone made +2.3 in the January window; the sleeve fails on all four variants; the smallest cap-weighted position $5 at $25k. **The quality question is closed on free data; the paid extension is not bought.**
+- [ ] **Next**: B5 / B6 / B7 — credit stress as a second insurance signal, a VIX shock trigger, gold over a century — on the operator's go.
+- [ ] At the next checkup: archive `data/param_search/external/sec_facts/` (118 MB) and `alpaca_hist/quality/` on titanserver beside the other research data.
 
 ## Phase 2.15: Quality over a century — roadmap B2 run, no sleeve, B9 closed (2026-10-30) — Decision 075
 The next pick after B1, on the operator's go. Hypotheses Q1–Q6 and the drop rules committed before the run (`05b4144`, `scripts/param_search/quality.py`); results and tables in Decision 075. Nothing live changed.

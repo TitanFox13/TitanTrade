@@ -44,6 +44,45 @@ N 30 +1.32 vs N 50 +0.52; the anchors equal. **The walk-forward fails**: the cel
 
 **Scripts / docs**: `scripts/param_search/qualpick.py` (pre-registration `a086fdc`, then the code, three runs), `fetch_sec_facts.py`, `screens.simulate(score_matrix, weights)`, the harness README rows; roadmap Track H (stage 1 ✅, stage 2 💡, the paid item's note); todo Phase 2.16; two insights; handover note. Data: `external/sec_facts/` (118 MB, free, re-fetchable in six minutes; archived on titanserver at the next checkup).
 
+### Decision 076 addendum — the quality stage 2: the value-weighted picks were Apple, Nvidia and Lilly; no alpha survives a size control, a 5 % cap removes the gain, the sleeve fails — the quality door closes (operator: "stage 2", 2026-10-30)
+`scripts/param_search/qualpick2.py` — checks T1–T6, expected numbers and drop rules **committed before the run** (`64af97c`); the stage-1 pipeline and data, nothing new fetched; `screens.simulate` weights (raw, capped at 5 % with the excess redistributed, equal). **Nothing live changes.**
+
+**T1 — the confound measured** (each line's daily excess over SPY on SPMO's excess, the size tilt = the value-weighted minus the equal-weight hold of the scored set, and French RMW; alpha in pp/yr with its t; July | January):
+
+| line | β SPMO | β size | β RMW | α (t) | R² | holdings |
+|---|---|---|---|---|---|---|
+| top 50 by OP, value-weighted raw (stage 1's line) | −0.05 \| −0.06 | +0.23 \| +0.54 | +0.16 \| +0.15 | **+1.6 (0.7) \| +0.8 (0.4)** | 0.11 \| 0.27 | top-5 share 54 % \| 60 %; 2026: NVDA 33 %, AAPL 30 %, LLY 8 % |
+| top 30, value-weighted raw | −0.12 \| −0.06 | +0.24 \| +0.62 | +0.20 \| +0.16 | +3.0 (1.0) \| +1.1 (0.4) | 0.11 \| 0.26 | **top-5 share 66 % \| 72 %; AAPL 57 %, LLY 15 % \| NVDA 39 %, AAPL 34 %** |
+| top 50, capped at 5 % | −0.04 \| −0.03 | −0.08 \| −0.14 | +0.21 \| +0.19 | **−1.1 (−0.5) \| −0.2 (−0.1)** | 0.11 \| 0.12 | top-5 share 25 % |
+| top 50 within size quintiles, value-weighted | −0.06 \| −0.07 | +0.18 \| +0.56 | +0.21 \| +0.14 | +1.8 (0.7) \| +0.6 (0.2) | 0.10 \| 0.24 | |
+| top 50 by OP / assets, value-weighted raw | −0.04 \| −0.09 | +0.24 \| +1.01 | +0.10 \| +0.10 | +1.7 (0.7) \| +1.8 (0.8) | 0.08 \| 0.53 | |
+| the largest 50 by market value, no profitability (T3) | −0.14 \| −0.08 | +0.80 \| +0.86 | +0.07 \| +0.04 | −0.4 (−0.2) \| −0.5 (−0.4) | 0.63 \| 0.76 | |
+
+No alpha survives: after SPMO and the size tilt every t is between −0.5 and +1.2 (the bar was t > 2). The picks are not momentum (β SPMO ≈ 0), they are quality-tilted (β RMW +0.1 … +0.2, the ETFs' range) and they are two or three companies: the top-30 portfolio was 57 % Apple and 15 % Lilly in July 2026, the top-50 a third Nvidia and a third Apple. As pre-registered: a profitability ratio over book equity ranks the buyback giants first.
+
+**T2 / T3 — the confound removed by construction, and the size-only control** (excess vs SPY; IS / OOS; July | January):
+
+| line | July | January |
+|---|---|---|
+| value-weighted hold of the scored set (ref) | −0.92 (−1.1 / −0.7) | +1.05 (+3.2 / −1.1) |
+| **the largest 50 by market value, no profitability (T3)** | −0.08 (+0.4 / −0.5) | **+2.32 (+4.7 / +0.0)** |
+| top 50 by OP, value-weighted raw · top 30 | +1.78 (+4.4 / −0.6) · +3.05 (+5.2 / +1.1) | +2.65 (+3.7 / +1.6) · +2.99 (+3.3 / +2.6) |
+| **top 50 capped at 5 % · top 30 capped** | **−1.20 (+1.8 / −3.8)** · +0.49 (+3.9 / −2.5) | **−0.54 (+1.2 / −2.2)** · +0.33 (+4.4 / −3.6) |
+| top 50 within size quintiles: equal-weight · value-weighted · value-weighted capped | −0.57 (+2.1 / −2.9) · **+1.97 (+1.6 / +2.3)** · −0.22 (+1.5 / −1.7) | −1.08 (+2.8 / −4.8) · +2.16 (+2.8 / +1.5) · −0.96 (+2.3 / −4.1) |
+| top 50 by OP / assets: value-weighted raw · capped · equal-weight | +1.66 (+3.9 / −0.3) · −0.22 (+2.2 / −2.3) · +1.41 (+6.6 / −3.1) | +5.09 (+9.6 / +0.7) · +0.11 (+2.9 / −2.6) · +0.11 (+5.6 / −5.1) |
+
+The cap is the whole story: every uncapped value-weighted line beats SPY and every capped one loses it out of sample (−1.7 … −4.1), the within-size and the over-assets variants included. The one clause of the drop rule the letter of the numbers meets — the within-size value-weighted top 50 positive in both halves (+1.97 / +2.16) — is the same construction uncapped (its size loading +0.18 … +0.56, its alpha t 0.7 / 0.2, its capped twin −0.22 / −0.96), so the clause is met by the giants, not by quality. The size-only control (the fifty largest names, no profitability at all) made +2.3 in the January window on its own.
+
+**T4 — the weighted family, 24 cells** (N 30 / 50 × anchor × raw / capped / within-size × OP / OP-over-assets, excess vs SPY): marginals value-weighted raw +2.76, within-size +2.07, **capped +0.22**; OP +1.87 vs over-assets +1.65; N and anchor within a point. Ten of 24 cells positive in both halves — every one of them uncapped; no capped cell is. The walk-forward inside the family passes weakly (the in-sample-best cell, N 50 January raw over-assets +9.6, is +0.7 out of sample against a median of −0.4; by out-of-sample the pick is N 30 January within-size OP, +3.3 → +4.4 in-sample) — the family is "hold the largest profitable names uncapped", which a sleeve cannot be.
+
+**T5 — the sleeve** (vs SPY, 2017-07-03 → 2026-10-12; the book over the same window +1.31 (+0.0 / +2.5), Sharpe 1.07, through 2025 +0.72): with the pre-named capped top 50, dip 20 / SPMO 60 / picks 20 **+0.64 (−0.1 / +1.3), Sharpe 1.05, through 2025 +0.10**; dip 40 / SPMO 40 / picks 20 +0.33, 1.08, 0.00; with the within-size value-weighted top 50 (the secondary) +1.35 (−0.0 / +2.6), 1.08, +0.63 and +1.04 (+0.3 / +1.7), 1.11, +0.52 — none better in both halves and through 2025. Fails on all four.
+
+**T6 — the dust floor**: with capped weights the smallest of the fifty positions is 0.07 … 0.10 % of the sleeve — **$5 at $25k and $20 at $100k** against the $500 floor; a cap-weighted 50-name sleeve is untradeable at any size the account will have; turnover 39 % a year.
+
+**Decision.** Nothing changes, and the quality question is closed on free data: the premium is real (Decision 075), the funds do not capture it (075 addendum), our equal-weight picks give it back to the equal-weight drag (076), and our value-weighted picks were the decade's leaders (this addendum). Prior 30 % that it was quality; the answer is no. The paid long-history extension is not bought. Kept: the free SEC pipeline (`fetch_sec_facts.py`, `qualpick.annual_records`, `screens.simulate` with scores and weights) for any later single-name question; and the lesson that a sleeve test must name its weighting and then show the premium is not the weighting. **Next: B5 / B6 / B7.**
+
+**Scripts / docs**: `scripts/param_search/qualpick2.py` (pre-registration `64af97c`, then the code), the README row; roadmap Track H (stage 2 ✅ → closed, the paid item's note, Track D's quality row); todo Phase 2.16; the insight extended; handover note.
+
 ## Decision 075: Quality over a century — the premium is real, old and long-only capturable; no sleeve (no investable vehicle, and the bar missed by a hair), and the dip rule loses on quality portfolios as on any portfolio, so the fundamentals pipeline (B9) is closed (roadmap B2, operator's go, 2026-10-30)
 **Date**: 2026-10-30
 **Why**: "quality" (steadily profitable companies that invest conservatively) is the one documented premium the book has never held, and roadmap B9 (a fundamentals pipeline for a single-name dip universe) rests on whether profitability separates a dip from a break. Done the Decision 062 way: hypotheses Q1–Q6 and the drop rules written into `scripts/param_search/quality.py` and **committed before any code ran** (`05b4144`); loaders `datasets.french_levels(…, sub="external/french")`, `french_factors`, `aqr_qmj`. Data: Kenneth French's daily portfolios on operating profitability (OP) and investment (INV), the 25 size × profitability portfolios and the five-factor file (RMW, CMA), 1963-07 → 2026-09; AQR's Quality-Minus-Junk (US) daily 1957-07 →; QUAL on the decade. Windows: 63y 1963-07 → 2026-08 (split 1995; eras 1963–75 / 1975–2000 / 2000–26), QMJ 1957 → (split 1992), the ETF decade (split 2022, through 2025 beside full). Book = `carry.sets()` (the century book on the long window; the sector-dip / SPMO book on the decade), exposure = min(insurance ×0.5, shock ×0.5). **Nothing live changes.**
