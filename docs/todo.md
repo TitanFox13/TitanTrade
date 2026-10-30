@@ -33,6 +33,13 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
 - [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
 
+## Phase 2.18: A VIX-based shock trigger — roadmap B6 run, the price rule stays (2026-10-30) — Decision 078
+Operator's go. Variants, hypotheses X1–X5 and the Decision 067 bar committed before the run (`a2eb604`, `vixshock.py`); results in Decision 078. Nothing live changed.
+- [x] **No VIX cell beats the price rule**: 1990 → the best level cell (VIX > 40 / hold 10) +1.74 vs the price rule +1.75, same drawdown, neighbours within 0.5 (no plateau), worse on the decade (+1.14 vs +1.36, DD −22.0 vs −20.0); VIX > 25 / 30 lose 1 … 3 pp/yr on both windows (they fire 27–45 % of sessions and give the 2008 / 2020 rebounds back twice over); the jump cells of 12 … 16 points match the price rule because they are the same event; the inverted term structure is the worst of the family.
+- [x] **Timing**: median lead zero sessions over thirteen bears (2008 +45 the one early call; 2020 −1, 2022 −2); the VIX > 30 rule agrees with the price rule on only 45 % of de-risked sessions.
+- [x] Roadmap B6 ✅ closed, Track D; README row; one insight; handover note. The shock trigger stays the −7 % / 10 / 20 price rule.
+- [ ] **Next**: B7 — gold over a century (datahub monthly 1833 → against the French market), on the operator's go.
+
 ## Phase 2.17: Credit stress as the insurance's second signal — roadmap B5 run, a candidate that failed its robustness check (2026-10-30) — Decision 077
 Operator's go. Hypotheses C1–C6 and the caveats committed before the first run (`27457b8`), the addendum S1–S3 before the second (`227e040`); results in Decision 077. Nothing live changed.
 - [x] **Run 1** — SMA AND NFCI > 0.5 on 1971 →: +3.50 vs the SMA alone +2.62, both halves and both eras, DD −37.4 vs −35.6, all 20 placebo draws beaten (a random 9 % firing earns +2.80); the gain is in the rebounds (2020 −9 vs −16); ANFCI similar; STLFSI4 (1994 →) +1.76 vs +1.14, placebo beaten; **the VIX twin +1.86 vs +1.75 with DD −42.5 and the placebo not beaten**; on the decade the rule never fires (= the no-insurance book +3.03).

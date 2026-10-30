@@ -122,6 +122,17 @@ it cannot decide return, and the drawdown leg as first written (≤ 0.7 × SPY i
 ≥ 10 % drawdown) fails the design's own backtest 3 times in 5, because in a fast 10–19 %
 dip the insurance and the shock trigger barely engage, by design.
 
+### The Fall Is the Fact, the Fear Gauge Is the State (Decision 078)
+The VIX was tested as the shock trigger in twenty-six forms. A VIX level fires three
+times as often as a 7 % fall in ten sessions, because fear stays high for months after a
+crash while prices have already turned — so a level rule sits out the rebounds and gives
+them back twice over. A VIX jump of fifteen points matches the price rule exactly, because
+it is the price fall measured in a different unit. Over thirteen bears since 1990 the gauge
+led the fall by a median of zero sessions. The lesson of Decision 067 holds from the other
+side: a rule should react to what happened, and the cleanest record of what happened is
+the price itself — available on every market and in every century, with no options market
+needed.
+
 ### A Revised Series Knows the Future (Decision 077)
 The Chicago Fed's financial-conditions index passed every pre-registered test as the
 insurance's second signal over fifty-five years, beating all twenty placebo draws. It is
