@@ -120,22 +120,33 @@ def scaled(f):
     return f * (TARGET_VOL / (f.std() * np.sqrt(12)))
 
 
-def sleeve_table(title, keys, r_dip, r_mom, e, mkt, f, split, eras):
-    """The book and the sleeve variants (the factor rescaled to 10 % vol, gross and net), scored against the market."""
-    core = e * (0.4 * r_dip + 0.6 * r_mom)
-    print(f"\n{title}")
+def sleeve_table(title, parts, mkt_m, f_m, split, eras):
+    """The book and the sleeve variants, scored against the market. ``parts`` are *exact* monthly series compounded from
+    the daily book (the exposure rules applied day by day): ``book``, and the book with ``w`` taken out of the momentum
+    sleeve (``mom10`` / ``mom20``) or out of the dip sleeve (``dip10`` / ``dip20``); the factor (rescaled to 10 % vol,
+    gross and net) is blended in monthly."""
+    keys, (book, mom10, mom20, dip10, dip20, mkt, f) = align(parts["book"], parts["mom10"], parts["mom20"], parts["dip10"], parts["dip20"], mkt_m, f_m)
+    print(f"\n{title}: {keys[0]} → {keys[-1]} ({len(keys)} months)")
     print(f"{'book':58} {'excess':>6} {'(IS / OOS)':>15} {'DD':>9} {'Sharpe':>8} {'worst yr':>12}")
-    base = score(keys, core, mkt, split, eras); print(fmt("the book (dip 40 / mom 60, min(insurance, shock))", base))
+    base = score(keys, book, mkt, split, eras); print(fmt("the book (dip 40 / mom 60, min(insurance, shock))", base))
+    print(fmt("the market", score(keys, mkt, mkt, split, eras)).replace("+0.00%", " 0.00%"))
     for net in (False, True):
         g = scaled(f) - (NET_COST / 12 if net else 0.0); tag = "net 2 pp" if net else "gross"
-        for w in (0.10, 0.20):
-            for label, rr in ((f"trend {w:.0%} proportional, outside the rules ({tag})", (1 - w) * core + w * g),
-                              (f"trend {w:.0%} from the momentum sleeve ({tag})", e * (0.4 * r_dip + (0.6 - w) * r_mom) + w * g),
-                              (f"trend {w:.0%} from the dip sleeve ({tag})", e * ((0.4 - w) * r_dip + 0.6 * r_mom) + w * g)):
+        for w, mom_w, dip_w in ((0.10, mom10, dip10), (0.20, mom20, dip20)):
+            for label, rr in ((f"trend {w:.0%} proportional, outside the rules ({tag})", (1 - w) * book + w * g),
+                              (f"trend {w:.0%} from the momentum sleeve ({tag})", mom_w + w * g),
+                              (f"trend {w:.0%} from the dip sleeve ({tag})", dip_w + w * g)):
                 s = score(keys, rr, mkt, split, eras)
                 ok = s["excess"] > base["excess"] and s["is"] > base["is"] and s["oos"] > base["oos"] and s["sharpe"] >= base["sharpe"] and (not eras or all(x > y for x, y in zip(s["eras"], base["eras"])))
-                print(fmt(label, s) + (f"  gain {s['excess'] - base['excess']:+.2%}" + ("  ← passes the bar" if ok else "")))
+                print(fmt(label, s) + f"  gain {s['excess'] - base['excess']:+.2%}" + ("  ← passes the bar" if ok else ""))
     return base
+
+
+def monthly_parts(d, r_dip, r_mom, e):
+    """Exact monthly series of the book and of the book minus a 10 / 20 % slice of either sleeve, from the daily path."""
+    return {"book": to_monthly(d, e * (0.4 * r_dip + 0.6 * r_mom)),
+            "mom10": to_monthly(d, e * (0.4 * r_dip + 0.5 * r_mom)), "mom20": to_monthly(d, e * (0.4 * r_dip + 0.4 * r_mom)),
+            "dip10": to_monthly(d, e * (0.3 * r_dip + 0.6 * r_mom)), "dip20": to_monthly(d, e * (0.2 * r_dip + 0.6 * r_mom))}
 
 
 def main():
@@ -150,20 +161,19 @@ def main():
             for s in (tsm if name == "TSMOM" else cen).values():
                 for k in [k for k in s if k >= cut]:
                     del s[k]
+    tail = sorted(tsm["TSMOM"])[-3:]
+    print("data check: TSMOM last months", {k: round(tsm["TSMOM"][k], 4) for k in tail})
 
-    # ---- the books, monthly
+    # ---- the books, monthly — compounded from the daily path with the exposure rules applied day by day
     c = books.century(); cd = c["d"]
     e_c = books.exposure(c["bear"], books.shock_flags(c["mkt"], -0.07, 10, 20))
-    m_dip, m_mom, m_mkt = to_monthly(cd, c["r"]["dip"]), to_monthly(cd, c["r"]["mom"]), to_monthly(cd, c["r"]["mkt"])
-    m_e = to_monthly(cd, e_c - 1.0)   # (1 + e − 1) compounding of a 0.5 / 1.0 series ≈ the month's mean exposure
-    m_e = {k: v + 1.0 for k, v in m_e.items()}
+    parts_c = monthly_parts(cd, c["r"]["dip"], c["r"]["mom"], e_c); m_mkt = to_monthly(cd, c["r"]["mkt"])
     b = books.decade(etfs=("SPMO",)); dd_ = b["d"]
     e_d = books.exposure(b["bear"], books.shock_flags(b["spy"], -0.07, 10, 20))
-    d_dip, d_mom, d_mkt = to_monthly(dd_, b["r"]["sec"]), to_monthly(dd_, b["r"]["SPMO"]), to_monthly(dd_, b["r"]["mkt"])
-    d_e = {k: v + 1.0 for k, v in to_monthly(dd_, e_d - 1.0).items()}
+    parts_d = monthly_parts(dd_, b["r"]["sec"], b["r"]["SPMO"], e_d); d_mkt = to_monthly(dd_, b["r"]["mkt"])
 
     # ---- T1: the premia alone
-    print("=== T1 — the premia alone (monthly, gross, as published; AQR's own volatility scaling)")
+    print("\n=== T1 — the premia alone (monthly, gross, as published; AQR's own volatility scaling)")
     keys, (f_ts, f_cm, f_eq, f_fi, f_fx, mk) = align(tsm["TSMOM"], tsm["TSMOM^CM"], tsm["TSMOM^EQ"], tsm["TSMOM^FI"], tsm["TSMOM^FX"], m_mkt)
     mid = keys[len(keys) // 2]
     decades = [(f"{y}-01", f"{y + 9}-12") for y in range(1985, 2026, 10)]
@@ -179,31 +189,24 @@ def main():
 
     # ---- T2: crisis alpha and correlations
     print("\n=== T2 — the episodes (compounded over the window, the factor at 10 % volatility) and the correlations")
-    keys_b, (bd, bm, bmk, be) = align(m_dip, m_mom, m_mkt, m_e)
-    book_c = be * (0.4 * bd + 0.6 * bm)
-    kk, (bk, mm_, mc_, mkt_) = align(dict(zip(keys_b, book_c)), cen["All Macro Momentum"], cen["All Macro Carry"], m_mkt)
+    kk, (bk, mm_, mc_, mkt_) = align(parts_c["book"], cen["All Macro Momentum"], cen["All Macro Carry"], m_mkt)
     episodes(kk, {"the market": mkt_, "the book": bk, "macro momentum (10 % vol)": scaled(mm_), "macro carry (10 % vol)": scaled(mc_)})
-    kt, (bkt, ts_, mkt_t) = align(dict(zip(keys_b, book_c)), tsm["TSMOM"], m_mkt)
+    kt, (bkt, ts_, mkt_t) = align(parts_c["book"], tsm["TSMOM"], m_mkt)
     episodes(kt, {"TSMOM (10 % vol), 1985 →": scaled(ts_)})
     print(f"\ncorrelations (monthly): macro momentum vs market {np.corrcoef(mm_, mkt_)[0, 1]:+.2f}, vs the book's active return {np.corrcoef(mm_, bk - mkt_)[0, 1]:+.2f}; "
           f"macro carry vs market {np.corrcoef(mc_, mkt_)[0, 1]:+.2f}, vs active {np.corrcoef(mc_, bk - mkt_)[0, 1]:+.2f}; "
           f"TSMOM vs market {np.corrcoef(ts_, mkt_t)[0, 1]:+.2f}, vs active {np.corrcoef(ts_, bkt - mkt_t)[0, 1]:+.2f}")
     bear_m = mkt_ < -0.05
-    print(f"in the market's worst months (< −5 %, {bear_m.sum()} of {len(mkt_)}): market {mkt_[bear_m].mean():+.1%}/month, macro momentum {scaled(mm_)[bear_m].mean():+.1%}, "
+    print(f"in the market's worst months (< −5 %, {bear_m.sum()} of {len(mkt_)}): market {mkt_[bear_m].mean():+.1%}/month, the book {bk[bear_m].mean():+.1%}, macro momentum {scaled(mm_)[bear_m].mean():+.1%}, "
           f"macro carry {scaled(mc_)[bear_m].mean():+.1%}; TSMOM in its own worst months ({(mkt_t < -0.05).sum()}): {scaled(ts_)[mkt_t < -0.05].mean():+.1%}")
 
     # ---- T3 / T4: the sleeve bar
-    k3, (r_dip, r_mom, e3, mkt3, f3) = align(m_dip, m_mom, m_e, m_mkt, cen["All Macro Momentum"])
-    base_c = sleeve_table(f"=== T3 — the century book {k3[0]} → {k3[-1]} with a macro-momentum sleeve (split 1975-01, eras = quarter-centuries)", k3, r_dip, r_mom, e3, mkt3, f3, "1975-01", ERAS_C)
-    k4, (r_dip4, r_mom4, e4, mkt4, f4) = align(m_dip, m_mom, m_e, m_mkt, cen["All Macro Carry"])
-    sleeve_table(f"=== T4 — the century book with a macro-carry sleeve", k4, r_dip4, r_mom4, e4, mkt4, f4, "1975-01", ERAS_C)
-    k5, (r_dip5, r_mom5, e5, mkt5, f5) = align(m_dip, m_mom, m_e, m_mkt, tsm["TSMOM"])
-    mid5 = k5[len(k5) // 2]
-    sleeve_table(f"=== T3 — the century book {k5[0]} → {k5[-1]} with a TSMOM sleeve (the real trend series; split {mid5}, eras = decades)", k5, r_dip5, r_mom5, e5, mkt5, f5, mid5,
-                 [(f"{y}-01", f"{y + 9}-12") for y in range(int(k5[0][:4]) // 10 * 10 + 5, 2026, 10)])
-    k6, (r_dip6, r_mom6, e6, mkt6, f6) = align(d_dip, d_mom, d_e, d_mkt, tsm["TSMOM"])
-    sleeve_table(f"=== T3 — the ETF decade {k6[0]} → {k6[-1]} (sector dip 40 / SPMO 60) with a TSMOM sleeve (split 2022-01)", k6, r_dip6, r_mom6, e6, mkt6, f6, "2022-01", None)
-    _ = base_c
+    sleeve_table("=== T3 — the century book with a macro-momentum sleeve (split 1975-01, eras = quarter-centuries)", parts_c, m_mkt, cen["All Macro Momentum"], "1975-01", ERAS_C)
+    sleeve_table("=== T4 — the century book with a macro-carry sleeve", parts_c, m_mkt, cen["All Macro Carry"], "1975-01", ERAS_C)
+    k5 = sorted(set(parts_c["book"]) & set(tsm["TSMOM"])); mid5 = k5[len(k5) // 2]
+    sleeve_table(f"=== T3 — the century book from 1985 with a TSMOM sleeve (the real trend series; split {mid5}, eras = decades)", parts_c, m_mkt, tsm["TSMOM"], mid5,
+                 [(f"{y}-01", f"{y + 9}-12") for y in range(1985, 2026, 10)])
+    sleeve_table("=== T3 — the ETF decade (sector dip 40 / SPMO 60) with a TSMOM sleeve (split 2022-01)", parts_d, d_mkt, tsm["TSMOM"], "2022-01", None)
 
 
 if __name__ == "__main__":

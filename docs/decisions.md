@@ -1,5 +1,48 @@
 # Important Decisions Log
 
+## Decision 086: Trend and carry over a century — the premium is real and old, it pays in the same slow bears the book's insurance pays in, and a sleeve of it buys Sharpe and drawdown with return; no sleeve, B3 closed (roadmap B3, operator: "let's do the century trend", 2026-10-30)
+**Date**: 2026-10-30
+**Why**: trend following is the one published family with a century behind it that the book has never held, and its claim — "crisis alpha", money made in the bears — is exactly what the book's two switches are for. Futures are not on Alpaca, so the test was always going to be knowledge first: on AQR's published factor series, judged on the operator's own eras, before any instrument. Done the Decision 062 way: hypotheses T1–T5 and the drop rule in `scripts/param_search/trend.py`, **committed before the first run** (`1809250`); `datasets.aqr_monthly` is the loader. Data: AQR's Time Series Momentum factor (TSMOM and its four legs, monthly, 1985-01 → 2026-05 — the real trend series) and the Century of Factor Premia (1926-07 → 2026-02: "All Macro Momentum", 12-1 momentum *within* the macro asset classes, the century-long cousin of trend, cross-sectional not time-series; "All Macro Carry"; the multi-style composite). All long-short, gross of costs and fees; each sleeve candidate rescaled to a constant 10 % volatility (an investable managed-futures fund's) and shown gross and net of 2 pp/yr. The book = `books.century()` / `books.decade()` with the exposure rules applied day by day, compounded to months; only the sleeve blend is monthly. One correction before any number was read: the first run compounded the daily exposure factors across a month (a de-risked month went to zero exposure, the book read +9.5 and −13 %); the monthly book is now compounded from the daily path and reproduces the known numbers (+3.9 vs +3.6 daily-scored, DD −58 %, Sharpe 0.84). **Nothing live changes.**
+
+**T1 — the premia alone** (gross, as published; CAGR; halves; eras; drawdown; Sharpe; correlation with the market):
+
+| series | CAGR · Sharpe | halves | eras | DD | corr. market |
+|---|---|---|---|---|---|
+| **TSMOM, all assets, 1985 →** | **+12.1 % · 0.98** (vol 12.5 %) | +19.0 / +5.6 | decades +18.0 / +20.4 / +10.1 / **+1.0** (2015–24, the drought) / +12.0 | −27.9 | −0.07 |
+| its legs: commodities · equity indices · fixed income · currencies | 0.65 · 0.55 · 0.61 · 0.55 | all weaker in the second half | each negative in one decade | −46 … −81 | −0.12 … +0.23 |
+| the market, same months | +12.0 % · 0.81 | +12.5 / +11.4 | | −50.2 | |
+| **All Macro Momentum, 1927 →** (the century cousin) | **+1.9 % · 0.39** (vol 5.3 %) | +1.8 / +2.0 | **+0.1** / +3.4 / +3.5 / **+0.6** | −28.9 | −0.15 |
+| All Macro Carry, 1927 → | +2.4 % · 0.56 | +2.5 / +2.4 | +0.4 / +4.4 / +3.4 / +1.4 | −32.4 | +0.12 |
+| All Macro Multi-style · All asset classes Momentum | 0.87 · 0.61 | both halves + | all four eras + | −14 · −34 | −0.05 · −0.26 |
+| the market, same months | +10.1 % · 0.62 | +7.4 / +12.7 | +5.3 / +9.4 / +17.4 / +8.3 | −83.9 | |
+
+**T2 — the episodes** (compounded over the window; the factors at 10 % volatility; the book = the century book):
+
+| | 1929–32 | 1973–74 | 1987 | 2000–02 | 2008 | 2009 rebound | 2020 | 2022 | 2023 rebound |
+|---|---|---|---|---|---|---|---|---|---|
+| the market | −84 | −46 | −30 | −45 | −50 | +56 | −20 | −25 | +27 |
+| the book | −57 | −25 | −20 | −26 | −34 | +39 | −9 | −16 | +17 |
+| macro momentum (10 % vol) | **−13** | **+18** | −10 | **+6** | **+7** | −12 | +1 | **+12** | +1 |
+| macro carry (10 % vol) | **+57** | **+34** | −1 | **+34** | **−10** | +17 | **−9** | −2 | +11 |
+| TSMOM (10 % vol), 1985 → | — | — | −2 | **+50** | **+24** | −12 | +8 | **+27** | −7 |
+
+Correlations (monthly): macro momentum vs the market −0.15, **vs the book's active return +0.19**; TSMOM vs the market −0.07, **vs the book's active return +0.30**; carry vs the market +0.12, vs active −0.06. In the market's 122 worst months (< −5 %, mean −8.9 %) the book made −6.4 %, macro momentum +0.5 %, carry +0.1 %; TSMOM in its own 45 worst market months +2.2 %.
+
+**T3 / T4 — the sleeve bar** (return better in both halves and every era, Sharpe no lower; "gain" = excess vs the book's; 10 % and 20 % sleeves taken proportionally, from the momentum sleeve or from the dip sleeve, outside the exposure rules; gross / net):
+
+| book · sleeve | the book | best sleeve variant (gross) | its gain · Sharpe · DD | net 2 pp | verdict |
+|---|---|---|---|---|---|
+| **century 1927 →, macro momentum** | +3.88 (+5.5 / +2.3), DD −58.1, Sh 0.84, eras +5.5 / +5.6 / +3.2 / +1.5 | 10 % from the dip sleeve: +3.22 (+5.0 / +1.5), eras +4.7 / +5.3 / +2.3 / +0.8 | **−0.66** · 0.87 · −53.6 | −0.89 | fails — every variant −0.7 … −3.6 |
+| century 1927 →, macro carry | same | 10 % from the dip sleeve: +3.38 | **−0.50** · 0.88 · −51.7 | −0.72 | fails — every variant −0.5 … −2.3; 20 % buys 14 points of drawdown for −1.0 |
+| **1985 →, TSMOM** (the real trend series) | +1.90 (+4.1 / −0.2), DD −33.8, Sh 0.88, decades +3.0 / +4.6 / +0.3 / −0.2 / +2.8 | 10 % / 20 % from the dip sleeve: +1.95 / +1.96 | **+0.05 / +0.06** · 0.94 / 1.00 · −29.0 / −23.9 | −0.17 / −0.39 | fails — the return is a wash gross, lower net, and **2005–14 is −1.2 vs −0.2** (every other variant negative) |
+| ETF decade 2017 →, TSMOM | +1.37 (+0.3 / +2.5), DD −15.8, Sh 1.17 | 10 % from the dip sleeve: +0.13 (−1.8 / +2.2) | **−1.24** · 1.18 · −13.8 | −1.47 | fails — trend's drought decade; every variant −1.2 … −3.5 |
+
+**Verdict on the pre-registered rules.** **T1 holds, with the sizes off in both directions**: the real trend series is *stronger* than written (Sharpe 0.98 gross against 0.5 … 0.9; positive in both halves and in all five decades, the 2015–24 drought at +1.0 %), the century cousin *weaker* (Sharpe 0.39 against 0.4 … 0.7; positive in all four quarter-centuries but by a hair in the first and the last). **T2 holds in its main claim and fails in one**: trend made money in the slow bears (2000–02 +50, 2008 +24, 2022 +27 at 10 % volatility; 1973–74 +18 on the century cousin), lost in the rebounds (2009 −12, 2023 −7) and was flat to mildly positive in the fast crashes — but the century cousin *lost* 13 points in 1929–32, and the correlation with the book's active return is **+0.19 (century) and +0.30 (TSMOM)**, not the ±0.10 written: trend pays in the same months the book's insurance pays in. **T3 fails** in all three constructions, as written: on the century a trend sleeve costs 0.7 … 3.6 pp/yr for 4 … 9 points of drawdown and +0.02 … +0.06 of Sharpe; on 1985 → the two best cells are a wash gross (+0.05 / +0.06) with the Sharpe up to 1.00 and the drawdown 10 points shallower, and they still fail — the 2005–14 decade is a point worse and the net lines are negative; on the ETF decade every variant loses 1.2 … 3.5 pp/yr. **T4 fails** as written, and carry's crisis record was not what was written: the macro carry composite *hedged* the slow bears before 2008 (1929–32 +57, 1973–74 +34, 2000–02 +34) and crashed in 2008 (−10) and 2020 (−9); as a sleeve it buys the most drawdown of anything tested (−58 → −45 at 20 %) for a point of return. **T5 not reached.**
+
+**Decision.** Nothing changes; B3 is closed as knowledge. Three things kept: (1) **trend is the same bet from another market** — its crisis alpha lands in the slow bears where the book's insurance already steps aside, so its correlation with the book's *active* return is +0.2 … +0.3 and its diversification is smaller than its −0.07 correlation with the market suggests; (2) a trend sleeve is a Sharpe tool, not a return tool — the fourth diversifier to say so after options (074), quality (075) and gold (079), and the one that comes closest (a wash gross on 1985 →); the book cannot lever, so Sharpe bought with return is not wanted; (3) the instrument question is moot (DBMF / KMLM would add a fee to a sleeve that already fails), and the century cousin is weaker than the futures record — a hundred years of cross-sectional macro momentum is Sharpe 0.4, not 1. **Next: the checkup ≈ 2026-11-12; the Tiingo key for B11 when the operator signs up.**
+
+**Scripts / docs**: `scripts/param_search/trend.py` (pre-registration `1809250`, then the monthly-book correction and the run), `datasets.aqr_monthly`, the harness README row; roadmap B3 ✅ closed, Track D and C3 rows; todo Phase 2.26; one insight; handover note.
+
 ## Decision 085: The harness tidy-up — one `books.py` builds the decade and the century; the numbers must not move (roadmap Track F, operator: "do the tidy up", 2026-10-30) — **done: seven runs byte-identical, loaders equal**
 **Date**: 2026-10-30
 **Why**: the research harness grew one script per Decision over four days, and the recommended book's inputs — the sector dip sleeve on `fastbt`, SPMO, SPY, the two-signal insurance flags, the shock flags, and their century twins on Kenneth French's industries and momentum decile — were rebuilt inline each time. `carry.sets()` became the de-facto shared builder (eighteen scripts import it), but `master.decade()` / `century()` / `finalists()`, `rotation.decade()` / `century()`, `shorts.decade_base()` / `century_base()` and `regimes.main()` / `shock_grid()` still carry their own copies of the same twenty lines; `search.py` copies `datasets.py`'s loaders and `analyze1_lib.py`'s grid; `analyze1.py` is `analyze1_lib.py` plus a main. For the next agent, not for the numbers — which is exactly the risk: a refactor of research code is correct only if every number it ever printed is unchanged.

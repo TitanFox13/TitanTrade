@@ -33,6 +33,14 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
 - [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
 
+## Phase 2.26: Trend and carry over a century — roadmap B3 run, no sleeve (2026-10-30) — Decision 086
+Operator: "let's do the century trend". Hypotheses T1–T5 and the drop rule committed before the first run (`1809250`, `trend.py`); the monthly book construction corrected before any number was read; results in Decision 086. Nothing live changed.
+- [x] **T1 holds, sizes off both ways**: TSMOM 1985 → Sharpe 0.98 gross (stronger than written), positive in both halves and all five decades (2015–24 +1.0 %); the century macro-momentum cousin Sharpe 0.39 (weaker), positive in all four eras by a hair; carry Sharpe 0.56.
+- [x] **T2 mostly holds**: trend pays in the slow bears (2000–02 +50, 2008 +24, 2022 +27; 1973–74 +18 on the cousin), loses the rebounds, flat in the fast crashes; **but** the cousin lost 13 in 1929–32 and the correlation with the book's *active* return is +0.19 / +0.30 — the same bet from another market.
+- [x] **T3 fails** in all three constructions (century −0.7 … −3.6; 1985 → a wash gross, worse in one decade, negative net; ETF decade −1.2 … −3.5) for 4 … 10 points of drawdown and +0.02 … +0.12 Sharpe. **T4 fails**; carry hedged the slow bears before 2008 (+57 / +34 / +34) and crashed in 2008 / 2020. **T5 not reached.**
+- [x] Roadmap B3 ✅ closed, Track D row, C3 futures row; README row; `datasets.aqr_monthly`; one insight; handover note.
+- [ ] **Next**: the checkup ≈ 2026-11-12; B11 when the Tiingo key exists.
+
 ## Phase 2.25: The harness tidy-up — `books.py` (2026-10-30) — Decision 085
 Operator: "do the tidy up". What moves where and the acceptance (byte-identical outputs of seven script runs captured before the first edit; loader equality for `search.py`) committed before the change. No `src/` change, no deploy.
 - [x] `books.py` (LIVE, prev / sma_above / shock_flags, decade(), century(), sets(), exposure(), rf_daily / align_rf); `carry.py` and `master.py` re-export every public name (the same objects); `master` / `rotation` / `shorts` / `regimes` builders rewired; `search.py` ← `datasets` + `analyze1_lib`; `analyze1.py` ← `analyze1_lib`; the `sys.path` line added where a script now imports a sibling (for `-I`).

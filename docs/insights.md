@@ -122,6 +122,20 @@ it cannot decide return, and the drawdown leg as first written (≤ 0.7 × SPY i
 ≥ 10 % drawdown) fails the design's own backtest 3 times in 5, because in a fast 10–19 %
 dip the insurance and the shock trigger barely engage, by design.
 
+### Trend Is the Same Bet From Another Market (Decision 086)
+Forty years of time-series momentum across futures markets have a gross Sharpe near one,
+a correlation with the stock market near zero, and fifty points of gain in 2000–02, twenty-four
+in 2008 and twenty-seven in 2022 — the textbook crisis alpha. Put beside this book it adds
+almost nothing in return and fails every version of the sleeve bar, and the reason is in one
+number: its correlation with the book's *active* return is +0.3, not zero. Trend makes its money
+in the slow bears, which is exactly where the book's two-signal insurance already steps aside
+and earns its keep; the two are the same decision — be out when the market has been falling
+for a while — taken in different markets. A zero correlation with the index is not a zero
+correlation with a book that already times the index. Judge a diversifier against the book's
+excess, never against the market, and the fourth "Sharpe tool, not return tool" in a row
+(options, quality, gold, trend) says the pattern is general: anything that pays in the fall
+duplicates the insurance, anything that pays in the rebound duplicates the dip sleeve.
+
 ### Bonds Rally When the Book Steps Aside; Gold Did Once (Decision 080)
 The idle half of the book, parked in a 10-year Treasury instead of bills, earned about
 0.8 points a year more over fifty-five years with a drawdown five points shallower, and
