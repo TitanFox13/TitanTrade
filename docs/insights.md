@@ -122,6 +122,18 @@ it cannot decide return, and the drawdown leg as first written (≤ 0.7 × SPY i
 ≥ 10 % drawdown) fails the design's own backtest 3 times in 5, because in a fast 10–19 %
 dip the insurance and the shock trigger barely engage, by design.
 
+### Quality Is Harvested by Holding, Like Momentum (Decision 075)
+Sixty-three years of profitability-sorted portfolios say the quality premium is real,
+old and defensive: the most profitable third of the market beat the market by about a
+point a year in every era with a smaller drawdown, and the long-short factor made money
+in 2000–02 and 2008. The dip rule on those same portfolios lost 1.7 points a year to the
+market and four to simply holding them, and it lost exactly as much on the *least*
+profitable portfolios — profitability does not tell a dip from a break. This is Decision
+066's momentum lesson from the other side: a premium that lives in the cross-section is
+captured by owning it, and a rule that buys its dips and caps its wins throws it away.
+Corollary: the fundamentals pipeline that would have filtered a single-name dip universe
+by profitability has nothing to filter on, and stays unbuilt.
+
 ### Bought Protection Is Paid For Twice (Decision 074)
 Forty years of Cboe's protective-put index say what a monthly put costs: 3 points a
 year in every decade, for a drawdown a quarter smaller than the market's. The book's

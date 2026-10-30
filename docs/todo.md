@@ -33,6 +33,16 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
 - [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
 
+## Phase 2.15: Quality over a century — roadmap B2 run, no sleeve, B9 closed (2026-10-30) — Decision 075
+The next pick after B1, on the operator's go. Hypotheses Q1–Q6 and the drop rules committed before the run (`05b4144`, `scripts/param_search/quality.py`); results and tables in Decision 075. Nothing live changed.
+- [x] **Q1 holds** — RMW +3.1 pp/yr, CMA +3.0, QMJ +3.7 (t 3.7–4.3), positive in both halves and every era, defensive (+103 … +139 % in 2000–02, +30 … +59 in 2008), beta −0.1 … −0.2, uncorrelated with momentum except in the first half.
+- [x] **Q2 holds** — the top 30 % by profitability held beat the market +1.2 pp/yr in every era at the market's volatility with a 5-point smaller drawdown; conservative investment +2.2; the bottom decile −3.5.
+- [x] **Q3 fails the bar** — quality from momentum costs 1 pp/yr, instead of momentum 3; quality in place of half the dip sleeve +0.2 better, better OOS and in every era, Sharpe 0.96 vs 0.93, equal in-sample (a hair short), worse worst year.
+- [x] **Q4 fails, B9 closed** — the dip rule on the 10 most profitable portfolios −1.7 vs the market and −4.0 vs holding them; on the least profitable −1.6; the gap 0, flipping between halves and eras. Quality is harvested by holding.
+- [x] **Q6 fails** — QUAL −0.7 vs SPY (−0.4 / −1.1); no investable vehicle in the library.
+- [x] Roadmap B2 ✅, B9 🚫, Track D and C2 closed, Track H: quality ETFs (SPHQ / JQUA / DGRW) as the cheap reopening condition; README row; three loaders; one insight.
+- [ ] **Next**: B5 / B6 / B7 — credit stress as a second insurance signal, a VIX shock trigger, gold over a century — on the operator's go.
+
 ## Phase 2.14: Put-writing and the collar indices — roadmap B1 run, nothing adopted (2026-10-29) — Decision 074
 The next pick after E2, on the operator's go. Hypotheses O1–O5 and the drop rules committed before the run (`cf51d75`, `scripts/param_search/putwrite.py`); results and tables in Decision 074. Nothing live changed.
 - [x] **O1** — the put-write index (daily only from 2007) lagged the market by 4.0 pp/yr (−7 since 2017); the 30-delta buy-write kept pace over 40 years in the first half only; the protective put cost 3.1 pp/yr in every decade for a quarter less drawdown, the collar 5.7 for half; on the decade every index loses 2.9–18 pp/yr to SPY.

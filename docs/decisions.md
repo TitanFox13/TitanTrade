@@ -1,5 +1,92 @@
 # Important Decisions Log
 
+## Decision 075: Quality over a century — the premium is real, old and long-only capturable; no sleeve (no investable vehicle, and the bar missed by a hair), and the dip rule loses on quality portfolios as on any portfolio, so the fundamentals pipeline (B9) is closed (roadmap B2, operator's go, 2026-10-30)
+**Date**: 2026-10-30
+**Why**: "quality" (steadily profitable companies that invest conservatively) is the one documented premium the book has never held, and roadmap B9 (a fundamentals pipeline for a single-name dip universe) rests on whether profitability separates a dip from a break. Done the Decision 062 way: hypotheses Q1–Q6 and the drop rules written into `scripts/param_search/quality.py` and **committed before any code ran** (`05b4144`); loaders `datasets.french_levels(…, sub="external/french")`, `french_factors`, `aqr_qmj`. Data: Kenneth French's daily portfolios on operating profitability (OP) and investment (INV), the 25 size × profitability portfolios and the five-factor file (RMW, CMA), 1963-07 → 2026-09; AQR's Quality-Minus-Junk (US) daily 1957-07 →; QUAL on the decade. Windows: 63y 1963-07 → 2026-08 (split 1995; eras 1963–75 / 1975–2000 / 2000–26), QMJ 1957 → (split 1992), the ETF decade (split 2022, through 2025 beside full). Book = `carry.sets()` (the century book on the long window; the sector-dip / SPMO book on the decade), exposure = min(insurance ×0.5, shock ×0.5). **Nothing live changes.**
+
+**Verdict on the pre-registered rules: Q1 and Q2 hold (the premium is real, old, defensive and capturable long-only); Q3 fails the momentum-sleeve bar on every variant (one by a hair); Q6 fails (QUAL did not beat SPY in either half) → no quality sleeve; the B9 gate is closed (the dip rule is negative on high- and low-profitability portfolios alike and the gap flips sign between halves).** The expectations were right on the premium's size and shape and wrong on two things: quality's excess is *uncorrelated* with momentum's (−0.02 full, +0.23 only in the first half) and with the dip sleeve's (−0.03) — a genuine diversifier — and the top-30 % portfolio is positive in *every* era, not just both halves.
+
+**Q1 — the premium, long-short** (annualised mean, halves, eras; t, Sharpe; beta to the market, correlation with the momentum factor; compounded in 2000–02, the 2003 rally, 2008, the 2009 rally):
+
+| factor | mean | halves | eras | t / Sharpe | beta / corr. mom | 2000–02 · 2003 · 2008 · 2009 |
+|---|---|---|---|---|---|---|
+| **RMW** profitability (1963 →) | **+3.1** | +2.5 / +3.7 | +0.4 / +3.0 / +4.3 | 3.7 / 0.47 | −0.09 / +0.05 | +139 · −15 · +30 · −2 |
+| CMA investment (1963 →) | +3.0 | +4.0 / +1.9 | +4.4 / +2.8 / +2.5 | 3.9 / 0.49 | −0.13 / +0.02 | +73 · +13 · −1 · +4 |
+| **QMJ** quality-minus-junk (1957 →) | **+3.7** | +3.6 / +3.8 | +3.0 / +4.1 / +3.9 | 4.3 / 0.52 | −0.19 / +0.20 | +103 · −21 · +59 · −25 |
+| Mom momentum (reference) | +7.2 | +9.1 / +5.2 | +11.4 / +9.3 / +3.4 | 4.5 / 0.57 | −0.09 / 1.00 | +56 · −20 · +43 · **−55** |
+| HML value (reference) | +3.7 | +5.3 / +2.1 | +5.6 / +3.8 / +2.8 | 3.2 / 0.40 | −0.10 / −0.27 | +103 · +9 · −22 · +33 |
+
+Holds: positive in both halves and every era (RMW's 1963–75 at +0.4 is the doubtful era, as pre-registered), t 3.7–4.3, negative beta, defensive — it *made* money in 2000–02 and 2008 and gave some back in the junk rallies, and its 2009 (−25 for QMJ) is half of momentum's crash (−55). The premium is about half of momentum's and steadier.
+
+**Q2 — the long-only form held vs the market, 63 years** (excess CAGR; IS / OOS; σ relative to the market; DD vs −54.6; Sharpe vs 0.72; worst year; eras):
+
+| portfolio | excess | IS / OOS | σ/σm | DD | Sharpe | worst yr | eras 1963–75 / 75–2000 / 2000–26 |
+|---|---|---|---|---|---|---|---|
+| OP Hi 10 (top profitability decile) | +1.19 | +0.2 / +2.2 | 1.03 | −54.6 | 0.77 | −18.2 | +0.2 / −0.1 / +2.7 |
+| **OP Hi 30** | **+1.22** | **+0.8 / +1.6** | 1.00 | **−49.9** | 0.79 | **−7.3** | **+1.2 / +0.9 / +1.5** |
+| OP Med 40 · Lo 30 · Lo 10 | −0.07 · −2.26 · **−3.52** | | 1.00 · 1.14 · 1.37 | −60 · −74 · −85 | 0.72 · 0.54 · 0.43 | | |
+| **INV Lo 30** (conservative investment) | **+2.21** | +3.0 / +1.4 | 0.99 | −54.5 | **0.85** | −16.7 | +1.2 / +2.6 / +2.3 |
+| INV Lo 10 · Hi 30 · Hi 10 | +2.11 · −0.76 · −2.84 | | 1.09 · 1.13 · 1.29 | −60 · −66 · −76 | 0.78 · 0.62 · 0.48 | | |
+| top momentum decile (the sleeve) | +6.12 | +8.6 / +3.7 | 1.36 | −56.4 | 0.82 | −35.0 | +11.2 / +7.5 / +2.7 |
+| dip sleeve alone (reference) | +0.29 | +0.5 / +0.1 | 1.16 | −59.4 | 0.66 | −21.2 | +0.6 / −0.8 / +1.1 |
+
+Holds, better than expected: the top 30 % by profitability beat the market by 1.2 pp/yr in every era at the market's volatility with a 5-point smaller drawdown and a −7 % worst relative year; conservative investment by 2.2; the bottom decile lost 3.5 (the test has teeth). Long-only quality is about a third of the long-short premium, as expected, and the steadiest long-only excess in the harness.
+
+**Q3 — quality (OP Hi 30) as a sleeve beside the century book, 63 years** (quality's excess vs momentum's −0.02, vs the dip sleeve's −0.03; de-risked 27 %):
+
+| book | excess | IS / OOS | σ/σm | DD | Sharpe | worst yr | eras |
+|---|---|---|---|---|---|---|---|
+| **dip 40 / mom 60 (the book)** | **+3.47** | +5.8 / +1.2 | 0.98 | −35.6 | 0.93 | −14.8 | +9.1 / +3.3 / +1.2 |
+| dip 40 / mom 40 / quality 20 (from momentum) | +2.50 | +4.3 / +0.7 | 0.90 | −34.6 | 0.93 | −11.8 | +7.2 / +2.0 / +0.9 |
+| dip 30 / mom 50 / quality 20 | +3.09 | +5.0 / +1.2 | 0.92 | −34.0 | 0.95 | −13.2 | +8.2 / +2.7 / +1.2 |
+| **dip 20 / mom 60 / quality 20 (from the dip sleeve)** | **+3.65** | **+5.8 / +1.6** | 0.95 | −36.1 | **0.96** | −17.0 | **+9.2 / +3.5 / +1.4** |
+| dip 40 / mom 0 / quality 60 (instead of momentum) | +0.45 | +1.3 / −0.4 | 0.79 | −34.1 | 0.91 | −16.7 | +3.4 / −0.7 / +0.2 |
+| quality 100 % under the exposure rules | +0.73 | +1.2 / +0.2 | 0.75 | −34.0 | 0.96 | −11.1 | +3.6 / −0.4 / +0.5 |
+
+Fails the bar (return better in both halves *and* every era, Sharpe no lower) on every variant — but one by a hair, and it is recorded: **quality in place of half the dip sleeve** is +0.18 pp/yr better over 63 years, better out of sample (+1.6 vs +1.2), better in all three eras, Sharpe 0.96 vs 0.93, and equal to the decimal in-sample (the strict inequality failed), at the price of a worse worst year (−17.0 vs −14.8) and 0.5 point more drawdown. Taking quality from momentum costs a point (momentum's +6 is the bigger premium); quality instead of momentum costs 3. The reading: quality is a second, uncorrelated, steadier diversifier of the momentum sleeve, and on the century it is at least as good as the dip sleeve's residual-plus-dips at smoothing it — the dip sleeve's job (Decision 067: "Sharpe and drawdown, not return") can be shared.
+
+**Q4 — the live dip rule on quality portfolios, 63 years (the B9 gate)** — the rule (3 × 25 %, market residual, insurance ×0.5 from the universe's own breadth) on French portfolio universes, each vs the market and vs holding the universe equal-weight:
+
+| universe | vs the market | vs its EW hold | EW hold vs the market | trades / yr · win · median · tp / stop / clock |
+|---|---|---|---|---|
+| **10 high-profitability** (size × OP4–5) | **−1.66** (−1.0 / −2.3); eras +2.4 / −3.8 / −1.5 | **−3.96** (−3.7 / −4.2) | **+2.30** (+2.7 / +1.9) | 3.4 · 66 % · +4.3 % · 20 / 30 / 167 |
+| **10 low-profitability** (size × OP1–2) | **−1.63** (−0.3 / −3.0); +2.2 / −2.2 / −2.8 | −1.63 (−1.4 / −1.8) | −0.00 (+1.2 / −1.2) | 4.2 · 57 % · +2.7 % · 29 / 56 / 181 |
+| all 25 size × OP | −1.70 (−1.4 / −2.0) | −3.06 | +1.36 | 5.1 · 61 % · +4.2 % |
+| 10 OP deciles · 10 INV deciles | −0.51 · −0.74 | −0.41 · −1.55 | −0.10 · +0.81 | 2.5 · 66 % · 2.4 · 67 % |
+| 49 industries, same window (the floor) | −0.85 (+0.1 / −1.8); +2.3 / −2.7 / −0.5 | −1.45 | +0.60 | 11.6 · 56 % · +2.0 % · 139 / 197 / 393 |
+| high-OP minus low-OP, vs the market | **−0.03 (IS −0.7 / OOS +0.7; eras +0.2 / −1.6 / +1.2)** | | | |
+
+Closed. The rule loses on profitable and unprofitable portfolios alike, the gap between them is zero and flips sign between halves and eras, and on the high-profitability portfolios the rule gives back 4 points a year against simply holding them (which beat the market by 2.3 in both halves). The portfolios' dips are rarer than the industries' (3 trades a year) and most exits are the clock, with stops outnumbering targets; 66 % winners is the diversified-basket texture, not single names — and the return still is not there. **Profitability does not separate dips from breaks at the portfolio level; like momentum (Decision 066), quality is harvested by holding, not by buying its dips.** B9 — the fundamentals pipeline, the SEC data sets, the single-name door — stays closed.
+
+**Q5 — the crash leg** (minus the market, peak → trough / the rebound year; market absolute):
+
+| | 1973–74 | 1987 | 2000–02 | 2008 | 2020 | 2022 |
+|---|---|---|---|---|---|---|
+| market | −48 / +42 | −33 / +28 | −49 / +39 | −55 / +75 | −34 / +87 | −25 / +21 |
+| OP Hi 30 held | −2 / −2 | −1 / +1 | **+10 / −11** | **+9 / −9** | +2 / −5 | +0 / +9 |
+| top momentum decile held | +6 / +6 | −4 / −4 | +0 / +5 | +2 / **−27** | +2 / −9 | +3 / +0 |
+| dip sleeve alone | +4 / +14 | +1 / −9 | +49 / +15 | −3 / +13 | −4 / +45 | +11 / −9 |
+| book (dip 40 / mom 60) | +21 / −0 | +11 / −17 | +17 / −0 | +21 / −26 | +12 / −16 | +11 / −11 |
+| book with quality 20 from momentum | +20 / −2 | +11 / −17 | +20 / −4 | +22 / −25 | +12 / −15 | +11 / −10 |
+
+Quality protects in the slow bears (+9 … +10 in 2000–02 and 2008) and gives it back in the rebound year; nothing in the fast crashes (1987, 2020). Its 2009 is −9 against momentum's −27 — the cousin that does not crash. Inside the book the difference is a point or two either way.
+
+**Q6 — the decade, investable** (QUAL's excess vs SPMO's −0.16, vs the dip sleeve's +0.04):
+
+| | excess vs SPY | IS / OOS | → 2025 | DD | Sharpe |
+|---|---|---|---|---|---|
+| **QUAL held** | **−0.73** | **−0.4 / −1.1** | −0.83 | −34.1 vs −33.8 | 0.85 vs 0.89 |
+| SPMO held (reference) | +5.23 | +2.1 / +8.4 | +4.46 | −31.2 | 1.00 |
+| the book | +1.36 | +0.3 / +2.5 | +0.80 | −20.0 | 1.10 |
+| dip 40 / SPMO 40 / QUAL 20 | +0.44 | −0.1 / +1.0 | +0.04 | −20.4 | 1.10 |
+| dip 40 / SPMO 0 / QUAL 60 | −1.55 | −0.9 / −2.2 | −1.61 | −21.3 | 1.02 |
+
+Fails, as Decision 067 found: the one quality ETF in the library lost to SPY in both halves, so the century's +1.2 … +2.2 has no investable form in hand. In the book it costs 0.9 pp/yr for the same Sharpe — the expected shape.
+
+**Decision.** Nothing changes. Roadmap B2 done, B9 closed, Track D's "quality / low-beta" door closed with numbers, C2 "fundamentals" closed. What was learned and kept: the quality premium is real and sixty years old, defensive (it made money in 2000–02 and 2008), half the size of momentum's and uncorrelated with both sleeves; its long-only form (the top 30 % by profitability, conservative investment) beats the market by 1–2 pp/yr in every era with a smaller drawdown; buying its dips throws that away. **What would reopen a quality sleeve, and it is cheap**: an investable vehicle that beat SPY in both decade halves — only QUAL (MSCI USA Quality) is in the library and it did not; SPHQ (S&P 500 Quality, 2005 →), JQUA, DGRW and the Dimensional / Avantis profitability-tilted funds are not fetched (Track H, one `download-history` on the server). If one of them captures the century's +1.2 … +2.2, the near-pass above (quality in place of half the dip sleeve: +0.2 pp/yr, better out of sample and in every era, Sharpe 0.96 vs 0.93, a worse worst year) becomes a pre-registered test with an instrument; without one it is knowledge. **Next pick: B5 / B6 / B7** — the cheap afternoon tests (credit stress as a second insurance signal, a VIX shock trigger, gold over a century), in that order.
+
+**Scripts / docs**: `scripts/param_search/quality.py` (pre-registration `05b4144`, then the code), `datasets.french_levels(sub)` / `french_factors` / `aqr_qmj`, the harness README row; roadmap B2 ✅ / B9 🚫 / D closed / C2 closed / H quality ETFs; todo Phase 2.15; one insight; handover note.
+
 ## Decision 074: Put-writing and the collar indices — tested on 40 years of Cboe data, nothing adopted; option writing is a Sharpe tool not a return tool, and bought protection costs more than the two free signals (roadmap B1, operator's go, 2026-10-29)
 **Date**: 2026-10-29
 **Why**: brainstorm #32 ("sell a put at the dip level") and the collar-as-insurance idea were untestable until Decision 072 fetched Cboe's option-strategy benchmarks. Done the Decision 062 way: hypotheses O1–O5 and the drop rules written into `scripts/param_search/putwrite.py` and **committed before any code ran** (`cf51d75`); loader `datasets.cboe`. Indices (total return on the S&P 500): BXMD (buy-write, 30-delta call), BXY, CMBO, CNDR, BFLY, RXM, PPUT (long S&P + 5 % OTM put) daily from 1986-07; BXMC 1990 →; BXM 2003 →; **PUT (the cash-secured put-write) daily only from 2007** (Decision 072's "1991 →" was sparse points); WPUT 2006 →; CLL (collar 95 / 110) 2008-09 →. Windows: 40y 1986-07 → 2026-08 (split 2006-07, four decades), 20y 2007 → 2026-08 (split 2017), CLL 2008-09 → (split 2017-07), the ETF decade 2017 → 2026-10 (split 2022, through 2025 beside full). Market = Kenneth French's VW market on the long windows (the century book's market; ≈ 0.3 pp/yr from the S&P 500), SPY on the decade. Book = `carry.sets()` (the century book: dip on 49 industries 40 / top momentum decile 60; the decade book: sector dip 40 / SPMO 60), exposure = min(insurance ×0.5, shock ×0.5), idle capital at 0 unless stated. **Nothing live changes.**

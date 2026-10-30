@@ -14,7 +14,10 @@ Data lives in ``data/param_search/`` (git-ignored; archived on titanserver under
 
 Not a ``load`` key: ``alpaca(sym, "intl")`` reads the 39 region / country ETFs (roadmap E1, 2016 →, dividend-adjusted) and
 ``french_regional(region, kind)`` Kenneth French's regional daily factors (``external/french_intl/``, USD, 1990 →);
-``cboe(name)`` a Cboe index history from the external library (``external/cboe/``, option-strategy benchmarks 1986 →, VIX family).
+``cboe(name)`` a Cboe index history from the external library (``external/cboe/``, option-strategy benchmarks 1986 →, VIX family);
+``french_levels(file, sub="external/french")`` the Decision 072 French sorts (profitability, investment, size × profitability, 10 / 30
+industries), ``french_factors(file, sub)`` any French factor file (3 / 5 factors, momentum) as decimal returns, ``aqr_qmj(column)``
+AQR's Quality-Minus-Junk daily factor by country / region (openpyxl).
 """
 import datetime
 import json
@@ -67,9 +70,34 @@ def french_market():
     return out
 
 
-def french_levels(filename):
+def french_factors(filename, sub="french"):
+    """A French factor file (header starts with ",") → {column: {date: decimal return}}; -99.99 rows are skipped."""
+    cols, rows = _french_section(f"{S}/{sub}/{filename}", ",")
+    return {c: {d: rows[d][j] / 100 for d in sorted(rows) if rows[d][j] is not None} for j, c in enumerate(cols)}
+
+
+def aqr_qmj(column="USA"):
+    """AQR's Quality-Minus-Junk daily factor (``external/aqr/Quality-Minus-Junk-Factors-Daily.xlsx``, sheet "QMJ Factors",
+    one column per country / region, decimal returns) → {date: return}. Needs openpyxl (``uv run --with openpyxl``)."""
+    import openpyxl
+    ws = openpyxl.load_workbook(f"{S}/external/aqr/Quality-Minus-Junk-Factors-Daily.xlsx", read_only=True)["QMJ Factors"]
+    out, j = {}, None
+    for row in ws.iter_rows(values_only=True):
+        if j is None:
+            if row and row[0] == "DATE":
+                j = list(row).index(column)
+            continue
+        if not row or row[0] is None or row[j] is None:
+            continue
+        d = row[0] if isinstance(row[0], str) else row[0].strftime("%m/%d/%Y")
+        m, dd, y = d[:10].split("/")
+        out[f"{y}-{m}-{dd}"] = float(row[j])
+    return out
+
+
+def french_levels(filename, sub="french"):
     """Value-weighted daily total-return index per column of a French portfolio file (first VW section)."""
-    cols, rows = _french_section(f"{S}/french/{filename}", "Average Value Weighted Returns")
+    cols, rows = _french_section(f"{S}/{sub}/{filename}", "Average Value Weighted Returns")
     levels = {c: 100.0 for c in cols}; out = {c: {} for c in cols}
     for d in sorted(rows):
         for j, c in enumerate(cols):
