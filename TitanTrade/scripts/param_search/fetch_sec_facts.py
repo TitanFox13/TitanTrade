@@ -38,10 +38,9 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     tick = get("https://www.sec.gov/files/company_tickers.json")
     cik = {v["ticker"].upper(): int(v["cik_str"]) for v in tick.values()}
-    alt = {t.replace(".", "-"): c for t, c in cik.items()}
     mapped, unmapped, failed = {}, [], []
     for s in uni:
-        c = cik.get(s) or alt.get(s) or cik.get(s.replace("-", "."))
+        c = cik.get(s) or cik.get(s.replace(".", "-")) or cik.get(s.replace("-", "."))   # the SEC writes BRK-B, the universe BRK.B
         if c is None:
             unmapped.append(s); continue
         mapped[s] = c
@@ -56,7 +55,7 @@ def main():
         for ns, tags in TAGS.items():
             for tag in tags:
                 node = d.get("facts", {}).get(ns, {}).get(tag)
-                if not node:
+                if not node or not node.get("units"):
                     continue
                 unit = "USD" if "USD" in node["units"] else next(iter(node["units"]))
                 facts[tag] = [{k: r.get(k) for k in KEEP} for r in node["units"][unit] if r.get("form") in ("10-K", "10-K/A", "10-Q", "10-Q/A", "20-F", "40-F")]

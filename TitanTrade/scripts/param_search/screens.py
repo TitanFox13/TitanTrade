@@ -100,10 +100,11 @@ def rebalance_dates(dates, freq, anchor_month=1):
     return out
 
 
-def simulate(mkt, member, screen, n, freq, start_year=2017, anchor_month=1, picks_out=None, score_matrix=None):
+def simulate(mkt, member, screen, n, freq, start_year=2017, anchor_month=1, picks_out=None, score_matrix=None, weights=None):
     """Equal-weight hold of the screen's top-n, rebalanced; returns (curve, spy_curve, dates_slice, turnover_per_year).
     ``picks_out`` (list) receives (rebalance index, picked column indices) for eligibility masks. ``score_matrix``
-    (T × N, NaN = ineligible) ranks by a precomputed score instead of a price-feature screen (qualpick.py)."""
+    (T × N, NaN = ineligible) ranks by a precomputed score instead of a price-feature screen (qualpick.py); ``weights``
+    (T × N, e.g. market caps) sizes the picks in proportion instead of equally (a pick without a weight gets the median one)."""
     P, spy, dates = mkt.names, mkt.spy, mkt.dates
     rebs = [i for i in rebalance_dates(dates, freq, anchor_month) if dates[i] >= f"{start_year}-01-01"]
     i0 = rebs[0]; T = len(dates)
@@ -133,7 +134,11 @@ def simulate(mkt, member, screen, n, freq, start_year=2017, anchor_month=1, pick
             cost = COST * 2 * churn * total if held else COST * total
             total -= cost
             value[:] = 0.0; cash = 0.0
-            value[pick] = total / len(pick)
+            if weights is not None and len(pick):
+                w = weights[t][pick].astype(float); w = np.where(np.isfinite(w) & (w > 0), w, np.nanmedian(np.where(w > 0, w, np.nan)) if np.any(w > 0) else 1.0)
+                value[pick] = total * w / w.sum()
+            else:
+                value[pick] = total / len(pick)
             held = new
             if picks_out is not None:
                 picks_out.append((t, np.asarray(pick)))

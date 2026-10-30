@@ -122,6 +122,25 @@ it cannot decide return, and the drawdown leg as first written (≤ 0.7 × SPY i
 ≥ 10 % drawdown) fails the design's own backtest 3 times in 5, because in a fast 10–19 %
 dip the insurance and the shock trigger barely engage, by design.
 
+### Equal Weight Gives the Premium Back (Decision 076)
+Our own profitability picks beat the equal-weight universe by two points a year over the
+decade and still lost to SPY, because holding fifty names in equal slots costs about three
+points a year against a cap-weighted index in a decade led by the largest companies — more
+than the premium is worth. Weighted by size the same picks beat SPY by two to three points,
+and that is the trap from the other side: a profitability ratio over book equity ranks the
+buyback giants first, so "the most profitable" and "the biggest winners of this decade"
+are the same names. A sleeve test has to say how it would be weighted, and then show the
+premium is not the weighting.
+
+### Point in Time Means First Reported (Decision 076)
+The SEC's free filing data is point-in-time only if you read it that way. Three mistakes
+each halved the coverage before they were found: taking one revenue tag per company when
+companies switch tags over the years; filtering on the "FY" label when some filers' annual
+10-K facts are labelled "Q4"; and dating a year by the latest of its fields when a later
+10-K restates an old year under a new tag and carries that later filing date. The rule that
+survived: for every year and every field, the value from the earliest filing that reported
+it, whatever the tag. Check the coverage at every rebalance before reading a single return.
+
 ### The Vehicle Is Not the Premium (Decision 075 addendum)
 The hindsight-free quality portfolios beat SPY by 1.6 to 3.4 points a year over
 2017–2026. Twelve quality-labelled funds, their list fixed before a price was fetched,
