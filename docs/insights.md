@@ -122,6 +122,16 @@ it cannot decide return, and the drawdown leg as first written (≤ 0.7 × SPY i
 ≥ 10 % drawdown) fails the design's own backtest 3 times in 5, because in a fast 10–19 %
 dip the insurance and the shock trigger barely engage, by design.
 
+### The Vehicle Is Not the Premium (Decision 075 addendum)
+The hindsight-free quality portfolios beat SPY by 1.6 to 3.4 points a year over
+2017–2026. Twelve quality-labelled funds, their list fixed before a price was fetched,
+all lagged SPY, each in at least one half. They were not fakes: eleven load positively on
+the profitability factor. They load a quarter to a half of what the academic portfolio
+loads — multi-metric screens, sector caps and fees dilute the tilt — and every alpha but
+one is negative. A factor's history belongs to the portfolio that defined it; a fund with
+the same name is a separate claim that has to beat its index on its own. SPMO did, MTUM
+did not, and here none did. Test the vehicle; never infer it from the factor.
+
 ### Quality Is Harvested by Holding, Like Momentum (Decision 075)
 Sixty-three years of profitability-sorted portfolios say the quality premium is real,
 old and defensive: the most profitable third of the market beat the market by about a

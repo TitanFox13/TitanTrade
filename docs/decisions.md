@@ -87,6 +87,32 @@ Fails, as Decision 067 found: the one quality ETF in the library lost to SPY in 
 
 **Scripts / docs**: `scripts/param_search/quality.py` (pre-registration `05b4144`, then the code), `datasets.french_levels(sub)` / `french_factors` / `aqr_qmj`, the harness README row; roadmap B2 ✅ / B9 🚫 / D closed / C2 closed / H quality ETFs; todo Phase 2.15; one insight; handover note.
 
+### Decision 075 addendum — the quality funds as vehicles: twelve fetched and tested, none captures the premium (operator: "fetch quality funds first", 2026-10-30)
+`scripts/param_search/quality_etfs.py` — **the candidate list and hypotheses V1–V3 were committed before the fetch** (`b2c914f`): every quality-labelled US equity ETF on Alpaca with SIP history from 2016 (SPHQ, QUAL, VIG, DGRW, DGRO, QDF, QDEF, QUS, FQAL, COWZ, MOAT, JQUA). Eleven fetched on titanserver with the data API only (SIP, `adjustment=all`, dividend-adjusted like the archive; `alpaca_hist/quality/`, archived as `archive/param_search/alpaca_quality/`), QUAL from the library. Decade 2017-01-03 → 2026-10-12, split 2022, each fund from its first bar (MOAT 2016-05, FQAL 2016-09, COWZ 2016-12, JQUA 2017-11), through 2025 beside full. **Nothing live changes.**
+
+**V1a — the era**: the premium was there to capture. Over the same decade the French top-30 %-profitability portfolio beat the French market by **+1.62 pp/yr** (+2.8 / +0.5; through 2025 +2.0) and the top decile by **+3.45** (+4.1 / +2.8; +3.8), and the French market matched SPY to the decimal (15.27 vs 15.30 %/yr) — so against SPY the hindsight-free quality portfolios read +1.6 and +3.4, the decile positive in both halves.
+
+**V1b — the funds held vs SPY** (excess CAGR; IS / OOS; through 2025; the dividend-growth family as pre-registered):
+
+| fund | excess | IS / OOS | → 2025 | Sharpe vs 0.89 | worst yr | from |
+|---|---|---|---|---|---|---|
+| JQUA (JPMorgan quality factor) | +0.13 | −0.4 / +0.6 | −0.55 | 0.88 (SPY 0.84 on its window) | −6.0 | 2017-11 |
+| SPHQ (S&P 500 Quality) | −0.63 | −0.9 / −0.4 | −0.67 | 0.85 | −4.5 | 2017-01 |
+| QUAL (MSCI USA Quality) | −0.73 | −0.4 / −1.1 | −0.83 | 0.85 | −5.1 | |
+| FQAL (Fidelity quality factor) | −0.89 | −0.2 / −1.6 | −0.81 | 0.85 | −3.8 | |
+| DGRW · QUS · MOAT | −1.22 · −1.53 · −1.69 | −1.0 / −1.4 · −1.2 / −1.8 · +0.1 / −3.4 | −0.97 · −1.42 · −0.73 | 0.89 · 0.86 · 0.77 | | |
+| VIG · DGRO · COWZ | −2.03 · −2.08 · −2.06 | −1.1 / −2.9 · −1.6 / −2.5 · −2.1 / −2.0 | −1.70 · −2.10 · −2.27 | 0.85 · 0.83 · 0.73 | | |
+| QDEF · QDF | −3.29 · −3.85 | −5.9 / −0.6 · −6.3 / −1.3 | −3.41 · −4.13 | 0.78 · 0.71 | | |
+| SPMO (the momentum sleeve, reference) | +5.23 | +2.1 / +8.4 | +4.46 | 1.00 | −7.2 | |
+
+**0 of 12 beat SPY in both halves** (three were expected by luck alone; none happened), and all twelve are behind SPY through 2025. The pre-registered shape held: the dividend-growth family −1.2 … −3.9 (a value tilt in a growth decade), SPHQ and FQAL within ±1.5, COWZ −2.1, MOAT −1.7.
+
+**V2 — are they quality?** Each fund's daily excess over SPY regressed on French RMW and SPMO's excess: β RMW SPHQ +0.10 (t 8.4), QUAL +0.07 (7.4), VIG +0.24 (20.2), DGRW +0.24 (24.3), DGRO +0.27 (20.4), QDF +0.16, QDEF +0.23, QUS +0.16, FQAL +0.08 (9.9), COWZ +0.19 (8.3), JQUA +0.05 (3.2), MOAT −0.03 (−2.2; a moat fund is not a profitability fund); alphas −0.2 … −3.4 %/yr, MOAT +0.5; six meet the V2 definition (loading, t, correlation with QUAL > 0.3). They *are* quality exposures — diluted: a fund tracking the top 30 % outright would load about 0.4–0.5 on RMW; these load 0.05–0.27, and multi-metric screens (return on equity, leverage, earnings variability), sector caps and fees (0.15–0.5 %) absorb the rest, with a negative alpha left over in every case but one.
+
+**V3** not reached (no survivor). For the record, JQUA or SPHQ in place of half the dip sleeve: +0.72 vs the book's +1.36, Sharpe 1.03–1.06 vs 1.10, through 2025 ≈ 0.
+
+**Decision.** Nothing changes; the quality door stays closed. What was learned: the quality premium was alive this decade in its hindsight-free form and no fund delivered it — **the vehicle is not the premium**, as MTUM was not SPMO (Decision 067). The only route left to the century's result is a *held* profitability sleeve built from point-in-time fundamentals (the top 30 % by operating profitability, rebalanced yearly) — the B9 data for a purpose other than the one B9 was closed for — which would meet Decision 067's objection to self-picked sleeves (fitted selection parameters, no long investable history) and is **not proposed**; recorded in Track H as what it would take. Next: B5 / B6 / B7.
+
 ## Decision 074: Put-writing and the collar indices — tested on 40 years of Cboe data, nothing adopted; option writing is a Sharpe tool not a return tool, and bought protection costs more than the two free signals (roadmap B1, operator's go, 2026-10-29)
 **Date**: 2026-10-29
 **Why**: brainstorm #32 ("sell a put at the dip level") and the collar-as-insurance idea were untestable until Decision 072 fetched Cboe's option-strategy benchmarks. Done the Decision 062 way: hypotheses O1–O5 and the drop rules written into `scripts/param_search/putwrite.py` and **committed before any code ran** (`cf51d75`); loader `datasets.cboe`. Indices (total return on the S&P 500): BXMD (buy-write, 30-delta call), BXY, CMBO, CNDR, BFLY, RXM, PPUT (long S&P + 5 % OTM put) daily from 1986-07; BXMC 1990 →; BXM 2003 →; **PUT (the cash-secured put-write) daily only from 2007** (Decision 072's "1991 →" was sparse points); WPUT 2006 →; CLL (collar 95 / 110) 2008-09 →. Windows: 40y 1986-07 → 2026-08 (split 2006-07, four decades), 20y 2007 → 2026-08 (split 2017), CLL 2008-09 → (split 2017-07), the ETF decade 2017 → 2026-10 (split 2022, through 2025 beside full). Market = Kenneth French's VW market on the long windows (the century book's market; ≈ 0.3 pp/yr from the S&P 500), SPY on the decade. Book = `carry.sets()` (the century book: dip on 49 industries 40 / top momentum decile 60; the decade book: sector dip 40 / SPMO 60), exposure = min(insurance ×0.5, shock ×0.5), idle capital at 0 unless stated. **Nothing live changes.**
