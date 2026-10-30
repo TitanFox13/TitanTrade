@@ -23,8 +23,8 @@ uv run python -m titantrade full         # fetch → signals → execute
 uv run python -m titantrade gapcheck     # Gap-down protection + stop coverage for bare plan positions
 uv run python -m titantrade curate       # Monthly Claude universe proposal + post-mortem (advisory, no orders)
 uv run python -m titantrade benchmark [days] [--since YYYY-MM-DD]   # Beta / alpha / Sharpe / capture vs SPY
-uv run python -m titantrade backtest-mech [dir] [--start] [--end] [--split] [--grid] [--shadow]   # Same rule code on daily closes; --shadow = the shadow list
-uv run python -m titantrade download-history [dir] [--days N]       # SIP daily bars: watchlist + SPY + 11 sector ETFs
+uv run python -m titantrade backtest-mech [dir] [--start] [--end] [--split] [--grid] [--shadow]   # The two-sleeve book path-exact on daily closes (Decision 081); --shadow adds the shadow list, each list also as the dip sleeve alone
+uv run python -m titantrade download-history [dir] [--days N]       # SIP daily bars: watchlist + shadow list + SPY + 11 sector ETFs + SPMO (+ the cash ticker)
 uv run --with numpy python scripts/param_search/search.py           # Parameter search (scripts/param_search/README.md)
 ```
 
@@ -34,7 +34,7 @@ uv run --with numpy python scripts/param_search/search.py           # Parameter 
 cd TitanTrade && uv run --extra test python -m pytest tests/ -q
 ```
 
-`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 272 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens. Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
+`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 277 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens. Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
 
 ### Docker (production)
 
@@ -75,7 +75,7 @@ Deploy = `git pull && docker compose build api titantrade && docker compose up -
 | `src/titantrade/alerts.py` | Discord alerts: stuck in cash, ticker churn |
 | `src/titantrade/data_fetcher.py`, `market_context.py` | Data bundle; sector cache, sector breadth, SPY context |
 | `src/titantrade/curator.py` | Monthly Claude universe proposal + post-mortem (`_call_claude`, cost-logged) |
-| `src/titantrade/backtest/mechanical.py` | Backtester + walk-forward on the same `signals.py` rules |
+| `src/titantrade/backtest/mechanical.py` | Backtester + walk-forward on the same `signals.py` rules, with the live book's accounting (SPMO leg, SPY residual, 10 % slots, min(insurance, shock), per-leg band — Decision 081) |
 | `src/titantrade/benchmark.py` | Risk-adjusted metrics vs SPY |
 | `src/titantrade/api.py`, `scheduler.py` | FastAPI server; APScheduler jobs |
 | `src/titantrade/notifier.py` | Discord job alerts + daily summary (plan section) |

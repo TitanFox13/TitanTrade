@@ -30,9 +30,10 @@ Commands:
   curate           Monthly LLM universe proposal + post-mortem (advisory, no orders)
   benchmark [days] Performance vs SPY: beta, alpha, Sharpe (--since YYYY-MM-DD)
   backtest-mech [dir] [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--split YYYY-MM-DD] [--grid] [--shadow]
-                   Backtest the strategy on data/historical (same rule code as live)
+                   Backtest the two-sleeve book on data/historical (same rule code and accounting as live);
+                   --shadow adds the shadow list, each list also as the dip sleeve alone
   download-history [dir] [--days N]
-                   Download OHLCV (watchlist + shadow list + SPY + sector ETFs, SIP feed) for backtesting
+                   Download OHLCV (watchlist + shadow list + SPY + sector ETFs + the momentum / cash tickers, SIP feed)
 """
 
 
@@ -80,9 +81,11 @@ def main() -> None:
         from titantrade.config import load_config
 
         cfg = load_config()
+        t = cfg.trading
         args = [a for a in argv if not a.startswith("--")]
+        legs = [tk for tk in (t.momentum_ticker, t.cash_ticker) if tk]   # the core legs the backtester values (081)
         download_historical_data(
-            list(dict.fromkeys(cfg.trading.watchlist + cfg.trading.shadow_watchlist + list(cfg.trading.sector_etfs))), cfg,
+            list(dict.fromkeys(t.watchlist + t.shadow_watchlist + list(t.sector_etfs) + legs)), cfg,
             args[0] if args else "data/historical", days=int(_opt(argv, "--days", 750)),
         )
         return

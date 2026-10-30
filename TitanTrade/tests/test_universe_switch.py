@@ -131,7 +131,7 @@ class TestShadowList:
         with patch("titantrade.config.load_config", return_value=cfg), patch("titantrade.backtest.mechanical.load_historical_data", side_effect=fake_load), \
              patch("titantrade.backtest.mechanical.run_mechanical_backtest", return_value={"error": "no data"}):
             bt.main(["--shadow"])
-        assert seen["tickers"][:2] == ["CRWD", "ANET"] and "SPY" in seen["tickers"]
+        assert {"CRWD", "ANET", "SPY", "XLK"} <= set(seen["tickers"])   # both lists, SPY and the sectors are loaded
         with patch("titantrade.config.load_config", return_value=_cfg(fake_config, watchlist=ETFS)):
             bt.main(["--shadow"])
         assert "No shadow_watchlist" in capsys.readouterr().out

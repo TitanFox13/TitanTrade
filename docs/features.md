@@ -108,9 +108,9 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 ## Backtesting & Parameter Search
 
-- `backtest-mech`: the same `signals.py` rules on daily closes, next-close fills, per-side costs, slot accounting out of SPY, cash reserve, the insurance switch, a walk-forward helper and a coarse built-in grid → `state/backtest_mechanical.json`
-- `download-history [dir] [--days N]`: SIP daily bars for the watchlist, SPY and the 11 sector ETFs
-- `scripts/param_search/`: the Decision 062 harness — a vectorised engine validated trade-for-trade against the backtester, a 6,000-point grid, insurance × sizing stage, walk-forward of the selection procedure, plateau scoring; the Decision 066 / 067 research scripts (screens, century, sleeves, master grid, regimes, crashes, shorts, analogues, dynamic universe) on the same engine. Data (git-ignored) in `data/param_search/`
+- `backtest-mech`: the same `signals.py` rules on daily closes **with the live book's accounting (Decision 081)** — the momentum ETF held at `momentum_weight` of the investable book as a core leg, SPY the dip sleeve's residual, slots of `slot_pct` of the *sleeve* (10 % of equity under design 070) filled at the next close out of SPY, exits back into SPY (the executor's sell-to-cash plus same-run buy-back, equal to within the reserve's drift), every core leg rebalanced only outside its 5 % band in the executor's order (SPY, then the momentum leg; the cash leg when configured, sold first / bought last), per-side costs on the dip trades, the cash reserve, exposure = min(insurance, shock trigger) on the core legs while held positions keep their exits, entries paused while either rule is on; `momentum_weight: 0` is the dip-only book. Reports the exit mix, the average and minimum exposure, the risk-off and shock days, the average momentum share and the core-leg trade counts; `--shadow` runs the watchlist *and* the shadow list under the same book and each list as the dip sleeve alone; a walk-forward helper and a coarse built-in grid → `state/backtest_mechanical.json`. The engine never imports `Config`; `params_from_config` passes the live parameters
+- `download-history [dir] [--days N]`: SIP daily bars for the watchlist, the shadow list, SPY, the 11 sector ETFs and the momentum / cash tickers
+- `scripts/param_search/`: the Decision 062 harness — a vectorised engine validated trade-for-trade against the backtester's dip-only book (`validate.py`; its `--two-sleeve` mode prints the Decision 081 gap table, the harness blend against the path-exact engine), a 6,000-point grid, insurance × sizing stage, walk-forward of the selection procedure, plateau scoring; the Decision 066 / 067 research scripts (screens, century, sleeves, master grid, regimes, crashes, shorts, analogues, dynamic universe) on the same engine. Data (git-ignored) in `data/param_search/`
 
 ## HTTP API
 
@@ -118,7 +118,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 ## Test Suite (zero token spend)
 
-272 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
+277 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
 
 | File | Covers |
 |------|--------|
@@ -134,6 +134,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 | `test_universe_switch.py` | shadow list and design in config, the staged Decision 070 file, HOLD survival of a removed name, the window re-stamp, ETF sectors, the correlation gate on ETFs, the curator on the shadow list, `--shadow` |
 | `test_readiness.py` | the T-bill leg (target, core membership, plan field, executor order both ways, off by default) and the heartbeat ping |
 | `test_fill_ledger.py` | gap maths, Eastern session date, idempotent update with missing bars, the API endpoint and the summary field |
+| `test_backtest_two_sleeve.py` | the two-sleeve backtester (081): the momentum leg at its target and only moved outside the band, the slot on the dip sleeve (10 % / 25 %), the shock trigger scaling both legs and pausing entries, min() not the product, `momentum_weight` 0 = the dip-only book |
 
 ```bash
 cd TitanTrade && uv run --extra test python -m pytest tests/ -q

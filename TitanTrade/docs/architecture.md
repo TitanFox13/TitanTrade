@@ -61,7 +61,7 @@ config.py, logger.py, retry.py
 ├── curator.py           <- Claude universe proposal + post-mortem (uses market_data, cost_logger, notifier)
 ├── benchmark.py         <- metrics vs SPY (broker portfolio history + SIP bars)
 ├── fill_ledger.py       <- fill vs the backtest's price per entry (trade log + SIP bars)
-├── backtest/            <- data_loader (SIP bars), mechanical (backtester + walk-forward on signals.py)
+├── backtest/            <- data_loader (SIP bars), mechanical (the two-sleeve book path-exact on signals.py: momentum leg, SPY residual, slots on the sleeve, min(insurance, shock), per-leg band in the executor's order — Decision 081; walk-forward)
 ├── notifier.py          <- Discord embeds + daily summary
 ├── scheduler.py         <- APScheduler jobs → the commands in __main__
 └── api.py               <- FastAPI endpoints over state/ + scheduler
