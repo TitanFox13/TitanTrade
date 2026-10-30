@@ -100,9 +100,10 @@ def rebalance_dates(dates, freq, anchor_month=1):
     return out
 
 
-def simulate(mkt, member, screen, n, freq, start_year=2017, anchor_month=1, picks_out=None):
+def simulate(mkt, member, screen, n, freq, start_year=2017, anchor_month=1, picks_out=None, score_matrix=None):
     """Equal-weight hold of the screen's top-n, rebalanced; returns (curve, spy_curve, dates_slice, turnover_per_year).
-    ``picks_out`` (list) receives (rebalance index, picked column indices) for eligibility masks."""
+    ``picks_out`` (list) receives (rebalance index, picked column indices) for eligibility masks. ``score_matrix``
+    (T × N, NaN = ineligible) ranks by a precomputed score instead of a price-feature screen (qualpick.py)."""
     P, spy, dates = mkt.names, mkt.spy, mkt.dates
     rebs = [i for i in rebalance_dates(dates, freq, anchor_month) if dates[i] >= f"{start_year}-01-01"]
     i0 = rebs[0]; T = len(dates)
@@ -119,9 +120,9 @@ def simulate(mkt, member, screen, n, freq, start_year=2017, anchor_month=1, pick
         if t in rebs:
             f = features(P, spy, t)
             elig = member[t] & ~np.isnan(P[t]) & ~np.isnan(P[t - 252])
-            score = np.where(elig, screen(f) if screen else 0.0, -np.inf)
+            score = np.where(elig, score_matrix[t] if score_matrix is not None else (screen(f) if screen else 0.0), -np.inf)
             score = np.where(np.isnan(score), -np.inf, score)
-            if screen is None:
+            if screen is None and score_matrix is None:
                 pick = np.nonzero(elig)[0]
             else:
                 pick = np.argsort(-score, kind="stable")[:n]
