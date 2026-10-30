@@ -81,7 +81,7 @@ Exit side: longer targets, no target, longer clocks, trailing stops, ATR stops. 
 
 ## 8. Your first task: the two-sleeve book in the package backtester (roadmap Track F, first row) — picked by the operator 2026-10-30
 
-**Done 2026-10-30 by the next agent → Decision 081** (pre-registered, built, 277 tests; the decade expectation restated to ≈ +1.0 pp/yr on the exact path; the CLI-image deploy pending the operator's go). The section below is the brief as it was written; the numbers in section 2 (+1.4, both halves positive) are the blend's.
+**Done 2026-10-30 by the next agent → Decision 081** (pre-registered, built, 277 tests; the decade expectation restated to ≈ +1.0 pp/yr on the exact path; both images deployed 14:57 UTC on the operator's go — the server checkout is at `d139e6e` plus docs). The section below is the brief as it was written; the numbers in section 2 (+1.4, both halves positive) are the blend's.
 
 **The problem in one sentence**: the live book is a two-sleeve book, the package backtester still simulates the one-sleeve book of Decision 061, and every expected number was computed by a research-harness blend that trades differently from the executor — so "backtest what trades, trade what you backtested" (Decision 061's lesson) is broken for the sleeve, and the checkup's `backtest-mech --shadow` compares a dip-only book at 25 % slots with a live book that holds 60 % SPMO and 10 % slots.
 
