@@ -33,6 +33,12 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
 - [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
 
+## Phase 2.22: The curator ledger — roadmap A5 (2026-10-30) — Decision 082
+Operator's go ("Go, A5"). What is measured, the no-skill prior and the verdict rule committed before the build (the Decision 082 stub). Nothing live changes; the ledger records.
+- [ ] `curator_ledger.py`: one row per proposal (list, members, additions, removals), outcomes at 21 / 63 / 126 / 252 sessions filled by the daily summary from SIP bars (idempotent, retried), a summary with the verdict guard; `run_universe_review` records the row; `GET /api/curator-ledger`.
+- [ ] Tests (≤ 5), ruff clean; docs (features, data_schemas, api_reference, backend architecture, deployment's checkup routine, agent_instructions); Decision 082 results section; roadmap A5 ⏳.
+- [ ] Deploy (both images, no config change) — on the operator's go, before Sunday's curate job if the first proposal is to be row one.
+
 ## Phase 2.21: The two-sleeve book in the package backtester — roadmap Track F, first row (2026-10-30) — Decision 081
 Operator's go ("Go", 2026-10-30, after the takeover report). Hypotheses H1–H5 and the drop rule committed before the engine ran (`3c2339c`, the Decision 081 stub); the build follows `docs/handover.md` section 8; results in Decision 081. Nothing live changes; the CLI-image deploy is a separate go.
 - [x] Engine: `momentum_bars` / `cash_bars`, `momentum_weight` (0 = the old book), the shock trigger and min(), the slot on the dip sleeve, the 5 % band per core leg in the executor's order with only the cash above the reserve, `shock_days`, `min_exposure`, the average SPMO share and the core-leg trade counts; exits return to SPY (the executor's sell-to-cash plus same-run buy-back, equal to within the reserve's drift — routing to cash moved the Decision 062 floor by 0.6 % of equity and was reverted).

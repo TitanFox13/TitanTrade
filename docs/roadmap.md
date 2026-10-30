@@ -20,7 +20,7 @@
 | A2 | **The go/stop rule** (Decision 069): behaviour (actions rule-prescribed, fills near the backtest's price), drawdown (never further than SPY in a ≥ 10 % drawdown, ≤ 0.7 × in a ≥ 20 % one), return reported with its band and never judged under 3 years | ⏳ | at least one SPY drawdown ≥ 10 % in the window |
 | A3 | **The first real selloff** — the insurance and the shock trigger live for the first time; the rebound after it (the design's known cost) | ⏳ | what the backtest says: the book falls less, then lags for a year |
 | A4 | **The shadow list's verdict** — the dip rule on the 15 names vs the live ETF sleeve, same window, year after year; is the operator's judgment skill or luck? | ⏳ | a multi-year record; the first number is meaningless |
-| A5 | **The curator's skill** — the monthly proposals for the shadow list, shadow-tracked vs outcome (brainstorm #16, a small build) | 💡 build | a ledger like the fill ledger, one row per proposal |
+| A5 | **The curator's skill** — the monthly proposals for the shadow list, shadow-tracked vs outcome (brainstorm #16, a small build) | 🔬 **pre-registered 2026-10-30 (Decision 082), build in progress** — then ⏳ | a ledger like the fill ledger, one row per proposal, additions and removals against the list's equal weight and SPY at 21 / 63 / 126 / 252 sessions; no reading under 12 proposals, a verdict at 24 |
 | A6 | **The gates valued on live data** (brainstorm #17): earnings and macro blackouts vs what the blocked entries did | ⏳ | at 6 months of near-miss records; needs A2-style patience |
 
 ## Track B — Tests the new data unlocks (Decision 072; all hindsight-free; operator's go per test)
