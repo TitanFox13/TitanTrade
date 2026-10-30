@@ -33,6 +33,14 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
 - [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
 
+## Phase 2.21: The two-sleeve book in the package backtester — roadmap Track F, first row (2026-10-30) — Decision 081
+Operator's go ("Go", 2026-10-30, after the takeover report). Hypotheses H1–H5 and the drop rule committed before the engine ran (the Decision 081 stub); the build follows `docs/handover.md` section 8. Nothing live changes; the CLI-image deploy is a separate go.
+- [ ] Engine: `momentum_bars` / `cash_bars`, `momentum_weight` (0 = the old book), the shock trigger and min(), the slot on the dip sleeve, the 5 % band per core leg in the executor's order, `shock_days` and the average SPMO share.
+- [ ] `params_from_config` passes the new fields; `main` loads the momentum ticker (fails plainly when missing) and prints the sleeve line; `--shadow` runs both lists under the two-sleeve book and the dip sleeve alone; `download-history` fetches the momentum and cash tickers.
+- [ ] Tests (`tests/test_backtest_two_sleeve.py`, ≤ 5, synthetic bars); `validate.py` keeps the dip-only equality and gains the two-sleeve gap mode; ruff clean.
+- [ ] The decade gap table (blend vs path-exact) recorded in Decision 081; the expectation restated if the drop rule says so; features / architecture / CLAUDE.md / README / roadmap F ✅.
+- [ ] Deploy (both images, no config change) — **on the operator's go only**; then `backtest-mech --shadow --start 2026-10-29` on the CLI image prints the two-sleeve numbers for both lists.
+
 ## Phase 2.20: The de-risk destination — roadmap B8 run, a short Treasury proposed for the go-live cash leg (2026-10-30) — Decision 080
 Operator's go. Hypotheses D1–D7 committed before the first run (`75d7049`), the addendum A1 (the 1975 window) before the second (`ea40b11`); results in Decision 080. Nothing live changed; the proposal is a go-live configuration value on the operator's go.
 - [x] **Bills beat cash** by 0.6 … 0.7 pp/yr on every long window (the carry line, Decision 068 addendum).
