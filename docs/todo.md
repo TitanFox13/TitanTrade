@@ -33,6 +33,12 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
 - [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
 
+## Phase 2.24: The chaos drill — the executor against a lying broker (2026-10-30) — Decision 084
+Operator's go ("Go, chaos test"). Scenarios S1–S9, invariants I1–I6, the expected outcome per scenario (S1 core legs and S2 expected to fail I3; S3b a design question) and the drop rule committed before the build (the Decision 084 stub).
+- [ ] `tests/test_chaos.py`: the stateful fake broker with Alpaca's share accounting, patched into executor / protection / entries / core_allocation and the quote, the HTTP layer counted; one `execute_trades` per scenario; the invariants.
+- [ ] Run; record every finding in Decision 084 with its path; a violating scenario stays as a strict expected failure until a fix lands on the operator's go.
+- [ ] Propose the fix(es) in one question to the operator (the suspect-account guard; the quote-confirmed target exit); implement and deploy only on the go.
+
 ## Phase 2.23: The "how to read a checkup" page (2026-10-30) — Decision 083
 Operator: "let's do the next task" after Decision 082. Docs only, no deploy.
 - [x] `docs/how_to_read_a_checkup.md`: the four questions in order, a table per section (meaning / normal / a problem), the switches from their inputs, the prescribed reasons per trade, the benchmark band, the fill ledger, the shadow comparison, the go/stop rule, the expectation (081), the checklist; linked from CLAUDE.md, deployment's checkup routine and the handover.

@@ -1,5 +1,37 @@
 # Important Decisions Log
 
+## Decision 084: The chaos drill — one executor run against a broker that lies, refuses and vanishes; nothing bare, nothing doubled (roadmap Track F, operator's go, 2026-10-30) — **pre-registered, build in progress**
+**Date**: 2026-10-30
+**Why**: every guard in the executor was written after a production incident — the CRWD split that sold a healthy position at an artificial bottom and then showed a phantom $22,828 account (Decision 054), the FCX gap-down sell rejected with 40310000 because the cancelled stop still held the shares (Decisions 037 / 042 / 063), the bracket legs that die at the close (Decision 060), the stop that never got placed. Each guard has its own unit test; no test has ever fed the executor several anomalies in one run and checked the one property that matters for real money: **after the run every held dip position has exactly one stop at the plan's level, no order was placed on bad data, and nothing was bought or sold twice.** Written before the drill ran.
+
+**The drill** (`tests/test_chaos.py`): a stateful fake broker — account, positions, resting orders with Alpaca's share accounting (a resting sell order holds its shares; a second sell on held shares is refused with 40310000; a cancel releases them) — patched into every module that imports a broker function by name (`executor`, `protection`, `entries`, `core_allocation`), the live quote patched alongside, and the HTTP layer patched to count any call that escapes the fake. One `execute_trades` run per scenario on a book like today's (two dip positions with stops, SPMO at 60 %, SPY, 5 % cash, a plan with their HOLD items and one NEW item), then the invariants.
+
+**Invariants, checked after every scenario:**
+- **I1 nothing bare** — every non-core position of a whole share or more has a resting sell stop at the plan item's level.
+- **I2 nothing doubled** — exactly one stop per position, no buy order for a name already held or already pending, no second sale of a sold position.
+- **I3 no order on bad data** — while the account value is more than 50 % off the recorded peak (either way), no core rebalance and no entry; while a position's mark disagrees with the live quote, no sale driven by the mark.
+- **I4 only prescribed actions** — every trade-log row's trigger is one of entry / target / holding_limit / orphan_close / gap_down_protection / core_rebalance; cash never below zero.
+- **I5 the peak file never learns a phantom** — unchanged after a suspect value.
+- **I6 no call escapes the fake** — zero HTTP attempts.
+
+**Scenarios and what I expect, from reading the code before running it:**
+| # | anomaly | expected |
+|---|---|---|
+| S1 | the account reports equity 79 % below the peak (the July 2026 phantom) | entries blocked and the peak untouched ✓ (the Decision 054 guard); **the core legs are expected to FAIL I3**: `manage_core_position` reads the phantom value and would sell SPY / SPMO toward a collapsed target — no suspect-value guard sits on that path |
+| S2 | the account reports equity 60 % *above* the peak | the peak refuses the spike ✓; **entries and core buys are expected to FAIL I3**: the breaker only trips on the downside, so a slot is sized on the phantom equity (capped by real cash) and the core legs buy toward a phantom target with real cash |
+| S3 | a position's mark is a quarter of the live quote (the CRWD split mark) | gap-down protection skips on the live-quote cross-check ✓, no target exit ✓, the stop stays ✓ |
+| S3b | a position's mark is 30 % *above* the live quote (a reverse-split artefact) | **expected to fire the target exit on the mark alone** (`_manage_held` reads `unrealized_plpc`, no quote cross-check) — a sale on bad data at the real price; I3 fails; a finding to decide, not an obvious guard |
+| S4 | the mark and the quote both 71 % below the stop, with a split announcement / without | skip and alert ✓ / sell by gap-down protection ✓ (by design) |
+| S5 | a held position's GTC stop has vanished (the 90-day expiry, a corporate action) | one stop re-placed at the plan level ✓; with a stop present none added ✓ |
+| S6 | a holding-limit exit while the stop holds the shares; the broker refuses the first market sell even after the cancel settled | cancel → settle → sell refused → the stop restored ✓ (I1 holds, the position stays for the next run) |
+| S7 | the broker refuses to cancel the stop | no sale (the shares stay held), the one stop stands ✓ — with a misleading "CRITICAL naked" log line expected |
+| S8 | every broker call fails (network) | the run aborts or completes with zero orders ✓ |
+| S9 | the plan's NEW item is already pending / already held | skipped both times ✓ |
+
+**Drop rule**: a scenario that violates an invariant is **a finding, not a failed task** — the drill is the deliverable. Each finding is recorded here with the exact path; the scenario stays in the suite as a *strict expected failure* (so the suite is green and the gap is visible) until a fix lands **on the operator's go**; a fix is a guard that does less on bad data, never a relaxation; the expected failures above (S1 core legs, S2) would be closed by one guard at the top of `execute_trades` — on a suspect account value do nothing this run but stop coverage, and alert. S3b is a design question for the operator (confirm a target exit with the live quote, as gap-down already does). Nothing live changes from the drill itself; a fix is a deploy with its own go.
+
+*The drill's results follow in this Decision once it has run.*
+
 ## Decision 083: A plain-language "how to read a checkup" page for the operator (roadmap Track F, operator: "let's do the next task", 2026-10-30)
 **Date**: 2026-10-30
 **What**: `docs/how_to_read_a_checkup.md` — one page, everyday words, almost no numbers: the four questions a checkup answers in order (is the machine running; is the book what the rules say; did it trade only as prescribed; how is it doing against the index — reported, not judged), a table per section with "what the line means / normal / a problem", the two switches explained from their printed inputs, the prescribed reasons for every kind of trade, the benchmark line and why its band stays wide for years, the fill ledger and the shadow comparison, the go/stop rule as the only thing that ever changes anything, the expectation to hold the book against (Decision 081's restated numbers and the rebound-year cost), and a yes/no checklist at the end. Linked from `CLAUDE.md`, the deployment guide's checkup routine and the handover (the checkup is to be written so it matches the page). Nothing else changes; docs only, no deploy.
