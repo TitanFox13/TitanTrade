@@ -28,6 +28,7 @@ SOURCES = {
     "fred": {f"{k}.csv": f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={k}" for k in
              ("VIXCLS", "VXVCLS", "VXNCLS", "DGS1MO", "DTB3", "DGS2", "DGS10", "DGS30", "T10Y2Y", "T10Y3M", "DFF", "FEDFUNDS",
               "BAMLH0A0HYM2", "BAMLC0A0CM", "BAMLH0A0HYM2EY", "NFCI", "ANFCI", "STLFSI4", "USREC", "USRECD", "UNRATE", "ICSA",
+              "BAA", "AAA", "DBAA", "DAAA", "BAA10Y", "AAA10Y", "TEDRATE",   # Moody's corporate yields and spreads (unrevised; monthly 1919 →, daily 1983 →) and the TED spread 1986–2022 — Decision 077
               "CPIAUCSL", "T5YIE", "T10YIE", "UMCSENT", "M2SL", "SP500", "NASDAQCOM", "DJIA", "DCOILWTICO", "DTWEXBGS",
               "GOLDAMGBD228NLBM", "DEXUSEU", "WALCL", "TOTRESNS", "RRPONTSYD")},
     # CFTC Commitments of Traders, legacy futures-only, one zip per year 1986 →
