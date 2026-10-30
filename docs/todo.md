@@ -33,6 +33,11 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
 - [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
 
+## Phase 2.25: The harness tidy-up — `books.py` (2026-10-30) — Decision 085
+Operator: "do the tidy up". What moves where and the acceptance (byte-identical outputs of seven script runs captured before the first edit; loader equality for `search.py`) committed before the change. No `src/` change, no deploy.
+- [ ] `books.py` (LIVE, prev / sma_above / shock_flags, decade(), century(), sets(), exposure(), rf_daily / align_rf); `carry.py` and `master.py` re-export every public name; `master` / `rotation` / `shorts` / `regimes` builders rewired; `search.py` ← `datasets` + `analyze1_lib`; `analyze1.py` ← `analyze1_lib`.
+- [ ] The seven diffs and the loader check; any difference → that script left as it was and recorded; README rows; Decision 085 result; roadmap F ✅.
+
 ## Phase 2.24: The chaos drill — the executor against a lying broker (2026-10-30) — Decision 084
 Operator's go ("Go, chaos test"). Scenarios S1–S9, invariants I1–I6, the expected outcome per scenario (S1 core legs and S2 expected to fail I3; S3b a design question) and the drop rule committed before the build (the Decision 084 stub).
 - [x] `tests/test_chaos.py`: the stateful fake broker with Alpaca's share accounting, patched into executor / protection / entries / core_allocation and the quote, the HTTP layer counted; one `execute_trades` per scenario; the invariants. 12 tests (9 pass, 3 strict expected failures), suite 289, ruff clean.
