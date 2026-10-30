@@ -106,6 +106,12 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 - Appended by the daily summary once the session's SIP bar is published (entries up to 10 days old are retried); rows are never edited; `GET /api/fill-ledger` serves the rows with the median / mean / worst gap; the Discord summary shows the median and today's rows
 - The behaviour leg of the go/stop rule reads the median gap at every checkup
 
+## Curator Ledger (Decision 082)
+
+- `state/curator_ledger.json`: one row per monthly proposal — the list reviewed, its members, the additions and the removals (an empty proposal is a row too), written by `run_universe_review`
+- The daily summary fills each name's return from the first close after the proposal over 21 / 63 / 126 / 252 sessions beside the list's equal-weight return and SPY's, from SIP bars once the horizon's session is published (idempotent; a name without bars stays null); rows are never edited once filled
+- `GET /api/curator-ledger`: the rows and the score per horizon — additions minus the list and the list minus removals, the hit rate and its chance by luck; no reading under 12 proposals, a verdict at 24 (Decision 082). Skill shows as additions above the list and removals below it; whatever it shows, the dip sleeve never bets on single names (Decision 070)
+
 ## Backtesting & Parameter Search
 
 - `backtest-mech`: the same `signals.py` rules on daily closes **with the live book's accounting (Decision 081)** — the momentum ETF held at `momentum_weight` of the investable book as a core leg, SPY the dip sleeve's residual, slots of `slot_pct` of the *sleeve* (10 % of equity under design 070) filled at the next close out of SPY, exits back into SPY (the executor's sell-to-cash plus same-run buy-back, equal to within the reserve's drift), every core leg rebalanced only outside its 5 % band in the executor's order (SPY, then the momentum leg; the cash leg when configured, sold first / bought last), per-side costs on the dip trades, the cash reserve, exposure = min(insurance, shock trigger) on the core legs while held positions keep their exits, entries paused while either rule is on; `momentum_weight: 0` is the dip-only book. Reports the exit mix, the average and minimum exposure, the risk-off and shock days, the average momentum share and the core-leg trade counts; `--shadow` runs the watchlist *and* the shadow list under the same book and each list as the dip sleeve alone; a walk-forward helper and a coarse built-in grid → `state/backtest_mechanical.json`. The engine never imports `Config`; `params_from_config` passes the live parameters
@@ -114,11 +120,11 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 ## HTTP API
 
-`/api/health`, `/api/portfolio`, `/api/plan`, `/api/trades`, `/api/near-misses`, `/api/costs`, `/api/universe-proposal`, `/api/post-mortem`, `/api/benchmark`, `/api/benchmark/refresh`, `/api/fill-ledger`, `/api/settings`, `PUT /api/settings/mode`, `/api/watchlist` (GET / PUT), `/api/scheduler`, `/api/scheduler/{id}`, `POST /api/scheduler/{id}/trigger`, `PUT /api/scheduler/{id}/enabled`. See [TitanTrade/docs/api_reference.md](../TitanTrade/docs/api_reference.md).
+`/api/health`, `/api/portfolio`, `/api/plan`, `/api/trades`, `/api/near-misses`, `/api/costs`, `/api/universe-proposal`, `/api/post-mortem`, `/api/benchmark`, `/api/benchmark/refresh`, `/api/fill-ledger`, `/api/curator-ledger`, `/api/settings`, `PUT /api/settings/mode`, `/api/watchlist` (GET / PUT), `/api/scheduler`, `/api/scheduler/{id}`, `POST /api/scheduler/{id}/trigger`, `PUT /api/scheduler/{id}/enabled`. See [TitanTrade/docs/api_reference.md](../TitanTrade/docs/api_reference.md).
 
 ## Test Suite (zero token spend)
 
-277 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
+282 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
 
 | File | Covers |
 |------|--------|
@@ -134,6 +140,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 | `test_universe_switch.py` | shadow list and design in config, the staged Decision 070 file, HOLD survival of a removed name, the window re-stamp, ETF sectors, the correlation gate on ETFs, the curator on the shadow list, `--shadow` |
 | `test_readiness.py` | the T-bill leg (target, core membership, plan field, executor order both ways, off by default) and the heartbeat ping |
 | `test_fill_ledger.py` | gap maths, Eastern session date, idempotent update with missing bars, the API endpoint and the summary field |
+| `test_curator_ledger.py` | the curator ledger (082): a row per proposal (empty ones too), horizons filled from the first close after the proposal with a null for a name without bars, the reading guard and the hit-rate maths, the API, the curator hook |
 | `test_backtest_two_sleeve.py` | the two-sleeve backtester (081): the momentum leg at its target and only moved outside the band, the slot on the dip sleeve (10 % / 25 %), the shock trigger scaling both legs and pausing entries, min() not the product, `momentum_weight` 0 = the dip-only book |
 
 ```bash

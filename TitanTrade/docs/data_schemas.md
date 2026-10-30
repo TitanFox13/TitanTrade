@@ -173,6 +173,16 @@ Entries blocked by ≤ 2 gates: `{"near_misses": [{"id": "nm_…", "timestamp", 
 
 One row per BUY entry, appended by the daily summary once the session's SIP bar is published (entries up to 10 days old are retried; rows are never edited). `date` is the Eastern session of the order; `fill_price` is the trade's `fill_price` when captured (`fill_known` true), else the bracket limit; `backtest_close` is that session's close, the price the backtest fills at; `gap_pct` = fill / close − 1 in %, positive = paid more. `GET /api/fill-ledger` adds `summary` (`n`, `median_gap_pct`, `mean_gap_pct`, `worst_gap_pct`, `fills_known`).
 
+## 11c. Curator Ledger (`state/curator_ledger.json`, Decision 082)
+
+```json
+{"rows": [{"proposal_id": "2026-11-01T19:00:12+00:00", "date": "2026-11-01", "list": "shadow_watchlist",
+           "members": ["CRWD", "…"], "adds": ["MSFT"], "removes": ["DVN"],
+           "outcomes": {"21": {"date": "2026-12-02", "spy": 1.8, "list_ew": 2.1, "adds": {"MSFT": 3.4}, "removes": {"DVN": -0.7}}}}]}
+```
+
+One row per monthly proposal (an empty proposal too), appended by `run_universe_review`. `outcomes` is keyed by the horizon in sessions (21 / 63 / 126 / 252): each holds the session the horizon fell on and the total return in % from the first close after the proposal for SPY, the equal weight of `members` and every addition and removal (`null` for a name without bars); filled by the daily summary once the session's SIP bar is published, never edited after. `GET /api/curator-ledger` adds `summary` (`proposals`, `additions`, `removals`, per horizon the additions-minus-list and list-minus-removals medians in pp with the hit rate and its chance by luck, `verdict` — "No reading under 12 proposals" until then).
+
 ## 12. Other
 
 - `state/portfolio.json`: `{"last_updated", "portfolio_value", "cash", "positions": [{"symbol", "qty", "avg_entry_price", "current_price", "market_value", "unrealized_plpc"}]}` — written at the end of every execute run; the daily summary and `/api/portfolio` (when Alpaca is unreachable) read it.

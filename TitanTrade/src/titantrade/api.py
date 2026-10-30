@@ -141,6 +141,15 @@ def fill_ledger() -> dict:
     return {"summary": summary(rows), "rows": rows}
 
 
+@app.get("/api/curator-ledger")
+def curator_ledger() -> dict:
+    """Every monthly proposal against what the names did afterwards (Decision 082), with the running score."""
+    from .curator_ledger import load_ledger, summary
+
+    rows = load_ledger().get("rows", [])
+    return {"summary": summary(rows), "rows": rows}
+
+
 # --- Benchmark -----------------------------------------------------------------
 
 @app.get("/api/benchmark")

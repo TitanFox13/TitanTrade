@@ -18,6 +18,8 @@ Why this split: the October 2026 audit (Decision 060, Evidence 2–3) found that
 
 **Output**: `state/universe_proposal.json` (`generated_at`, `watchlist` = the list reviewed, `list` = `"shadow_watchlist"` or `"watchlist"`, `proposal`, `raw`, `status: "advisory — apply through the watchlist editor"`), a Discord embed, and `GET /api/universe-proposal`. The operator applies accepted changes with `PUT /api/watchlist`; nothing is applied automatically.
 
+**Scored**: every proposal gets a row in the curator ledger (Decision 082, `curator_ledger.py`): its additions and removals against the list's equal-weight return and SPY at 21 / 63 / 126 / 252 sessions, filled by the daily summary; `GET /api/curator-ledger`. No reading under 12 proposals, a verdict at 24 — whether the monthly call earns its keep.
+
 ## Post-mortem (`curator.run_post_mortem`)
 
 **Input** (`build_post_mortem_prompt`): the last 90 days of trade records (ticker, action, trigger, price, timestamp, reasoning).

@@ -35,9 +35,9 @@ Operator's call after the component audit: "fully convert with all the points ma
 
 ## Phase 2.22: The curator ledger — roadmap A5 (2026-10-30) — Decision 082
 Operator's go ("Go, A5"). What is measured, the no-skill prior and the verdict rule committed before the build (the Decision 082 stub). Nothing live changes; the ledger records.
-- [ ] `curator_ledger.py`: one row per proposal (list, members, additions, removals), outcomes at 21 / 63 / 126 / 252 sessions filled by the daily summary from SIP bars (idempotent, retried), a summary with the verdict guard; `run_universe_review` records the row; `GET /api/curator-ledger`.
-- [ ] Tests (≤ 5), ruff clean; docs (features, data_schemas, api_reference, backend architecture, deployment's checkup routine, agent_instructions); Decision 082 results section; roadmap A5 ⏳.
-- [ ] Deploy (both images, no config change) — on the operator's go, before Sunday's curate job if the first proposal is to be row one.
+- [x] `curator_ledger.py`: one row per proposal (list, members, additions, removals), outcomes at 21 / 63 / 126 / 252 sessions filled by the daily summary from SIP bars (idempotent, retried, a name without bars stays null), a summary with the verdict guard; `run_universe_review` records the row; `GET /api/curator-ledger`.
+- [x] Tests (five; 282 total), ruff clean; docs (features, data_schemas, api_reference, backend architecture, deployment's checkup routine, agent_instructions, CLAUDE.md); Decision 082 build section; roadmap A5 ✅ → ⏳.
+- [ ] Deploy (both images, no config change) — **on the operator's go, before Sunday 2026-11-01 15:00 ET** if the first proposal is to be row one. **Verify after Sunday's curate job**: `/api/curator-ledger` holds one row with the shadow list as members and the proposal's names; the first horizon fills ≈ 2026-12-03.
 
 ## Phase 2.21: The two-sleeve book in the package backtester — roadmap Track F, first row (2026-10-30) — Decision 081
 Operator's go ("Go", 2026-10-30, after the takeover report). Hypotheses H1–H5 and the drop rule committed before the engine ran (`3c2339c`, the Decision 081 stub); the build follows `docs/handover.md` section 8; results in Decision 081. Nothing live changes; the CLI-image deploy is a separate go.
