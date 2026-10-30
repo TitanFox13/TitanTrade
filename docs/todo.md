@@ -33,6 +33,11 @@ Operator's call after the component audit: "fully convert with all the points ma
 - [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
 - [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
 
+## Phase 2.23: The "how to read a checkup" page (2026-10-30) — Decision 083
+Operator: "let's do the next task" after Decision 082. Docs only, no deploy.
+- [x] `docs/how_to_read_a_checkup.md`: the four questions in order, a table per section (meaning / normal / a problem), the switches from their inputs, the prescribed reasons per trade, the benchmark band, the fill ledger, the shadow comparison, the go/stop rule, the expectation (081), the checklist; linked from CLAUDE.md, deployment's checkup routine and the handover.
+- [ ] At the next checkup (≈ 2026-11-12): write the record in the page's order and wording, and fix the page where the record needed something it does not cover.
+
 ## Phase 2.22: The monthly curator retired; the curator ledger built and removed (2026-10-30) — Decision 082
 Operator's go on A5 ("Go, A5"): the ledger pre-registered (`81ec4be`) and built (`451f104`, five tests). Then, asked whether to keep the monthly call for the ledger to judge or retire it, the operator chose **retire** — the last scheduled LLM call goes.
 - [x] `monthly_curate` disabled in `data/schedule.json` (definition kept, one toggle brings it back); the ledger code reverted; `curate` stays a manual advisory command; `CLAUDE_KEY` still required by config (later cleanup if never used).

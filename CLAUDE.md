@@ -8,7 +8,7 @@ Mechanical equity trading system on Alpaca: two sleeves — a dip-in-uptrend ove
 TitanTrade/                 Python backend: data, signals, plan, risk gates, execution, API + scheduler
 TitanTrade/scripts/         Parameter-search harness (Decision 062)
 TitanTrade/legacy/          Frozen LLM-era modules, tests, scripts and docs — not importable (git tag v2-llm-pipeline)
-docs/                       Project-wide documentation (handover, roadmap, decisions, features, todo, architecture, insights)
+docs/                       Project-wide documentation (handover, roadmap, decisions, features, todo, architecture, insights, how_to_read_a_checkup — the operator's plain-language guide)
 ```
 
 The Flutter desktop app was deleted in Decision 063 (unused). The HTTP API is the only front end.
