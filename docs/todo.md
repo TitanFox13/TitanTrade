@@ -41,7 +41,7 @@ Operator's go. Hypotheses D1–D7 committed before the first run (`75d7049`), th
 - [x] **Gold and the mixes were 1973–74**: from 1975 gold +0.29 over bills at the placebo's median (56 %), the mixes at or below it; closed. A permanent 10 % bond sleeve −1 pp/yr vs the book: closed.
 - [x] Roadmap B8 ✅, C5 / D / C3; the Phase 2.0 go-live item (b) amended; README; one insight; handover note.
 - [ ] **At go-live (operator's go; "leave for go-live" decided 2026-10-30 — the leg stays off on paper)**: `cash_ticker` = SHY (or VGSH) rather than SGOV when the leg is on; the checkup line compares the sweep APY with SHY's yield plus the +0.3 duration pickup; deployment, risk-management and features pages name SHY where they name SGOV. IEF recorded as the dial.
-- [ ] **Next**: the first checkup under design 070 (≈ 2026-11-05: the log sweep, the scheduler, the stops, the benchmark with its band, the fill ledger, `backtest-mech --shadow`, `pull_backup.sh`, the Nov 1 curator proposal on the shadow list; archive `external/sec_facts/`, `alpaca_hist/quality/` and the new FRED files on titanserver), then the Track F cleanup.
+- [x] **Next**: ~~the first checkup under design 070~~ ran 2026-10-30 (Check 2026-10-30 in decisions.md; the research data archived on titanserver). **Then the Track F cleanup — picked by the operator 2026-10-30 as the next agent's first task; `docs/handover.md` (rewritten the same day, with the paste prompt in its section 0) is the brief.**
 
 ## Phase 2.19: Gold over a century — roadmap B7 run, no sleeve, the parking place to B8 (2026-10-30) — Decision 079
 Operator's go. Hypotheses G1–G5 committed before the first run (`2f52478`), the addendum A1–A2 before the second (`1636a74`); results in Decision 079. Nothing live changed.
