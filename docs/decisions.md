@@ -1,6 +1,6 @@
 # Important Decisions Log
 
-## Decision 085: The harness tidy-up — one `books.py` builds the decade and the century; the numbers must not move (roadmap Track F, operator: "do the tidy up", 2026-10-30) — **pre-registered, build in progress**
+## Decision 085: The harness tidy-up — one `books.py` builds the decade and the century; the numbers must not move (roadmap Track F, operator: "do the tidy up", 2026-10-30) — **done: seven runs byte-identical, loaders equal**
 **Date**: 2026-10-30
 **Why**: the research harness grew one script per Decision over four days, and the recommended book's inputs — the sector dip sleeve on `fastbt`, SPMO, SPY, the two-signal insurance flags, the shock flags, and their century twins on Kenneth French's industries and momentum decile — were rebuilt inline each time. `carry.sets()` became the de-facto shared builder (eighteen scripts import it), but `master.decade()` / `century()` / `finalists()`, `rotation.decade()` / `century()`, `shorts.decade_base()` / `century_base()` and `regimes.main()` / `shock_grid()` still carry their own copies of the same twenty lines; `search.py` copies `datasets.py`'s loaders and `analyze1_lib.py`'s grid; `analyze1.py` is `analyze1_lib.py` plus a main. For the next agent, not for the numbers — which is exactly the risk: a refactor of research code is correct only if every number it ever printed is unchanged.
 
@@ -8,7 +8,9 @@
 
 **Acceptance, pre-registered**: the printed output of `carry.py`, `validate.py --two-sleeve`, `master.py --finalists`, `shorts.py`, `rotation.py`, `regimes.py` and `regimes.py --grid` is **byte-identical** before and after (captured before the first edit; the timing line excluded); `search.py`'s loaders for the two datasets present on this machine (A and D) yield arrays equal to `datasets.load`'s (B and C have no local files — the Yahoo wall). **Drop rule**: any difference means that script is left exactly as it was and the difference is recorded here; the tidy-up never changes a number to make a diff go away.
 
-*The result follows once the diffs have run.*
+**Result: every number unchanged.** The seven runs are byte-identical before and after (`carry.py` 21 lines, `validate.py --two-sleeve` 17, `master.py --finalists` 32, `shorts.py` 92, `rotation.py` 98, `regimes.py` 23, `regimes.py --grid` 174 — the timing lines aside); `search.py`'s loaders for A and D produce the same Markets as `datasets.load` (2,709 sessions, the same arrays to the bit, NaNs included), the same `START` / `SPLIT`, and the same 6,000 grid points; `carry.sets is books.sets` and `master.shock_flags is books.shock_flags` (the re-exports are the same objects, not copies). Nothing had to be left as it was. The scripts are shorter by about 110 lines; `books.py` is 95. Two run-mode details found on the way: a script that imports a sibling needs the `sys.path` line to run under `-I` (added to `analyze1.py` and `search.py`), and the stage-1 result files are not on the research machine (the Yahoo wall; `analyze1.py` was checked by import, not by a run). Nothing in `src/` changed; no deploy.
+
+**Scripts / docs**: `scripts/param_search/books.py` (new), `carry.py`, `master.py`, `rotation.py`, `shorts.py`, `regimes.py`, `search.py`, `analyze1.py`; the README rows; roadmap Track F ✅; todo Phase 2.25.
 
 ## Decision 084: The chaos drill — one executor run against a broker that lies, refuses and vanishes; nothing bare, nothing doubled (roadmap Track F, operator's go, 2026-10-30) — **run: seven guards hold, one real hole (the core legs trade on a phantom account value), one small one (a target exit on an unconfirmed mark); both fixed the same evening on the operator's go**
 **Date**: 2026-10-30

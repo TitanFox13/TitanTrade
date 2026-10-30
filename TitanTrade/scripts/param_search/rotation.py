@@ -25,6 +25,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np  # noqa: E402
 
+import books  # noqa: E402
 import datasets  # noqa: E402
 import fastbt  # noqa: E402
 import master  # noqa: E402
@@ -90,14 +91,10 @@ def score_line(label, r, r_mkt, dates, split, eras=None, to=None):
 
 
 def decade():
-    cur = datasets.load("A_alpaca_names_2016"); sec = datasets.load("D_alpaca_sectors_2016"); dates = cur.dates; i0 = dates.index("2017-01-03")
-    _, _, spy_above, breadth = cur.pre(90, 150, 200)
-    SEC = fastbt.run(sec, LIVE, "2017-01-03", None)["_curve"]; d = dates[i0:]
+    b = books.decade(); d, spy, bear, sec, dates, i0, n = b["d"], b["spy"], b["bear"], b["sec"], b["dates"], b["i0"], b["n"]
+    r_dip, r_mom, r_mkt = b["r"]["sec"], b["r"]["SPMO"], b["r"]["mkt"]; shock = master.shock_flags(spy, -0.07, 10, 20)
     def etf(sym):
         v = datasets.alpaca(sym); return np.array([v.get(t, np.nan) for t in dates])
-    SP = etf("SPMO"); n = min(len(SEC), len(SP) - i0); d = d[:n]; spy = cur.spy[i0:i0 + n]
-    r_dip = SEC[1:n] / SEC[:n - 1] - 1; r_mom = SP[i0 + 1:i0 + n] / SP[i0:i0 + n - 1] - 1; r_mkt = spy[1:] / spy[:-1] - 1
-    bear = (master.prev(spy_above[i0:i0 + n][1:]) == 0.0) & (master.prev(breadth[i0:i0 + n][1:]) < 0.5); shock = master.shock_flags(spy, -0.07, 10, 20)
     P_sec = sec.sectors; P_multi = np.column_stack([etf(s) for s in MULTI])
     sleeves = {"SPMO held (current candidate)": r_mom}
     for form, skip, top, absolute in itertools.product((63, 126, 252), (0, 21), (1, 2, 3), (False, True)):
@@ -130,11 +127,8 @@ def decade():
 
 
 def century():
-    ind = datasets.load("F_french_49ind_1926"); mom = datasets.french_levels("10_Portfolios_Prior_12_2_Daily.csv")
-    r0 = fastbt.run(ind, LIVE, "1927-07-01", None); fd = ind.dates[ind.dates.index(r0["start"]):]; j0 = ind.dates.index(fd[0])
-    dip = r0["_curve"]; mk = r0["_spy_curve"]; hi = np.array([mom["Hi PRIOR"].get(x, np.nan) for x in fd])
-    r_dip = dip[1:] / dip[:-1] - 1; r_mom = np.nan_to_num(hi[1:] / hi[:-1] - 1); r_mkt = mk[1:] / mk[:-1] - 1
-    bear = master.prev(master.sma_above(mk)[1:]) == 0.0; shock = master.shock_flags(mk, -0.07, 10, 20)
+    c = books.century(); ind, fd, mk, bear = c["ind"], c["d"], c["mkt"], c["bear"]; j0 = ind.dates.index(fd[0])
+    r_dip, r_mom, r_mkt = c["r"]["dip"], c["r"]["mom"], c["r"]["mkt"]; shock = master.shock_flags(mk, -0.07, 10, 20)
     P = ind.names; T = len(fd)
     sleeves = {"top momentum decile held (current century stand-in)": r_mom}
     for form, top in itertools.product((126, 252), (5, 10)):

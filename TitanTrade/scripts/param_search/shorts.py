@@ -26,6 +26,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np  # noqa: E402
 
+import books  # noqa: E402
 import datasets  # noqa: E402
 import fastbt  # noqa: E402
 import master  # noqa: E402
@@ -66,29 +67,20 @@ def line(label, r, r_mkt, dates, split, eras=None, eps=(), to=None):
 
 
 def century_base():
-    ind = datasets.load("F_french_49ind_1926"); mom = datasets.french_levels("10_Portfolios_Prior_12_2_Daily.csv")
-    r0 = fastbt.run(ind, LIVE, "1927-07-01", None); d = ind.dates[ind.dates.index(r0["start"]):]
-    dip = r0["_curve"]; mk = r0["_spy_curve"]
-    hi = np.array([mom["Hi PRIOR"].get(x, np.nan) for x in d]); lo = np.array([mom["Lo PRIOR"].get(x, np.nan) for x in d])
-    r = {"dip": dip[1:] / dip[:-1] - 1, "mom": np.nan_to_num(hi[1:] / hi[:-1] - 1), "lo": np.nan_to_num(lo[1:] / lo[:-1] - 1), "mkt": mk[1:] / mk[:-1] - 1}
+    c = books.century(); d, mk, mom = c["d"], c["mkt"], c["mom"]
+    lo = np.array([mom["Lo PRIOR"].get(x, np.nan) for x in d])
+    r = dict(c["r"]); r["lo"] = np.nan_to_num(lo[1:] / lo[:-1] - 1)
     wml = french_wml(); r["wml"] = np.array([wml.get(x, 0.0) for x in d[1:]])
-    bear = master.prev(master.sma_above(mk)[1:]) == 0.0
     shock = master.shock_flags(mk, -0.07, 10, 20)
-    return d, r, bear, shock
+    return d, r, c["bear"], shock
 
 
 def decade_base():
-    cur = datasets.load("A_alpaca_names_2016"); sec = datasets.load("D_alpaca_sectors_2016"); dates = cur.dates; i0 = dates.index("2017-01-03")
-    _, _, spy_above, breadth = cur.pre(90, 150, 200)
-    SEC = fastbt.run(sec, LIVE, "2017-01-03", None)["_curve"]; d = dates[i0:]
-    def etf(sym):
-        v = datasets.alpaca(sym); return np.array([v.get(t, np.nan) for t in d])
-    SP, SH = etf("SPMO"), etf("SH"); n = min(len(SEC), len(SP), len(SH)); d = d[:n]; spy = cur.spy[i0:i0 + n]
-    r = {"dip": SEC[1:n] / SEC[:n - 1] - 1, "mom": SP[1:n] / SP[:n - 1] - 1, "sh": SH[1:n] / SH[:n - 1] - 1, "mkt": spy[1:] / spy[:-1] - 1}
+    b = books.decade(etfs=("SPMO", "SH")); d, spy = b["d"], b["spy"]
+    r = {"dip": b["r"]["sec"], "mom": b["r"]["SPMO"], "sh": b["r"]["SH"], "mkt": b["r"]["mkt"]}
     wml = french_wml(); r["wml"] = np.array([wml.get(t, np.nan) for t in d[1:]])
-    bear = (master.prev(spy_above[i0:i0 + n][1:]) == 0.0) & (master.prev(breadth[i0:i0 + n][1:]) < 0.5)
     shock = master.shock_flags(spy, -0.07, 10, 20)
-    return d, r, bear, shock
+    return d, r, b["bear"], shock
 
 
 def exposure(bear, shock, ins=0.5, use_ins=True, use_shock=True):

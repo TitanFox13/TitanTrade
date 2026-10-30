@@ -1,37 +1,19 @@
 """Stage 1: entry/exit grid, insurance off, slot 20% × 3. Four datasets. Plateau-scored."""
 import itertools
 import json
+import os
 import sys
 import time
-import datetime
 from multiprocessing import Pool
-import fastbt
-S = "data/param_search"
-NAMES = ["CRWD","ANET","LLY","DXCM","HCA","JPM","GS","DVN","WMT","URI","GE","DASH","DECK","FCX","EQIX"]
-SECT = ["XLK","XLV","XLF","XLE","XLI","XLY","XLB","XLRE","XLP","XLU","XLC"]
 
-def yahoo(sym):
-    r = json.load(open(f"{S}/yahoo/{sym}.json"))["chart"]["result"][0]
-    ts = r["timestamp"]; adj = r["indicators"]["adjclose"][0]["adjclose"]
-    out = {}
-    for t, c in zip(ts, adj):
-        if c is not None and c > 0:
-            out[datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%d")] = float(c)
-    return out
-
-DATASETS = {
-    "A_alpaca_names_2016":   lambda: fastbt.load_dir(f"{S}/alpaca_hist/historical_long", NAMES, SECT),
-    "D_alpaca_sectors_2016": lambda: fastbt.Market({d: c for d, c in json.load(open(f"{S}/alpaca_hist/historical_long/SPY.json")) and {b["date"]: float(b["close"]) for b in json.load(open(f"{S}/alpaca_hist/historical_long/SPY.json"))}.items()},
-                                                   {s: {b["date"]: float(b["close"]) for b in json.load(open(f"{S}/alpaca_hist/historical_long/{s}.json"))} for s in SECT},
-                                                   {s: {b["date"]: float(b["close"]) for b in json.load(open(f"{S}/alpaca_hist/historical_long/{s}.json"))} for s in SECT}),
-    "B_yahoo_names_1999":    lambda: fastbt.Market(yahoo("SPY"), {n: yahoo(n) for n in NAMES}, {s: yahoo(s) for s in SECT}),
-    "C_yahoo_sectors_1999":  lambda: fastbt.Market(yahoo("SPY"), {s: yahoo(s) for s in SECT}, {s: yahoo(s) for s in SECT}),
-}
-START = {"A_alpaca_names_2016": "2016-01-04", "D_alpaca_sectors_2016": "2016-01-04", "B_yahoo_names_1999": "1999-01-04", "C_yahoo_sectors_1999": "1999-01-04"}
-SPLIT = {"A_alpaca_names_2016": "2022-01-01", "D_alpaca_sectors_2016": "2022-01-01", "B_yahoo_names_1999": "2018-01-01", "C_yahoo_sectors_1999": "2018-01-01"}
-GRID = dict(dip_pct=[0.06, 0.08, 0.10, 0.12, 0.15], dip_lookback_days=[40, 60, 90, 120], trend_sma_days=[100, 150, 200],
-            max_hold_days=[20, 40, 60, 90], tp_pct=[0.06, 0.08, 0.10, 0.15, 0.20], stop_pct=[0.08, 0.10, 0.12, 0.15, 0.20])
-KEYS = list(GRID)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script directory
+import datasets  # noqa: E402
+import fastbt  # noqa: E402
+from analyze1_lib import GRID, KEYS  # noqa: E402  (the stage-1 grid, shared with the analysis — Decision 085)
+S = datasets.S
+# The four stage-1 datasets, loaded by datasets.py (Decision 085: one loader per universe, not a copy here).
+DATASETS = {k: (lambda k=k: datasets.load(k)) for k in ("A_alpaca_names_2016", "D_alpaca_sectors_2016", "B_yahoo_names_1999", "C_yahoo_sectors_1999")}
+START, SPLIT = datasets.START, datasets.SPLIT
 POINTS = [dict(zip(KEYS, v)) for v in itertools.product(*GRID.values())]
 _mkt = None; _name = None
 def _init(name):

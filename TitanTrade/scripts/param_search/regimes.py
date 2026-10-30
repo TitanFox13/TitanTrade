@@ -8,11 +8,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np  # noqa: E402
 
-import datasets  # noqa: E402
+import books  # noqa: E402  (Decision 085: the decade and the century come from books.py; the regime rules below are this script's own)
 import fastbt  # noqa: E402
-
-LIVE = dict(dip_pct=0.08, dip_lookback_days=90, trend_sma_days=150, max_hold_days=60, tp_pct=0.20, stop_pct=0.12,
-            slot_pct=0.25, max_slots=3, insurance_sma_days=200, insurance_breadth=0.5, insurance_scale=1.0)   # raw dip book, insurance applied here
 
 
 def cagr(c):
@@ -74,23 +71,15 @@ def run_rules(dates, r_dip, r_mom, r_mkt, mkt_level, breadth, mom_level, split, 
 
 def main():
     # ---- decade
-    cur = datasets.load("A_alpaca_names_2016"); sec = datasets.load("D_alpaca_sectors_2016"); dates = cur.dates; i0 = dates.index("2017-01-03")
-    _, _, _, breadth = cur.pre(90, 150, 200)
-    SEC = fastbt.run(sec, LIVE, "2017-01-03", None)["_curve"]; d = dates[i0:]
-    def etf(sym):
-        v = datasets.alpaca(sym); x = np.array([v.get(t, np.nan) for t in d]); return x
-    MT, SP = etf("MTUM"), etf("SPMO"); n = min(len(SEC), len(MT), len(SP)); d = d[:n]
-    spy = cur.spy[i0:i0 + n]
-    r_dip = SEC[1:n] / SEC[:n - 1] - 1; r_mom = 0.5 * (MT[1:n] / MT[:n - 1] - 1) + 0.5 * (SP[1:n] / SP[:n - 1] - 1); r_mkt = spy[1:] / spy[:-1] - 1
+    b = books.decade(etfs=("MTUM", "SPMO")); d, spy, i0, n, breadth = b["d"], b["spy"], b["i0"], b["n"], b["breadth"]
+    r_dip = b["r"]["sec"]; r_mom = 0.5 * b["r"]["MTUM"] + 0.5 * b["r"]["SPMO"]; r_mkt = b["r"]["mkt"]
     mom_level = np.concatenate([[1.0], np.cumprod(1 + r_mom)])
     print("=== decade 2017 → 2026, sector-dip book (raw) + MTUM/SPMO; columns at the right = book minus SPY from the peak to the market trough")
     run_rules(d, r_dip, r_mom, r_mkt, spy, breadth[i0:i0 + n], mom_level, "2022-01-01",
               [("2020 covid", "2020-02-19", "2020-03-23"), ("2022 bear", "2022-01-03", "2022-10-12"), ("2025 tariff", "2025-02-19", "2025-04-08"), ("2023 (rally yr)", "2023-01-03", "2023-12-29")])
     # ---- century
-    ind = datasets.load("F_french_49ind_1926"); mom = datasets.french_levels("10_Portfolios_Prior_12_2_Daily.csv")
-    r = fastbt.run(ind, LIVE, "1927-07-01", None); fd = ind.dates[ind.dates.index(r["start"]):]
-    dip = r["_curve"]; mk = r["_spy_curve"]; hi = np.array([mom["Hi PRIOR"].get(x, np.nan) for x in fd])
-    r_dip = dip[1:] / dip[:-1] - 1; r_mkt = mk[1:] / mk[:-1] - 1; r_mom = np.nan_to_num(hi[1:] / hi[:-1] - 1)
+    c = books.century(); fd, mk = c["d"], c["mkt"]
+    r_dip, r_mom, r_mkt = c["r"]["dip"], c["r"]["mom"], c["r"]["mkt"]
     print("\n=== century 1927 → 2026, dip on 49 industries (raw) + top momentum decile; no breadth series, so the two-signal rule is SMA200-only here")
     run_rules(fd, r_dip, r_mom, r_mkt, mk, None, np.concatenate([[1.0], np.cumprod(1 + r_mom)]), "1990-01-01",
               [("1929 crash", "1929-09-03", "1932-06-01"), ("1973 bear", "1973-01-11", "1974-10-03"), ("2008 crisis", "2007-10-09", "2009-03-09"), ("2009 rebound", "2009-03-09", "2010-03-09")])
@@ -99,17 +88,9 @@ def main():
 def shock_grid():
     """Robustness of the shock trigger: drop threshold × lookback × hold × scale, decade and century; cost vs no rule."""
     import itertools
-    sets = []
-    cur = datasets.load("A_alpaca_names_2016"); sec = datasets.load("D_alpaca_sectors_2016"); dates = cur.dates; i0 = dates.index("2017-01-03")
-    SEC = fastbt.run(sec, LIVE, "2017-01-03", None)["_curve"]; d = dates[i0:]
-    def etf(sym):
-        v = datasets.alpaca(sym); return np.array([v.get(t, np.nan) for t in d])
-    MT, SP = etf("MTUM"), etf("SPMO"); n = min(len(SEC), len(MT), len(SP)); spy = cur.spy[i0:i0 + n]
-    sets.append(("decade", d[:n], SEC[1:n] / SEC[:n - 1] - 1, 0.5 * (MT[1:n] / MT[:n - 1] - 1) + 0.5 * (SP[1:n] / SP[:n - 1] - 1), spy[1:] / spy[:-1] - 1, spy, "2022-01-01"))
-    ind = datasets.load("F_french_49ind_1926"); mom = datasets.french_levels("10_Portfolios_Prior_12_2_Daily.csv")
-    r = fastbt.run(ind, LIVE, "1927-07-01", None); fd = ind.dates[ind.dates.index(r["start"]):]
-    dip = r["_curve"]; mk = r["_spy_curve"]; hi = np.array([mom["Hi PRIOR"].get(x, np.nan) for x in fd])
-    sets.append(("century", fd, dip[1:] / dip[:-1] - 1, np.nan_to_num(hi[1:] / hi[:-1] - 1), mk[1:] / mk[:-1] - 1, mk, "1990-01-01"))
+    b = books.decade(etfs=("MTUM", "SPMO")); c = books.century()
+    sets = [("decade", b["d"], b["r"]["sec"], 0.5 * b["r"]["MTUM"] + 0.5 * b["r"]["SPMO"], b["r"]["mkt"], b["spy"], "2022-01-01"),
+            ("century", c["d"], c["r"]["dip"], c["r"]["mom"], c["r"]["mkt"], c["mkt"], "1990-01-01")]
     grid = list(itertools.product((-0.05, -0.07, -0.10), (5, 10, 20), (10, 20, 40), (0.5, 0.25, 0.0)))
     for name, dd, r_dip, r_mom, r_mkt, level, split in sets:
         n = len(r_dip); ks = next(k for k, x in enumerate(dd) if x >= split)

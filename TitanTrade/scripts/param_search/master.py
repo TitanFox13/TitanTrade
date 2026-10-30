@@ -13,12 +13,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np  # noqa: E402
 
-import datasets  # noqa: E402
+import books  # noqa: E402
 import fastbt  # noqa: E402
+from books import ERAS, LIVE, prev, shock_flags, sma_above  # noqa: E402,F401  (Decision 085: re-exported for the scripts that import master)
 
-LIVE = dict(dip_pct=0.08, dip_lookback_days=90, trend_sma_days=150, max_hold_days=60, tp_pct=0.20, stop_pct=0.12,
-            slot_pct=0.25, max_slots=3, insurance_sma_days=200, insurance_breadth=0.5, insurance_scale=1.0)
-WEIGHTS = [0.0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0]
+WEIGHTS =[0.0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0]
 INS = {"off": None, "x0.5": 0.5, "cash": 0.0}
 SHOCK = {"off": None, "-7/10/20/.5": (-0.07, 10, 20, 0.5), "-7/5/10/.5": (-0.07, 5, 10, 0.5), "-5/10/20/.5": (-0.05, 10, 20, 0.5), "-7/10/20/.25": (-0.07, 10, 20, 0.25)}
 VOLT = {"off": None, "15%": 0.15, "20%": 0.20}
@@ -26,27 +25,6 @@ VOLT = {"off": None, "15%": 0.15, "20%": 0.20}
 
 def cagr(c):
     return fastbt.metrics(c, [])["cagr"]
-
-
-def prev(a):
-    return np.concatenate([[np.nan], a[:-1]])
-
-
-def sma_above(x, n=200):
-    out = np.full(len(x), np.nan)
-    for i in range(n, len(x)):
-        out[i] = 1.0 if x[i] > x[i - n:i].mean() else 0.0
-    return out
-
-
-def shock_flags(level, thr, look, hold):
-    n = len(level) - 1
-    ret = np.array([np.nan] * look + [level[i] / level[i - look] - 1 for i in range(look, n + 1)])[1:]
-    ret = prev(ret); e = np.zeros(n, dtype=bool); k = 0
-    for i in range(n):
-        if ret[i] < thr: k = hold
-        e[i] = k > 0; k = max(0, k - 1)
-    return e
 
 
 def roll_vol(r, n=20):
@@ -125,15 +103,8 @@ def walk_forward(rows, label, key_train, key_test):
 
 
 def decade():
-    cur = datasets.load("A_alpaca_names_2016"); sec = datasets.load("D_alpaca_sectors_2016"); dates = cur.dates; i0 = dates.index("2017-01-03")
-    _, _, spy_above, breadth = cur.pre(90, 150, 200)
-    SEC = fastbt.run(sec, LIVE, "2017-01-03", None)["_curve"]; CUR = fastbt.run(cur, LIVE, "2017-01-03", None)["_curve"]; d = dates[i0:]
-    def etf(sym):
-        v = datasets.alpaca(sym); return np.array([v.get(t, np.nan) for t in d])
-    MT, SP = etf("MTUM"), etf("SPMO"); n = min(len(SEC), len(CUR), len(MT), len(SP)); d = d[:n]; spy = cur.spy[i0:i0 + n]
-    r = {"sec": SEC[1:n] / SEC[:n - 1] - 1, "cur": CUR[1:n] / CUR[:n - 1] - 1, "MTUM": MT[1:n] / MT[:n - 1] - 1, "SPMO": SP[1:n] / SP[:n - 1] - 1, "mkt": spy[1:] / spy[:-1] - 1}
+    b = books.decade(curated=True, etfs=("MTUM", "SPMO")); d, spy, r, bear, n = b["d"], b["spy"], dict(b["r"]), b["bear"], b["n"]
     r["both"] = 0.5 * r["MTUM"] + 0.5 * r["SPMO"]
-    bear = (prev(spy_above[i0:i0 + n][1:]) == 0.0) & (prev(breadth[i0:i0 + n][1:]) < 0.5)
     shocks = {k: (None if v is None else shock_flags(spy, *v[:3])) for k, v in SHOCK.items()}
     volt_vol_holder[0] = roll_vol(r["mkt"])
     def mom12(rr):
@@ -165,16 +136,12 @@ def decade():
 
 
 def century():
-    ind = datasets.load("F_french_49ind_1926"); mom = datasets.french_levels("10_Portfolios_Prior_12_2_Daily.csv")
-    r0 = fastbt.run(ind, LIVE, "1927-07-01", None); d = ind.dates[ind.dates.index(r0["start"]):]
-    dip = r0["_curve"]; mk = r0["_spy_curve"]; hi = np.array([mom["Hi PRIOR"].get(x, np.nan) for x in d])
-    r = {"dip": dip[1:] / dip[:-1] - 1, "mom": np.nan_to_num(hi[1:] / hi[:-1] - 1), "mkt": mk[1:] / mk[:-1] - 1}
-    bear = prev(sma_above(mk)[1:]) == 0.0
+    c = books.century(); d, mk, r, bear = c["d"], c["mkt"], c["r"], c["bear"]
     shocks = {k: (None if v is None else shock_flags(mk, *v[:3])) for k, v in SHOCK.items()}
     volt_vol_holder[0] = roll_vol(r["mkt"])
     lvl = np.concatenate([[1.0], np.cumprod(1 + r["mom"])]); n = len(lvl)
     m12 = prev(np.array([np.nan] * 252 + [lvl[i - 21] / lvl[i - 252] - 1 for i in range(252, n)])[1:]) > 0
-    eras = [("1927-07-01", "1950-01-01"), ("1950-01-01", "1975-01-01"), ("1975-01-01", "2000-01-01"), ("2000-01-01", "2026-09-01")]
+    eras = ERAS
     rows = []
     for w, ins, sh, vt, own in itertools.product(WEIGHTS, INS, SHOCK, VOLT, (False, True)):
         if w == 1.0 and own:
@@ -195,15 +162,8 @@ def century():
 
 def finalists():
     """The consensus region of the grid, decade and century, with crash-episode behaviour (book minus market, peak → trough)."""
-    cur = datasets.load("A_alpaca_names_2016"); sec = datasets.load("D_alpaca_sectors_2016"); dates = cur.dates; i0 = dates.index("2017-01-03")
-    _, _, spy_above, breadth = cur.pre(90, 150, 200)
-    SEC = fastbt.run(sec, LIVE, "2017-01-03", None)["_curve"]; CUR = fastbt.run(cur, LIVE, "2017-01-03", None)["_curve"]; d = dates[i0:]
-    def etf(sym):
-        v = datasets.alpaca(sym); return np.array([v.get(t, np.nan) for t in d])
-    MT, SP = etf("MTUM"), etf("SPMO"); n = min(len(SEC), len(CUR), len(MT), len(SP)); d = d[:n]; spy = cur.spy[i0:i0 + n]
-    r = {"sec": SEC[1:n] / SEC[:n - 1] - 1, "cur": CUR[1:n] / CUR[:n - 1] - 1, "MTUM": MT[1:n] / MT[:n - 1] - 1, "SPMO": SP[1:n] / SP[:n - 1] - 1, "mkt": spy[1:] / spy[:-1] - 1}
+    b = books.decade(curated=True, etfs=("MTUM", "SPMO")); d, spy, r, bear = b["d"], b["spy"], dict(b["r"]), b["bear"]
     r["both"] = 0.5 * r["MTUM"] + 0.5 * r["SPMO"]
-    bear = (prev(spy_above[i0:i0 + n][1:]) == 0.0) & (prev(breadth[i0:i0 + n][1:]) < 0.5)
     shock = shock_flags(spy, -0.07, 10, 20); volt_vol_holder[0] = roll_vol(r["mkt"]); shock_scale_holder[0] = 0.5
     eps = [("covid", "2020-02-19", "2020-03-23"), ("2022", "2022-01-03", "2022-10-12"), ("2025", "2025-02-19", "2025-04-08"), ("2023yr", "2023-01-03", "2023-12-29")]
     def ep(rr):
@@ -224,13 +184,10 @@ def finalists():
         print(f"{label:52} {sc['excess']:+7.1%} {sc['is']:+6.1%} {sc['oos']:+6.1%} | {sc['dd']:6.1%} | {sc['sharpe']:6.2f} | {sc['worst_year']:+8.1%} {sc['roll3_pos']:5.0%} | " + " ".join(f"{x:+7.1%}" for x in e))
     print(f"{'SPY':52} {'':>7} {'':>6} {'':>6} | {sc['mkt_dd']:6.1%} | {sc['mkt_sharpe']:6.2f} |")
     # century
-    ind = datasets.load("F_french_49ind_1926"); mom = datasets.french_levels("10_Portfolios_Prior_12_2_Daily.csv")
-    r0 = fastbt.run(ind, LIVE, "1927-07-01", None); fd = ind.dates[ind.dates.index(r0["start"]):]
-    dip = r0["_curve"]; mk = r0["_spy_curve"]; hi = np.array([mom["Hi PRIOR"].get(x, np.nan) for x in fd])
-    rc = {"dip": dip[1:] / dip[:-1] - 1, "mom": np.nan_to_num(hi[1:] / hi[:-1] - 1), "mkt": mk[1:] / mk[:-1] - 1}
-    bearc = prev(sma_above(mk)[1:]) == 0.0; shockc = shock_flags(mk, -0.07, 10, 20); volt_vol_holder[0] = roll_vol(rc["mkt"])
-    eras = [("1927-07-01", "1950-01-01"), ("1950-01-01", "1975-01-01"), ("1975-01-01", "2000-01-01"), ("2000-01-01", "2026-09-01")]
-    epc = [("1929", "1929-09-03", "1932-06-01"), ("1973", "1973-01-11", "1974-10-03"), ("2008", "2007-10-09", "2009-03-09"), ("2009reb", "2009-03-09", "2010-03-09")]
+    c = books.century(); fd, mk, rc, bearc = c["d"], c["mkt"], c["r"], c["bear"]
+    shockc = shock_flags(mk, -0.07, 10, 20); volt_vol_holder[0] = roll_vol(rc["mkt"])
+    eras = ERAS
+    epc =[("1929", "1929-09-03", "1932-06-01"), ("1973", "1973-01-11", "1974-10-03"), ("2008", "2007-10-09", "2009-03-09"), ("2009reb", "2009-03-09", "2010-03-09")]
     def epcf(rr):
         c = np.concatenate([[1.0], np.cumprod(1 + rr)]); m = np.concatenate([[1.0], np.cumprod(1 + rc["mkt"])]); out = []
         for _, a, b in epc:

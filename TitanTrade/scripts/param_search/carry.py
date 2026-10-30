@@ -21,46 +21,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np  # noqa: E402
 
-import datasets  # noqa: E402
-import fastbt  # noqa: E402
 import master  # noqa: E402
-
-LIVE = master.LIVE
-
-
-def rf_daily():
-    cols, rows = datasets._french_section(f"{datasets.S}/french/F-F_Research_Data_Factors_daily.csv", ",Mkt-RF")
-    i = cols.index("RF")
-    return {d: rows[d][i] / 100 for d in sorted(rows)}
-
-
-def align_rf(dates, rf):
-    """RF for each return day (dates[1:]); a date missing from the French file carries the last known rate."""
-    out = np.zeros(len(dates) - 1); last = 0.0
-    for k, d in enumerate(dates[1:]):
-        last = rf.get(d, last); out[k] = last
-    return out
-
-
-def exposure(bear, shock):
-    return np.minimum(np.where(bear, 0.5, 1.0), np.where(shock, 0.5, 1.0))
-
-
-def sets():
-    out = []
-    cur = datasets.load("A_alpaca_names_2016"); sec = datasets.load("D_alpaca_sectors_2016"); dates = cur.dates; i0 = dates.index("2017-01-03")
-    _, _, spy_above, breadth = cur.pre(90, 150, 200)
-    SEC = fastbt.run(sec, LIVE, "2017-01-03", None)["_curve"]; d = dates[i0:]
-    v = datasets.alpaca("SPMO"); SP = np.array([v.get(t, np.nan) for t in d]); n = min(len(SEC), len(SP)); d = d[:n]; spy = cur.spy[i0:i0 + n]
-    bear = (master.prev(spy_above[i0:i0 + n][1:]) == 0.0) & (master.prev(breadth[i0:i0 + n][1:]) < 0.5)
-    out.append(("decade", d, spy, {"dip": SEC[1:n] / SEC[:n - 1] - 1, "mom": SP[1:n] / SP[:n - 1] - 1, "mkt": spy[1:] / spy[:-1] - 1}, bear, "2022-01-01", None))
-    ind = datasets.load("F_french_49ind_1926"); mom = datasets.french_levels("10_Portfolios_Prior_12_2_Daily.csv")
-    r0 = fastbt.run(ind, LIVE, "1927-07-01", None); fd = ind.dates[ind.dates.index(r0["start"]):]
-    dip = r0["_curve"]; mk = r0["_spy_curve"]; hi = np.array([mom["Hi PRIOR"].get(x, np.nan) for x in fd])
-    out.append(("century", fd, mk, {"dip": dip[1:] / dip[:-1] - 1, "mom": np.nan_to_num(hi[1:] / hi[:-1] - 1), "mkt": mk[1:] / mk[:-1] - 1},
-                master.prev(master.sma_above(mk)[1:]) == 0.0, "1975-01-01",
-                [("1927-07-01", "1950-01-01"), ("1950-01-01", "1975-01-01"), ("1975-01-01", "2000-01-01"), ("2000-01-01", "2026-09-01")]))
-    return out
+from books import LIVE, align_rf, exposure, rf_daily, sets  # noqa: E402,F401  (Decision 085: the builders live in books.py; re-exported here for the scripts that import carry)
 
 
 def main():
