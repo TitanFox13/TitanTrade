@@ -122,6 +122,18 @@ it cannot decide return, and the drawdown leg as first written (≤ 0.7 × SPY i
 ≥ 10 % drawdown) fails the design's own backtest 3 times in 5, because in a fast 10–19 %
 dip the insurance and the shock trigger barely engage, by design.
 
+### Bonds Rally When the Book Steps Aside; Gold Did Once (Decision 080)
+The idle half of the book, parked in a 10-year Treasury instead of bills, earned about
+0.8 points a year more over fifty-five years with a drawdown five points shallower, and
+beat fifty random stretches of the bond's own history on every window — because the
+sessions the book is de-risked are, more often than not, the sessions rates are being cut:
+1982, 2000–02, 2008, 2020. It loses exactly when rates rise with the fall — 1962–75 and
+2022 — which is the one bear the operator fears most, so the long bond is the dial and the
+short Treasury, which keeps a third of the gain with a tenth of the duration and passes
+every check, is the pick. Gold's apparent crisis property was 1973–74 in every construction.
+The parking place for de-risked money is a question about *what happens to rates in a
+bear*, and the century's answer is "usually they fall, occasionally they do not".
+
 ### A Hedge That Worked Once Is an Episode (Decision 079)
 Parking the book's de-risked half in gold instead of cash beat bills by 1.4 points a
 year over fifty-five years, in both halves, with a shallower drawdown — the pre-registered

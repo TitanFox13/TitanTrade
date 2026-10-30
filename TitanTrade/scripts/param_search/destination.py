@@ -137,7 +137,8 @@ def main():
         results[name] = panel(f"B8 — {name}", d, {k: rs[k] for k in ("dip", "mom", "mkt")}, rs["e"], dests, split, eras, [x for x in EPS if x[1] >= a], rng, sleeve=b10)
     _, dd, spy, rd, bear_d, split_d, _ = dec; e_d = carry.exposure(bear_d, master.shock_flags(spy, -0.07, 10, 20)); bills_d = carry.align_rf(dd, rf)
     etf = {k: rets(datasets.alpaca(k), dd) for k in ("IEF", "TLT", "GLD")}
-    dests_d = {"cash": np.zeros(len(dd) - 1), "bills": bills_d, "IEF (7–10-year)": etf["IEF"], "TLT (20-year+)": etf["TLT"], "GLD": etf["GLD"], "bills 50 / GLD 50": 0.5 * bills_d + 0.5 * etf["GLD"], "IEF 50 / GLD 50": 0.5 * etf["IEF"] + 0.5 * etf["GLD"], "the market": rd["mkt"]}
+    dests_d = {"cash": np.zeros(len(dd) - 1), "bills": bills_d, "the 2-year (constructed)": np.nan_to_num(bond_rets(y2, dd, 2)), "the 10-year (constructed)": np.nan_to_num(bond_rets(y10, dd, 10)), "IEF (7–10-year)": etf["IEF"], "TLT (20-year+)": etf["TLT"], "GLD": etf["GLD"],
+               "bills 50 / GLD 50": 0.5 * bills_d + 0.5 * etf["GLD"], "IEF 50 / GLD 50": 0.5 * etf["IEF"] + 0.5 * etf["GLD"], "the market": rd["mkt"]}
     results["decade"] = panel("B8 — the decade with the ETFs", dd, {k: rd[k] for k in ("dip", "mom", "mkt")}, e_d, dests_d, split_d, None, EPS_DEC, rng, through="2025-12-31")
     # ---------------- the pre-registered verdict ----------------
     R = results["1971 →"]; sb, _, dd_b = R["bills"]; sc_, _, _ = R["cash"]; R62 = results["1962 →"]
