@@ -122,6 +122,17 @@ it cannot decide return, and the drawdown leg as first written (≤ 0.7 × SPY i
 ≥ 10 % drawdown) fails the design's own backtest 3 times in 5, because in a fast 10–19 %
 dip the insurance and the shock trigger barely engage, by design.
 
+### A Hedge That Worked Once Is an Episode (Decision 079)
+Parking the book's de-risked half in gold instead of cash beat bills by 1.4 points a
+year over fifty-five years, in both halves, with a shallower drawdown — the pre-registered
+bar, met. Then the addendum: gold earned 14.6 % a year during the book's de-risked windows
+over 1971 → and 7.0 % during them from 1975 →, against 7.2 % at all other times. The whole
+crisis property was 1973–74, when gold rose 186 % in the two years the book was half out.
+From 1975 the idle half in gold sat at the median of fifty random stretches of gold's own
+history, and behind bills in the first half. A rule that passes on a long window can still
+rest on one episode; the placebo and the window without it are how you find out, and the
+century's four-era standard exists for exactly this.
+
 ### The Fall Is the Fact, the Fear Gauge Is the State (Decision 078)
 The VIX was tested as the shock trigger in twenty-six forms. A VIX level fires three
 times as often as a 7 % fall in ten sessions, because fear stays high for months after a

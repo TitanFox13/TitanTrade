@@ -160,5 +160,26 @@ def main():
     print(f"  → {'DECISION PROPOSED' if any(ok_sleeve.values()) or ok_dest else 'NO — gold stays closed; the decade was the 2020s'}")
 
 
+def main_addendum():
+    from breadth2 import block_shuffle
+    rng = np.random.default_rng(79); _, cen = carry.sets(); rf = carry.rf_daily()
+    _, fd, mk, rc, bear_c, _, _ = cen; e_c = carry.exposure(bear_c, master.shock_flags(mk, -0.07, 10, 20)); glv = gold_step(fd); rg_full = np.nan_to_num(glv[1:] / glv[:-1] - 1)
+    out = {}
+    for a, split, eras, label in ((FLOAT_START, SPLIT71, ERAS71, "1971 →"), ("1975-01-02", "2000-09-01", [("1975-01-02", "2000-01-01"), ("2000-01-01", "2026-09-01")], "1975 → (without 1973–74)")):
+        d, rs = cut(fd, {"dip": rc["dip"], "mom": rc["mom"], "mkt": rc["mkt"], "e": e_c, "g": rg_full}, a, "2026-08-31"); e, rg, m = rs["e"], rs["g"], rs["mkt"]; core = 0.4 * rs["dip"] + 0.6 * rs["mom"]; rfd = carry.align_rf(d, rf)
+        sc = lambda rr: score(rr, m, d, split, eras)  # noqa: E731
+        book = e * core; sb, sbl, sg = sc(book), sc(book + (1 - e) * rfd), sc(book + (1 - e) * rg)
+        draws = np.array([sc(book + (1 - e) * block_shuffle(rg, rng))["excess"] for _ in range(50)])
+        on = e < 1
+        print(f"\n=== addendum, {label} {d[0]} → {d[-1]}: gold {np.mean(rg[on]) * 252:+.1%}/yr while the book is de-risked ({np.mean(on):.0%} of sessions) vs {np.mean(rg) * 252:+.1%}/yr overall; the market {np.mean(m[on]) * 252:+.1%}/yr while de-risked")
+        for lab, s in (("book, idle in cash", sb), ("idle in bills", sbl), ("idle in gold", sg)):
+            print(f"  {lab:22} {s['excess']:+.2%} ({s['is']:+.1%} / {s['oos']:+.1%}), DD {s['dd']:.1%}, Sharpe {s['sharpe']:.2f}; eras " + " ".join(f"{x:+.1%}" for x in s["eras"]))
+        print(f"  A1 placebo (gold's returns block-shuffled, 50 draws): median {np.median(draws):+.2%} [p10 {np.percentile(draws, 10):+.2%} … p90 {np.percentile(draws, 90):+.2%}]; idle in gold {sg['excess']:+.2%} is above {np.mean(sg['excess'] > draws):.0%} of draws")
+        out[label] = (sb, sbl, sg, draws)
+    sb, sbl, sg, draws = out["1971 →"]; sb2, sbl2, sg2, _ = out["1975 → (without 1973–74)"]
+    a1 = sg["excess"] > np.percentile(draws, 90); a2 = sg2["is"] > sbl2["is"] and sg2["oos"] > sbl2["oos"]
+    print(f"\n=== the destination's verdict: A1 placebo p90 {'cleared' if a1 else 'NOT cleared'}; A2 from 1975 beats bills in both halves {'yes' if a2 else 'no'} ({sg2['is']:+.1%} / {sg2['oos']:+.1%} vs {sbl2['is']:+.1%} / {sbl2['oos']:+.1%}) → {'PROPOSED' if a1 and a2 else 'a candidate — folded into B8 (the de-risk destination judged with bonds and bills)'}")
+
+
 if __name__ == "__main__":
-    main()
+    main_addendum() if "--addendum" in sys.argv else main()
