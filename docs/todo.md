@@ -35,9 +35,9 @@ Operator's call after the component audit: "fully convert with all the points ma
 
 ## Phase 2.24: The chaos drill — the executor against a lying broker (2026-10-30) — Decision 084
 Operator's go ("Go, chaos test"). Scenarios S1–S9, invariants I1–I6, the expected outcome per scenario (S1 core legs and S2 expected to fail I3; S3b a design question) and the drop rule committed before the build (the Decision 084 stub).
-- [ ] `tests/test_chaos.py`: the stateful fake broker with Alpaca's share accounting, patched into executor / protection / entries / core_allocation and the quote, the HTTP layer counted; one `execute_trades` per scenario; the invariants.
-- [ ] Run; record every finding in Decision 084 with its path; a violating scenario stays as a strict expected failure until a fix lands on the operator's go.
-- [ ] Propose the fix(es) in one question to the operator (the suspect-account guard; the quote-confirmed target exit); implement and deploy only on the go.
+- [x] `tests/test_chaos.py`: the stateful fake broker with Alpaca's share accounting, patched into executor / protection / entries / core_allocation and the quote, the HTTP layer counted; one `execute_trades` per scenario; the invariants. 12 tests (9 pass, 3 strict expected failures), suite 289, ruff clean.
+- [x] Run and recorded in Decision 084: seven guards hold; **S1 / S2** — the core legs rebalance on a phantom account value in both directions (−79 %: all SPY and 312 of 400 SPMO sold at the market); **S3b** — a target exit fires on an unconfirmed mark. Each stays a strict expected failure until its fix lands.
+- [ ] **Fixes proposed, on the operator's go**: (1) one account-value check at the top of `execute_trades` (the breaker's ±50 % rule, a `risk_manager` helper) — when suspect: log, alert, skip the core legs, the entries and the target / holding exits, keep stop coverage; (2) `_manage_held` confirms a target exit with the live quote (as gap-down does). Then the three markers come off; deploy both images, no config change.
 
 ## Phase 2.23: The "how to read a checkup" page (2026-10-30) — Decision 083
 Operator: "let's do the next task" after Decision 082. Docs only, no deploy.

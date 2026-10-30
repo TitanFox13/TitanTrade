@@ -118,7 +118,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 ## Test Suite (zero token spend)
 
-277 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
+289 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
 
 | File | Covers |
 |------|--------|
@@ -134,6 +134,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 | `test_universe_switch.py` | shadow list and design in config, the staged Decision 070 file, HOLD survival of a removed name, the window re-stamp, ETF sectors, the correlation gate on ETFs, the curator on the shadow list, `--shadow` |
 | `test_readiness.py` | the T-bill leg (target, core membership, plan field, executor order both ways, off by default) and the heartbeat ping |
 | `test_fill_ledger.py` | gap maths, Eastern session date, idempotent update with missing bars, the API endpoint and the summary field |
+| `test_chaos.py` | the chaos drill (084): a stateful fake broker with Alpaca's share accounting fed into whole `execute_trades` runs — phantom equity both ways, phantom marks both ways, a split-like gap, a vanished stop, a refused sell, a refused cancel, a dead network, duplicate entries — against the invariants (nothing bare, nothing doubled, no order on bad data, only prescribed actions, the peak untouched, no call escapes); the three open findings are strict expected failures |
 | `test_backtest_two_sleeve.py` | the two-sleeve backtester (081): the momentum leg at its target and only moved outside the band, the slot on the dip sleeve (10 % / 25 %), the shock trigger scaling both legs and pausing entries, min() not the product, `momentum_weight` 0 = the dip-only book |
 
 ```bash

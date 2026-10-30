@@ -1,6 +1,6 @@
 # Important Decisions Log
 
-## Decision 084: The chaos drill — one executor run against a broker that lies, refuses and vanishes; nothing bare, nothing doubled (roadmap Track F, operator's go, 2026-10-30) — **pre-registered, build in progress**
+## Decision 084: The chaos drill — one executor run against a broker that lies, refuses and vanishes; nothing bare, nothing doubled (roadmap Track F, operator's go, 2026-10-30) — **run: seven guards hold, one real hole (the core legs trade on a phantom account value), one small one (a target exit on an unconfirmed mark); fixes proposed, awaiting the operator's go**
 **Date**: 2026-10-30
 **Why**: every guard in the executor was written after a production incident — the CRWD split that sold a healthy position at an artificial bottom and then showed a phantom $22,828 account (Decision 054), the FCX gap-down sell rejected with 40310000 because the cancelled stop still held the shares (Decisions 037 / 042 / 063), the bracket legs that die at the close (Decision 060), the stop that never got placed. Each guard has its own unit test; no test has ever fed the executor several anomalies in one run and checked the one property that matters for real money: **after the run every held dip position has exactly one stop at the plan's level, no order was placed on bad data, and nothing was bought or sold twice.** Written before the drill ran.
 
@@ -30,7 +30,26 @@
 
 **Drop rule**: a scenario that violates an invariant is **a finding, not a failed task** — the drill is the deliverable. Each finding is recorded here with the exact path; the scenario stays in the suite as a *strict expected failure* (so the suite is green and the gap is visible) until a fix lands **on the operator's go**; a fix is a guard that does less on bad data, never a relaxation; the expected failures above (S1 core legs, S2) would be closed by one guard at the top of `execute_trades` — on a suspect account value do nothing this run but stop coverage, and alert. S3b is a design question for the operator (confirm a target exit with the live quote, as gap-down already does). Nothing live changes from the drill itself; a fix is a deploy with its own go.
 
-*The drill's results follow in this Decision once it has run.*
+**Results** (`tests/test_chaos.py`, 12 tests: 9 pass, 3 strict expected failures; the suite 289, ruff clean). The book of the drill: DXCM 100 sh (+5 %) and URI 10 sh (+10 %) with their stops at 70.40 / 880, SPMO 400 sh at 54.8 % of equity, SPY 20 sh, cash 15.8 %, the peak file at $100,000, a plan with the two HOLD items and one NEW item (XLC). Baseline: one bracket for XLC and nothing else.
+
+| # | result | detail |
+|---|---|---|
+| S1 phantom equity −79 % | entries blocked ✓, the peak untouched ✓; **core legs FAIL I3 — confirmed** | the run sold **all 20 SPY and 312 of 400 SPMO at the market** toward targets computed on $21,000. On the live book that is ≈ $43,000 of ETFs sold on a data glitch, bought back at the next run with the value corrected — two sets of costs and the gap in between |
+| S2 phantom equity +60 % | the peak refused the spike ✓; **core buys FAIL I3 — confirmed** | SPY +15 and SPMO +2 bought with real cash toward targets computed on $160,000; the entry was stopped only by the dust gate (the 5 % reserve on a phantom $160,000 ate the cash), not by a suspect-value check — the breaker trips on the downside alone |
+| S3 phantom low mark | ✓ | gap-down protection skipped on the live-quote cross-check, no target exit, the stop stayed |
+| S3b phantom high mark | **FAIL I3 — confirmed** | DXCM sold as a "target" exit on a +37 % mark while the quote was unchanged: `_manage_held` reads `unrealized_plpc` with no quote cross-check (the sale fills at the real price — an early exit on bad data, not a loss) |
+| S4 split-like gap | ✓ / ✓ | with the announcement: skipped and alerted, the stop kept; without: sold by gap-down protection |
+| S5 vanished stop | ✓ | exactly one stop re-placed, at the plan's 70.40; URI's existing stop left alone |
+| S6 refused sell after a settled cancel | ✓ | the stop restored at 880, the position kept for the next run, no SELL recorded |
+| S7 refused cancel | ✓ | nothing sold, the one stop stands (the "CRITICAL naked" log line is misleading — the position is covered; cosmetic) |
+| S8 dead network | ✓ | the run raises before any order (the scheduler marks the job failed — loud and idle, the right shape) |
+| S9 pending / held name | ✓ / ✓ | not bought again; a held name with a NEW item is neither bought nor orphaned |
+
+**Verdict.** The guards written after each incident hold where they were written: the split mark, the deep gap, the vanished stop, the 40310000 race, the refused cancel, the dead network, the duplicate entry. **The one real hole is the account value**: the suspect-value guard protects the entry gate and the peak file, and nothing else reads it — the core legs (now 60 % of the book plus the SPY residual) rebalance toward targets computed on whatever number the broker reports, in both directions. July 2026's phantom $22,828 happened before the core legs existed in their present size; under design 070 it would move about $43,000. The second, smaller finding is the target exit on an unconfirmed mark.
+
+**Proposed fixes (not built; the operator's go)** — both guards that do *less* on bad data: (1) `execute_trades` checks the account value against the recorded peak once, right after reading it (the same ±50 % rule as the breaker, one helper in `risk_manager`); when suspect it logs, alerts, **skips the core legs, the entries and the target / holding exits for the run, and still runs stop coverage** (plan levels, no account value) — "on a suspect account value the run only keeps the stops"; (2) `_manage_held` confirms a target exit with the live quote before selling, as gap-down protection already does, and skips with a warning when the quote does not confirm. About twenty lines and the three expected failures turn into passes (strict, so the markers come off). Deploy = both images, no config change, no window restart. Nothing live changes from the drill.
+
+**Scripts / docs**: `tests/test_chaos.py` (the fake broker, nine scenarios, the invariants); `docs/features.md` (the test table), `CLAUDE.md` (the count); roadmap Track F ✅ with the findings; todo Phase 2.24.
 
 ## Decision 083: A plain-language "how to read a checkup" page for the operator (roadmap Track F, operator: "let's do the next task", 2026-10-30)
 **Date**: 2026-10-30
