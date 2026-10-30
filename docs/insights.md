@@ -122,6 +122,28 @@ it cannot decide return, and the drawdown leg as first written (≤ 0.7 × SPY i
 ≥ 10 % drawdown) fails the design's own backtest 3 times in 5, because in a fast 10–19 %
 dip the insurance and the shock trigger barely engage, by design.
 
+### A Revised Series Knows the Future (Decision 077)
+The Chicago Fed's financial-conditions index passed every pre-registered test as the
+insurance's second signal over fifty-five years, beating all twenty placebo draws. It is
+also re-estimated at every release, and the FRED archive shows the week of 3 April 2020
+read +0.07 when it was published and +0.31 today — a quarter of a point, with March's sign
+flipped. The unrevised credit spread, tested the same way over the same window and over the
+century, did not reproduce the result; neither did the VIX. A series whose history is
+rewritten with hindsight will date the crises cleanly, and a rule fitted to it inherits
+that hindsight. Any rule on a revised macro series has to be built on first-release data,
+which for these indices exists only from 2011; before that there is nothing a live reader
+could have seen.
+
+### A Slow Stress Signal Confirms the Bear Late (Decision 077)
+Moody's spread between Baa and Aaa bonds crossed 1.5 points in the autumn of 1974 and in
+October 2008 — after the first leg of each bear, which is the leg the insurance exists
+for. Gating the insurance on it kept 5 of the 21 points the 200-day rule earned in
+1973–74 and 10 of the 21 in 2008, and earned its keep only in the rebounds, where it
+switched the insurance off before the moving average did. That is the shock-release
+finding from the other side: the territory a credit signal can improve is the recovery,
+and the price is the crash. Breadth, the VIX and credit spreads have now all failed as a
+second signal; the 200-day line with sector breadth stays.
+
 ### Equal Weight Gives the Premium Back (Decision 076)
 Our own profitability picks beat the equal-weight universe by two points a year over the
 decade and still lost to SPY, because holding fifty names in equal slots costs about three

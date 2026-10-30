@@ -186,5 +186,109 @@ def main():
     print(f"  → {'DECISION PROPOSED' if verdict else 'NO — the insurance keeps its two signals; credit stress joins member breadth in Track D'}")
 
 
+EPS_CENT = [("1929-32", "1929-09-03", "1932-06-01"), ("1937-38", "1937-03-10", "1938-03-31"), ("1973-74", "1973-01-11", "1974-10-03"), ("1987", "1987-08-25", "1987-12-04"), ("2000-02", "2000-03-24", "2002-10-09"),
+            ("2008", "2007-10-09", "2009-03-09"), ("2020", "2020-02-19", "2020-03-23"), ("2022", "2022-01-03", "2022-10-12")]
+ERAS4 = [("1927-07-01", "1950-01-01"), ("1950-01-01", "1975-01-01"), ("1975-01-01", "2000-01-01"), ("2000-01-01", "2026-09-01")]
+
+
+def available(avail_dates, values, dd):
+    """The latest value whose availability date ≤ the session, on dd[1:] with the previous-close convention."""
+    out = np.full(len(dd), np.nan)
+    for i, d in enumerate(dd):
+        k = bisect.bisect_right(avail_dates, d) - 1
+        if k >= 0: out[i] = values[k]
+    return master.prev(out)[1:]
+
+
+def monthly_known(series, dd):
+    """A monthly series dated the first of its month, read one month late: available from the first day of the month after next."""
+    rows = []
+    for d, v in sorted(series.items()):
+        y, m = int(d[:4]), int(d[5:7]); m2 = m + 2; y2 = y + (m2 - 1) // 12; m2 = (m2 - 1) % 12 + 1; rows.append((f"{y2:04d}-{m2:02d}-01", v))
+    return available([r[0] for r in rows], [r[1] for r in rows], dd)
+
+
+def realtime_known(name, dd):
+    """The first-release values (FRED API output_type 4), each available from its release date."""
+    rows = []
+    for line in open(f"{datasets.S}/external/fred/{name}_initial.csv").read().splitlines()[1:]:
+        d, rel, v = line.split(",")[:3]
+        try: rows.append((rel, float(v)))
+        except ValueError: pass
+    rows.sort(); return available([r[0] for r in rows], [r[1] for r in rows], dd)
+
+
+def era_dd(rr, dd, eras):
+    c = np.concatenate([[1.0], np.cumprod(1 + rr)]); out = []
+    for a, b in eras:
+        ia = next(k for k, d in enumerate(dd) if d >= a); ib = max(k for k, d in enumerate(dd) if d <= b); w = c[ia:ib + 1]; out.append(float((w / np.maximum.accumulate(w) - 1).min()))
+    return out
+
+
+def report2(title, dd, r, lvl, incumbent, inds, split, eras, eps, rng, extra=()):
+    """inds: {label: (indicator on dd[1:], thresholds, the placebo threshold)}; extra: [(label, indicator array, threshold)] compared as single lines."""
+    shock = master.shock_flags(lvl, -0.07, 10, 20); core = 0.4 * r["dip"] + 0.6 * r["mom"]; m = r["mkt"]
+    book = lambda bear: carry.exposure(bear, shock) * core  # noqa: E731
+    sc = lambda rr: master.score(rr, m, dd, split, eras)  # noqa: E731
+    def line(label, rr, bear, pl=None):
+        s = sc(rr); e = " ".join(f"{ep(rr, m, dd, a, b):+5.0%}/{ep(rr, m, dd, a, b, rebound=True):+4.0%}" for _, a, b in eps)
+        print(f"{label:44} {s['excess']:+7.2%} {s['is']:+6.1%} {s['oos']:+6.1%} | {s['dd']:6.1%} {s['sharpe']:5.2f} | {np.mean(bear):5.1%} | {e}" + (f" | placebo {np.median(pl):+5.2%} [{np.percentile(pl, 10):+5.2%}…{np.percentile(pl, 90):+5.2%}], beaten {np.mean(s['excess'] > pl):3.0%}" if pl is not None else ""))
+        if eras: print(f"{'':44} eras: " + " ".join(f"{x:+6.1%}" for x in s["eras"]) + " | era DD: " + " ".join(f"{x:6.1%}" for x in era_dd(rr, dd, eras)))
+        return s
+    print(f"\n=== {title}: {dd[0]} → {dd[-1]}; columns: excess vs the market, IS, OOS | DD, Sharpe | de-risked share | episodes (book − market, fall / rebound year)")
+    print(f"{'insurance rule':44} {'excess':>7} {'IS':>6} {'OOS':>6} | {'DD':>6} {'Sh':>5} | {'on':>5} | " + " ".join(f"{x[0]:>10}" for x in eps))
+    out = {"incumbent": line("incumbent (SMA200 alone)", book(incumbent), incumbent)}
+    for name, (v, thresholds, mid) in inds.items():
+        for x in thresholds:
+            bear = incumbent & (np.nan_to_num(v, nan=-np.inf) > x); pl = None
+            if x == mid:
+                pl = np.array([sc(book(incumbent & (np.nan_to_num(block_shuffle(v, rng), nan=-np.inf) > x)))["excess"] for _ in range(20)])
+            out[(name, x)] = (line(f"SMA200 AND {name} > {x:g}", book(bear), bear, pl), pl)
+        bear = np.nan_to_num(v, nan=-np.inf) > mid; out[(name, "alone")] = line(f"{name} > {mid:g} alone (no SMA)", book(bear), bear)
+    for label, v, x in extra:
+        bear = incumbent & (np.nan_to_num(v, nan=-np.inf) > x); out[label] = line(label, book(bear), bear)
+    return out
+
+
+def main_spread():
+    rng = np.random.default_rng(78)
+    baa, aaa, dbaa, daaa, baa10 = (fred(k) for k in ("BAA", "AAA", "DBAA", "DAAA", "BAA10Y"))
+    spread_m = {d: baa[d] - aaa[d] for d in baa if d in aaa}; spread_d = {d: dbaa[d] - daaa[d] for d in dbaa if d in daaa}
+    _, fd, mk, rc, bear_c, _, _ = carry.sets()[1]
+    # S2 — the century, 1927 → : the monthly spread read one month late
+    R = {}
+    R["cent"] = report2("S2 — Moody's BAA − AAA (monthly, one month late) on the century book", fd, rc, mk, bear_c, {"BAA−AAA": (monthly_known(spread_m, fd), (1.2, 1.5, 2.0), 1.5)}, "1975-01-01", ERAS4, EPS_CENT, rng)
+    # S2 — the 1971 window, for the direct comparison with the NFCI
+    d, rs = cut(fd, {"dip": rc["dip"], "mom": rc["mom"], "mkt": rc["mkt"], "bear": bear_c}, "1971-02-01", "2026-08-31"); lvl = np.concatenate([[1.0], np.cumprod(1 + rs["mkt"])])
+    r71 = {"dip": rs["dip"], "mom": rs["mom"], "mkt": rs["mkt"]}
+    R["1971"] = report2("S2 — the same spread on the 1971 → window (the NFCI's window)", d, r71, lvl, rs["bear"], {"BAA−AAA": (monthly_known(spread_m, d), (1.2, 1.5, 2.0), 1.5)}, "1998-07-01", [("1971-02-01", "2000-01-01"), ("2000-01-01", "2026-09-01")], [e for e in EPS_LONG], rng)
+    # S2 — the daily spreads 1986 →
+    d, rs = cut(fd, {"dip": rc["dip"], "mom": rc["mom"], "mkt": rc["mkt"], "bear": bear_c}, "1986-02-01", "2026-08-31"); lvl = np.concatenate([[1.0], np.cumprod(1 + rs["mkt"])])
+    r86 = {"dip": rs["dip"], "mom": rs["mom"], "mkt": rs["mkt"]}
+    R["1986"] = report2("S2 — the daily spreads (one day late) on the 1986 → window", d, r86, lvl, rs["bear"], {"DBAA−DAAA": (known(spread_d, d, 1), (1.0, 1.3, 1.6), 1.3), "BAA10Y": (known(baa10, d, 1), (3.0, 3.5, 4.0), 3.5)}, "2006-07-01", None, [e for e in EPS_LONG if e[1] >= "1986-02-01"], rng)
+    # S1 — the real-time NFCI against the current vintage, 2011-06 →
+    d, rs = cut(fd, {"dip": rc["dip"], "mom": rc["mom"], "mkt": rc["mkt"], "bear": bear_c}, "2011-06-10", "2026-08-31"); lvl = np.concatenate([[1.0], np.cumprod(1 + rs["mkt"])])
+    r11 = {"dip": rs["dip"], "mom": rs["mom"], "mkt": rs["mkt"]}; cur_n = known(fred("NFCI"), d); rt_n = realtime_known("NFCI", d); rt_a = realtime_known("ANFCI", d); cur_a = known(fred("ANFCI"), d)
+    for x in (0.0, 0.5):
+        c_on = np.nan_to_num(cur_n, nan=-np.inf) > x; r_on = np.nan_to_num(rt_n, nan=-np.inf) > x
+        print(f"\nS1 — NFCI > {x:g} on 2011-06 → 2026-08: current vintage on {np.mean(c_on):.1%} of sessions, real time on {np.mean(r_on):.1%}; agree {np.mean(c_on == r_on):.1%}; current-only {np.mean(c_on & ~r_on):.1%}, real-time-only {np.mean(r_on & ~c_on):.1%}; "
+              f"max real-time NFCI in 2020: {np.nanmax(rt_n[[k for k, t in enumerate(d[1:]) if t[:4] == '2020']]):+.2f} vs current {np.nanmax(cur_n[[k for k, t in enumerate(d[1:]) if t[:4] == '2020']]):+.2f}")
+    R["2011"] = report2("S1 — the real-time NFCI vs the current vintage, 2011-06 → (the only window the archive covers)", d, r11, lvl, rs["bear"], {"NFCI current": (cur_n, (0.0, 0.5), 0.5), "NFCI real-time": (rt_n, (0.0, 0.5), 0.5), "ANFCI real-time": (rt_a, (0.0, 0.5), 0.5), "ANFCI current": (cur_a, (0.0, 0.5), 0.5)},
+                       "2019-01-01", None, [e for e in EPS_LONG if e[1] >= "2011-06-10"], rng)
+    # ---------------- the verdict for the whole of B5 ----------------
+    print("\n=== pre-registered verdict for the whole of B5 (the unrevised spread at its middle threshold)")
+    inc71 = R["1971"]["incumbent"]; s71, pl71 = R["1971"][("BAA−AAA", 1.5)]; incc = R["cent"]["incumbent"]; sc_, plc = R["cent"][("BAA−AAA", 1.5)]
+    ok_bar = s71["is"] > inc71["is"] and s71["oos"] > inc71["oos"] and s71["dd"] >= inc71["dd"] - 0.03 and s71["excess"] > np.percentile(pl71, 90)
+    ok_eras = all(x > y for x, y in zip(sc_["eras"], incc["eras"]))
+    dd_i = era_dd(carry.exposure(bear_c, master.shock_flags(mk, -0.07, 10, 20)) * (0.4 * rc["dip"] + 0.6 * rc["mom"]), fd, ERAS4)
+    sp = monthly_known(spread_m, fd); bear = bear_c & (np.nan_to_num(sp, nan=-np.inf) > 1.5); dd_g = era_dd(carry.exposure(bear, master.shock_flags(mk, -0.07, 10, 20)) * (0.4 * rc["dip"] + 0.6 * rc["mom"]), fd, ERAS4)
+    ok_dd = all(g >= i - 0.03 for g, i in zip(dd_g, dd_i))
+    rt = R["2011"][("NFCI real-time", 0.5)][0]; cu = R["2011"][("NFCI current", 0.5)][0]; inc11 = R["2011"]["incumbent"]; contra = (cu["excess"] > inc11["excess"]) and (rt["excess"] < inc11["excess"])
+    print(f"  1971 →: spread > 1.5 {s71['excess']:+.2%} ({s71['is']:+.1%} / {s71['oos']:+.1%}), DD {s71['dd']:.1%} vs the SMA alone {inc71['excess']:+.2%} ({inc71['is']:+.1%} / {inc71['oos']:+.1%}), DD {inc71['dd']:.1%}; placebo p90 {np.percentile(pl71, 90):+.2%} → bar {'met' if ok_bar else 'NOT met'}")
+    print(f"  century eras, spread vs SMA alone: " + " ".join(f"{x:+.1%}/{y:+.1%}" for x, y in zip(sc_['eras'], incc['eras'])) + f" → {'all four ahead' if ok_eras else 'not all four'}; era DD gated vs SMA: " + " ".join(f"{g:.0%}/{i:.0%}" for g, i in zip(dd_g, dd_i)) + f" → {'within 3 points' if ok_dd else 'deeper than 3 points somewhere'}")
+    print(f"  real-time NFCI 2011 →: current-vintage rule {cu['excess']:+.2%}, real-time rule {rt['excess']:+.2%}, SMA alone {inc11['excess']:+.2%} → {'CONTRADICTS' if contra else 'does not contradict'}")
+    print(f"  → {'DECISION PROPOSED: the credit-spread gate on the insurance' if ok_bar and ok_eras and ok_dd and not contra else 'NO — B5 recorded as a candidate that failed its robustness check; the insurance keeps its two signals'}")
+
+
 if __name__ == "__main__":
-    main()
+    main_spread() if "--spread" in sys.argv else main()
