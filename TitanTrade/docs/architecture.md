@@ -22,11 +22,11 @@ The backend has two faces: a CLI (one-off commands via `docker compose run`) and
 
 ### 3. Execute (`executor.execute_trades`, 10:15 and 15:30 ET weekdays, Sunday `full`)
 1. Market-open check; sector cache; **orphan close** (`protection.close_orphaned_positions`: every non-core position without a plan item, via `close_position_settled`); **gap-down protection**
-2. Load the plan and the bundle; read the account and positions
+2. Load the plan and the bundle; read the account and positions. A reported account value more than 50 % off the recorded peak (`risk_manager.account_value_suspect`) is broker data corruption: the run logs, alerts and skips steps 3, 5 and the exits in 6, keeping only the stop coverage (Decision 084)
 3. **Core legs**: SPY first — `mechanical.core_target_pct` = exposure scale × (1 − cash reserve) × (1 − momentum weight) − (held overlay + planned NEW slots) / equity → `core_allocation.manage_core_position(target_pct, ticker=SPY)`; then the momentum sleeve — `momentum_target_pct` = exposure scale × (1 − cash reserve) × momentum weight → the same helper with `ticker=SPMO`; then, when `cash_ticker` is set (071), the T-bill leg at `cash_target_pct` = (1 − exposure scale) × (1 − cash reserve), placed first when it must sell and last when it must buy; the account is re-read after each core trade
 4. **Stop-out cooldowns**: `entries.record_stop_out_cooldowns` scans filled sell stops and stamps the 72 h cooldown with the fill price
 5. **NEW items**: `entries.handle_entry` — live price → cooldown check → `pricing.entry_levels` (entry = price × 1.003, stop, target) → sanity checks → committed cash → `risk_manager.pre_trade_check` (8 gates, slot sizing) → near miss or one bracket → `_ensure_gtc_stop_on_fill`; account re-read after each entry
-6. **HOLD items**: `executor._manage_held` — stop coverage at the item's stop; exit when `unrealized_plpc ≥ tp_pct` (trigger `target`) or trading days held ≥ `max_hold_days` (trigger `holding_limit`), both via `close_position_settled`
+6. **HOLD items**: `executor._manage_held` — stop coverage at the item's stop; exit when `unrealized_plpc ≥ tp_pct` *and the live quote confirms it* (trigger `target`; a mark the market does not confirm is kept with a warning, Decision 084) or trading days held ≥ `max_hold_days` (trigger `holding_limit`), both via `close_position_settled`
 7. Observability alerts (stuck in cash, ticker churn)
 
 ### 4. Gapcheck (09:35 ET weekdays)
@@ -101,7 +101,7 @@ No module imports `executor`. `executor.py` re-exports the broker functions it c
 | Overlay cap | 70% of equity, both core legs excluded (also from the sector gate) | risk_manager |
 | Cash reserve | 5%, net of pending buys, re-read after each entry | risk_manager / executor |
 | Min notional | $500 (dust guard, 054) | risk_manager |
-| Drawdown breaker | 8% from peak; ±50% → suspect data (054) | risk_manager |
+| Drawdown breaker | 8% from peak; ±50% → suspect data: entries blocked and the whole run keeps only the stops (054 / 084) | risk_manager / executor |
 | Earnings blackout | 2 days | earnings / risk_manager |
 | Macro blackout | 6 h, high-impact only | risk_manager |
 | Sector / correlation | 50% / 0.75 | risk_manager |

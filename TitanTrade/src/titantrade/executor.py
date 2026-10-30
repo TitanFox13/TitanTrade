@@ -33,10 +33,12 @@ from titantrade.broker import (  # re-exported: patch targets
     place_native_stop_loss,
 )
 from titantrade.market_context import load_stock_sectors
+from titantrade.market_data import get_latest_price
 from titantrade.protection import check_gap_down_protection, close_orphaned_positions, close_position_settled
 from titantrade.entries import handle_entry, record_stop_out_cooldowns
 from titantrade.core_allocation import _is_core_ticker, manage_core_position
 from titantrade.mechanical import cash_target_pct, core_target_pct, momentum_target_pct
+from titantrade.risk_manager import _notify_suspect_value, account_value_suspect, load_peak_value
 from titantrade.signals import trading_days_between
 from titantrade.trade_state import _load, _save, position_opened_at
 from titantrade.alerts import _maybe_alert_stuck_in_cash, _maybe_alert_ticker_churn
@@ -185,16 +187,17 @@ def ensure_stop_coverage(cfg: Config) -> int:
 # Held positions: coverage, then target / holding-limit exits
 # ---------------------------------------------------------------------------
 
-def _manage_held(item: dict[str, Any], cfg: Config, *, market_open: bool) -> list[dict[str, Any]]:
+def _manage_held(item: dict[str, Any], cfg: Config, *, market_open: bool, exits: bool = True) -> list[dict[str, Any]]:
     """Keep the stop on the book, then exit at the target or after the holding
     limit — evaluated at the executor runs, close-based as backtested. The
-    stop, the target and the clock are the only exits."""
+    stop, the target and the clock are the only exits. ``exits=False`` keeps
+    only the stop (a run on a suspect account value, Decision 084)."""
     ticker = item["ticker"]
     position = get_position(ticker, cfg)
     if not position:
         return []
     _ensure_coverage(ticker, item.get("stop_price"), cfg, market_open=market_open, position=position)
-    if not market_open:
+    if not market_open or not exits:
         return []
     qty = float(position.get("qty") or 0)
     if qty <= 0:
@@ -205,6 +208,20 @@ def _manage_held(item: dict[str, Any], cfg: Config, *, market_open: bool) -> lis
         plpc = 0.0
     days = trading_days_between(position_opened_at(ticker))
     if plpc >= cfg.trading.tp_pct:
+        # The position mark can be a broker artefact (the CRWD split, Decision 054);
+        # a target exit sells only when the live quote agrees (Decision 084), as
+        # gap-down protection already does. No quote → the mark stands, as before.
+        avg = float(position.get("avg_entry_price") or 0)
+        try:
+            quote = get_latest_price(ticker, cfg)
+        except Exception:  # noqa: BLE001
+            quote = None
+        if quote and avg > 0 and quote / avg - 1 < cfg.trading.tp_pct:
+            log.warning(
+                f"{ticker}: the position mark says {plpc:+.1%} but the live quote ${quote:.2f} is "
+                f"{quote / avg - 1:+.1%} from the entry — target not confirmed by the market, no exit"
+            )
+            return []
         trigger, reason = "target", f"{plpc:+.1%} reached the +{cfg.trading.tp_pct:.0%} target after {days} trading days"
     elif days >= cfg.trading.max_hold_days:
         trigger, reason = "holding_limit", f"{days} trading days held (limit {cfg.trading.max_hold_days}) at {plpc:+.1%}"
@@ -273,6 +290,18 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
     log.info(f"Portfolio: ${portfolio_value:,.2f} | Cash: ${cash_balance:,.2f} | Buying power: ${float(account.get('buying_power', 0)):,.2f}")
     positions = get_positions(cfg)
 
+    # --- A suspect account value: keep the stops, place nothing (Decision 084) ---
+    # The core legs size on this number and the entries and target exits read
+    # broker state; a value half or double the recorded peak is a data glitch
+    # (the CRWD split's phantom $22,828), and every order on it would be real.
+    suspect = account_value_suspect(portfolio_value)
+    if suspect:
+        log.error(
+            f"SUSPECT ACCOUNT VALUE ${portfolio_value:,.2f} against a peak of ${load_peak_value():,.2f} — "
+            f"this run keeps the stops and places no order"
+        )
+        _notify_suspect_value(portfolio_value, load_peak_value())
+
     # --- Core: SPY is the residual (Decision 061) ---
     held_now = {p.get("symbol") for p in positions}
     planned = sum(1 for i in items if i.get("action") == "NEW" and i.get("ticker") not in held_now)
@@ -287,7 +316,7 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
         f"Core target {core_target:.0%} of equity (planned new slots {planned}, exposure scale {scale})"
         + (f" | {sleeve} target {sleeve_target:.0%}" if sleeve_target is not None else "")
     )
-    if market_open:
+    if market_open and not suspect:
         legs = [(cfg.trading.core_ticker, core_target)]
         if sleeve_target is not None:
             legs.append((sleeve, sleeve_target))   # SPY first: its sale funds the sleeve and the entries
@@ -326,6 +355,9 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
         if not ticker:
             continue
         if action == "NEW" and ticker not in held_tickers:
+            if suspect:
+                log.info(f"Skipping {ticker} entry: the account value is suspect this run")
+                continue
             if get_open_orders(ticker, cfg):
                 log.info(f"Order already pending for {ticker} - skipping new entry")
                 continue
@@ -346,13 +378,14 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
                 log.error(f"Entry failed for {ticker}: {exc}")
         elif action == "HOLD" and ticker in held_tickers:
             try:
-                executed.extend(_manage_held(item, cfg, market_open=market_open))
+                executed.extend(_manage_held(item, cfg, market_open=market_open, exits=not suspect))
             except Exception as exc:  # noqa: BLE001
                 log.error(f"Held-position management failed for {ticker}: {exc}")
 
     # --- Observability ---
     try:
-        _maybe_alert_stuck_in_cash(portfolio_value, cash_balance)
+        if not suspect:
+            _maybe_alert_stuck_in_cash(portfolio_value, cash_balance)
     except Exception as exc:  # noqa: BLE001
         log.warning(f"Stuck-in-cash check failed: {exc}")
     try:

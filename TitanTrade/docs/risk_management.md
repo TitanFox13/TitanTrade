@@ -6,7 +6,7 @@ The system's job is to not lose money, and secondarily to make money. Missed opp
 
 ## What Protects the Book
 
-- **Position level**: a GTC stop-limit at −12% on every whole-share overlay position (placed by the bracket, converted on fill, re-placed by the 09:35 ET coverage job if ever missing — Decision 060); a +20% target and a 60-trading-day limit evaluated at each executor run; the orphan close for any position without a plan item.
+- **Position level**: a GTC stop-limit at −12% on every whole-share overlay position (placed by the bracket, converted on fill, re-placed by the 09:35 ET coverage job if ever missing — Decision 060); a +20% target (sold only when the live quote confirms the position mark — Decision 084) and a 60-trading-day limit evaluated at each executor run; the orphan close for any position without a plan item.
 - **Portfolio level**: flat slots of 25% of the dip sleeve (10% of equity, max 3) under a 70% overlay cap, the 5% cash reserve, the drawdown breaker, the sector / correlation / earnings / macro gates, the two-signal insurance (SPY < 200-day SMA **and** sector breadth < 50% → exposure halves, no new entries; fails open when inputs are unknown) and the shock trigger (068: SPY −7% over 10 sessions within the last 20 → exposure halves, no new entries); exposure = min of the two, applied to both core legs (SPY, SPMO).
 - **What no longer sells**: the LLM sentry, the intraday price check, the hedge swap and the trailing / TP1 manager — measured as net losses or untested (Decision 060, Evidence 3) and frozen under `legacy/`.
 
@@ -15,7 +15,7 @@ The system's job is to not lose money, and secondarily to make money. Missed opp
 Evaluated in order for every NEW item (an entry that expired unfilled is simply a NEW item again at the next run); a failure of ≤ 2 gates is recorded as a near miss.
 
 1. **Earnings blackout** — no entry within 2 calendar days of earnings (Finnhub; `earnings.DEFAULT_BLOCK_DAYS`). Binary risk that cannot be hedged.
-2. **Drawdown circuit breaker** — all entries halt while equity is ≥ 8% below the recorded peak (`state/peak_portfolio.json`). **Suspect-value guard** (054): a value more than ±50% off the peak is broker data corruption, not a drawdown — entries pause for the run, the block is labelled "suspect broker data" and alerted, and `update_peak_value` refuses the spike so a glitch never trips the breaker permanently.
+2. **Drawdown circuit breaker** — all entries halt while equity is ≥ 8% below the recorded peak (`state/peak_portfolio.json`). **Suspect-value guard** (054 / 084): a value more than ±50% off the peak, in either direction, is broker data corruption, not a drawdown — the block is labelled "suspect broker data" and alerted, `update_peak_value` refuses the spike so a glitch never trips the breaker permanently, and `execute_trades` reads the same test once per run (`account_value_suspect`): on a suspect value the run keeps the stops and places no order at all (no core rebalance, no entry, no target or clock exit).
 3. **Cash reserve** — 5% of equity stays in cash. The gate nets out the notional of pending (unfilled) buy orders (`open_buy_commitment`, 035), and the executor re-reads the account after every executed entry so an instantly filled bracket cannot be spent twice (058).
 4. **Overlay cap** — overlay positions ≤ 70% of equity (`compute_overlay_headroom`, both core legs excluded). Protects the core.
 5. **Position size** — the slot is `overlay_slot_pct` = `slot_pct × (1 − momentum_weight)` × equity, reduced to the cash and overlay headroom, floored to whole shares; anything below `MIN_POSITION_NOTIONAL` ($500) is blocked as dust (054). No ATR, confidence or VIX scaling (061).
@@ -74,6 +74,6 @@ Evaluated in order for every NEW item (an entry that expired unfilled is simply 
 | Bot offline | Stops live on Alpaca |
 | Overtrading | 3 slots, cash reserve, 72 h cooldown after a stop-out |
 | Stop-limit gap failure | Gap-down protection |
-| Broker glitch (split, phantom equity) | Corporate-actions check; suspect-value guard |
+| Broker glitch (split, phantom equity, phantom mark) | Corporate-actions check; the suspect-value guard on the whole run (keep the stops, place nothing); a target exit only when the live quote confirms (084) |
 | Failed exit leaves a position bare | Settled close restores the stop |
 | Stale plan | Plan rebuilt before every execute; orphan close for anything without an item |

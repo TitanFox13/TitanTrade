@@ -5,7 +5,7 @@
 Every trading decision is a rule on prices; parameters are the Decision 062 plateau, read from `data/watchlist.json` → `settings.mechanical` at every run.
 
 - **Entry**: a watchlist name closes ≥ 8% below its 90-day high while above its 150-day SMA. The watchlist is the dip universe: the 11 sector ETFs since Decision 070 (deployed 2026-10-29), with the hand-picked 15 names kept as `shadow_watchlist` — fetched, curated and backtested (`backtest-mech --shadow`), never traded. Candidates ranked deepest dip first fill the free slots (3 × 10% of equity = 25% of the 40% dip sleeve, flat sizing; `momentum_weight: 0` restores 25% slots). One bracket order at the live price + 0.3% with a −12% stop and a +20% target, through the eight gates. Whole shares only — a slot below one share is skipped.
-- **Exits**: the GTC stop-limit (−12%), the +20% target and the 60-trading-day holding limit; the latter two are evaluated against the broker position at every executor run. Nothing else sells a position.
+- **Exits**: the GTC stop-limit (−12%), the +20% target and the 60-trading-day holding limit; the latter two are evaluated against the broker position at every executor run, and a target exit sells only when the live quote confirms the position mark (Decision 084 — a mark can be a broker artefact). Nothing else sells a position.
 - **Core**: SPY is the dip sleeve's residual — exposure scale × 95% × (1 − momentum weight) − overlay − this run's planned slots — rebalanced within a 5% band. The core sells before entries need the cash and buys back after exits.
 - **Momentum sleeve** (068): SPMO held at 60% of the investable book (exposure scale × 95% × 60%), a second core leg rebalanced inside the same band after SPY; never an orphan, no stop, outside the overlay cap and the sector gate. The index does the rotating (semi-annual).
 - **T-bill leg** (071, off by default): with `cash_ticker` set (SGOV), the capital the exposure rules idle — `(1 − exposure_scale) × 95%` — is held in the T-bill ETF as a third core leg, sold first when exposure returns and bought last when it drops; no stop, never an orphan, outside the overlay cap and the sector gate. For a live account that earns nothing on cash.
@@ -18,7 +18,7 @@ Every trading decision is a rule on prices; parameters are the Decision 062 plat
 
 ### Eight Entry Gates (ALL must pass)
 1. **Earnings blackout**: no entry within 2 days of earnings (Finnhub calendar)
-2. **Drawdown circuit breaker**: halt at 8% below the portfolio peak. A value ±50% off the peak is treated as broker data corruption (Decision 054): entries pause, Discord alert, the peak file is never written
+2. **Drawdown circuit breaker**: halt at 8% below the portfolio peak. A value ±50% off the peak, either way, is treated as broker data corruption (Decisions 054 / 084): entries pause, Discord alert, the peak file is never written — and the whole run does nothing but keep the stops (no core rebalance, no entry, no target or clock exit) while the account value is suspect
 3. **Cash reserve**: 5% minimum, net of cash committed to pending buy orders (035); the account is re-read after every executed entry in a run (058)
 4. **Overlay cap**: overlay positions ≤ 70% of equity (both core legs excluded)
 5. **Position size**: the slot (`slot_pct` × (1 − momentum weight) = 10% of equity), reduced to the cash and overlay headroom; anything below $500 notional is blocked as dust (054)
@@ -134,7 +134,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 | `test_universe_switch.py` | shadow list and design in config, the staged Decision 070 file, HOLD survival of a removed name, the window re-stamp, ETF sectors, the correlation gate on ETFs, the curator on the shadow list, `--shadow` |
 | `test_readiness.py` | the T-bill leg (target, core membership, plan field, executor order both ways, off by default) and the heartbeat ping |
 | `test_fill_ledger.py` | gap maths, Eastern session date, idempotent update with missing bars, the API endpoint and the summary field |
-| `test_chaos.py` | the chaos drill (084): a stateful fake broker with Alpaca's share accounting fed into whole `execute_trades` runs — phantom equity both ways, phantom marks both ways, a split-like gap, a vanished stop, a refused sell, a refused cancel, a dead network, duplicate entries — against the invariants (nothing bare, nothing doubled, no order on bad data, only prescribed actions, the peak untouched, no call escapes); the three open findings are strict expected failures |
+| `test_chaos.py` | the chaos drill (084): a stateful fake broker with Alpaca's share accounting fed into whole `execute_trades` runs — phantom equity both ways, phantom marks both ways, a split-like gap, a vanished stop, a refused sell, a refused cancel, a dead network, duplicate entries — against the invariants (nothing bare, nothing doubled, no order on bad data, only prescribed actions, the peak untouched, no call escapes); the first run's three findings are fixed and pass |
 | `test_backtest_two_sleeve.py` | the two-sleeve backtester (081): the momentum leg at its target and only moved outside the band, the slot on the dip sleeve (10 % / 25 %), the shock trigger scaling both legs and pausing entries, min() not the product, `momentum_weight` 0 = the dip-only book |
 
 ```bash

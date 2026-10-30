@@ -55,6 +55,8 @@ The book has three kinds of holdings and one reserve:
 
 A problem is an inconsistency, not a reading: a switch "on" while its printed inputs say otherwise, an exposure of 0.25, or a new entry made while a switch was on.
 
+**Two lines that mean the broker's data was not trusted** (Decision 084): "SUSPECT ACCOUNT VALUE … this run keeps the stops and places no order" means the broker reported an account value half or double the recorded peak, so the run did nothing but keep the stops and sent an alert; "target not confirmed by the market, no exit" means a position looked like it had reached its target on the broker's mark while the live quote said otherwise, so it was kept. Both are the system refusing to act on bad data; a run that trades normally the next day is the expected follow-up. The log line without a glitch behind it would be the problem.
+
 ## 3. The trades since the last checkup
 
 Every action in the trade log must be one the rules prescribe:

@@ -69,6 +69,7 @@ class TestHeldExits:
         with patch("titantrade.executor.get_position", return_value=position), \
              patch("titantrade.executor.get_open_orders", return_value=open_orders), \
              patch("titantrade.executor.close_position_settled", return_value={"ticker": "BBB", "action": "SELL", "trigger": "x"}) as close, \
+             patch("titantrade.executor.get_latest_price", return_value=None), \
              patch("titantrade.executor.place_native_stop_loss") as place:
             trades = _manage_held(item, fake_config, market_open=True)
         return trades, close, place

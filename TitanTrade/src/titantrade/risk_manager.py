@@ -136,23 +136,34 @@ def _notify_suspect_value(observed: float, peak: float) -> None:
         log.exception("Failed to send suspect-portfolio-value alert")
 
 
+def account_value_suspect(portfolio_value: float) -> bool:
+    """A reported account value more than SUSPECT_VALUE_DEVIATION_PCT off the
+    recorded peak, in either direction, is broker data corruption (the CRWD
+    split's phantom $22,828, Decision 054) — never a real move between two
+    runs. The executor does nothing but keep the stops on such a run
+    (Decision 084); the breaker blocks entries on it."""
+    peak = load_peak_value()
+    return peak > 0 and abs(portfolio_value / peak - 1) > SUSPECT_VALUE_DEVIATION_PCT / 100
+
+
 def check_drawdown_circuit_breaker(portfolio_value: float) -> tuple[bool, float]:
     """Check if portfolio drawdown exceeds the max allowed.
 
     Returns (is_tripped, drawdown_pct).
     If tripped, NO new entries should be made.
 
-    A "drawdown" beyond SUSPECT_VALUE_DEVIATION_PCT is treated as broker data
-    corruption (see the constant's comment): entries stay blocked — sitting
-    out one run is cheap insurance either way — but the event is alerted as
-    a data problem so the operator doesn't read it as a real 79% crash.
+    A value beyond SUSPECT_VALUE_DEVIATION_PCT off the peak, either way, is
+    treated as broker data corruption (see the constant's comment): entries
+    stay blocked — sitting out one run is cheap insurance either way — but
+    the event is alerted as a data problem so the operator doesn't read it
+    as a real 79% crash.
     """
     peak = load_peak_value()
-    if peak > 0 and portfolio_value < peak * (1 - SUSPECT_VALUE_DEVIATION_PCT / 100):
+    if account_value_suspect(portfolio_value):
         drawdown_pct = (peak - portfolio_value) / peak * 100
         log.warning(
             f"SUSPECT PORTFOLIO VALUE: ${portfolio_value:,.2f} is "
-            f"{drawdown_pct:.1f}% below peak ${peak:,.2f} — likely broker "
+            f"{abs(drawdown_pct):.1f}% {'below' if drawdown_pct > 0 else 'above'} peak ${peak:,.2f} — likely broker "
             f"data glitch; blocking entries this run as a precaution"
         )
         _notify_suspect_value(portfolio_value, peak)

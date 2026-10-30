@@ -5,8 +5,8 @@ resting sell holds its shares, a second sell on held shares is refused with
 broker function by name; the HTTP layer counts any call that escapes it. After
 each scenario the invariants: nothing bare, nothing doubled, no order on bad
 data, only prescribed actions, the peak never learns a phantom, no call escapes.
-Scenarios that violate an invariant are strict expected failures until a fix
-lands on the operator's go (the findings are in Decision 084). Zero network."""
+The three findings of the first run (Decision 084) are fixed and now pass:
+the account-value guard and the quote-confirmed target exit. Zero network."""
 from __future__ import annotations
 
 import json
@@ -204,7 +204,7 @@ class FakeBroker:
 def _patches(fake: FakeBroker) -> ExitStack:
     names = {
         "titantrade.executor": ["cancel_all_orders_for_ticker", "cancel_order", "get_account", "get_open_orders", "get_position",
-                                "get_positions", "is_market_open", "place_limit_sell", "place_native_stop_loss"],
+                                "get_positions", "is_market_open", "place_limit_sell", "place_native_stop_loss", "get_latest_price"],
         "titantrade.protection": ["get_positions", "get_position", "get_open_orders", "cancel_order", "close_position_at_market",
                                   "place_market_sell", "place_native_stop_loss", "get_recent_split_announcements", "get_latest_price"],
         "titantrade.entries": ["place_bracket_order", "get_open_orders", "get_order", "get_position", "cancel_order",
@@ -301,7 +301,6 @@ def test_s1_phantom_equity_down_blocks_entries_and_spares_the_peak(fake_config, 
     assert fake.http_calls == 0
 
 
-@pytest.mark.xfail(strict=True, reason="Decision 084 S1: the core legs act on a phantom account value (no suspect-value guard on that path)")
 def test_s1_phantom_equity_down_no_order_at_all(fake_config, tmp_state_dir):
     fake, items = _book(tmp_state_dir)
     fake.phantom_equity = 21_000.0
@@ -309,7 +308,6 @@ def test_s1_phantom_equity_down_no_order_at_all(fake_config, tmp_state_dir):
     _invariants(fake, items, tmp_state_dir, suspect=True)
 
 
-@pytest.mark.xfail(strict=True, reason="Decision 084 S2: the breaker trips only on the downside; a +60 % phantom sizes entries and core buys")
 def test_s2_phantom_equity_up_no_order_at_all(fake_config, tmp_state_dir):
     fake, items = _book(tmp_state_dir)
     fake.phantom_equity = 160_000.0
@@ -326,7 +324,6 @@ def test_s3_phantom_low_mark_is_not_sold(fake_config, tmp_state_dir):
     _invariants(fake, items, tmp_state_dir)
 
 
-@pytest.mark.xfail(strict=True, reason="Decision 084 S3b: the target exit reads the broker's mark with no live-quote cross-check")
 def test_s3b_phantom_high_mark_is_not_sold(fake_config, tmp_state_dir):
     fake, items = _book(tmp_state_dir)
     fake.marks["DXCM"] = 110.0                         # +37 % on the mark; the market is unchanged

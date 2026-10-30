@@ -34,7 +34,7 @@ uv run --with numpy python scripts/param_search/search.py           # Parameter 
 cd TitanTrade && uv run --extra test python -m pytest tests/ -q
 ```
 
-`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 289 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens (three strict expected failures in `test_chaos.py` are the open Decision 084 findings). Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
+`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 289 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens (`test_chaos.py` is the broker-anomaly drill, Decision 084). Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
 
 ### Docker (production)
 
@@ -50,7 +50,7 @@ Deploy = `git pull && docker compose build api titantrade && docker compose up -
 
 - **Data** (`data_fetcher.py`, `market_context.py`): 250-day Alpaca bars per name → `signal_inputs` (close, lookback high, trend SMA), ATR-14, 60-day correlations; SPY returns + sector breadth; Finnhub earnings; FRED macro calendar → `state/data_bundle.json`.
 - **Signals** (`signals.py` pure rules; `mechanical.py` builds the plan): dip-in-uptrend entries ranked deepest first into free slots, two-signal insurance and the shock trigger (exposure = min of both; entries pause while either is on), the sleeve target, held positions with their stop and target → `state/plan.json`.
-- **Risk Manager** (`risk_manager.py`): 8 programmatic gates between the plan and the broker; flat slot sizing (25% of the dip sleeve = 10% of equity) trimmed by cash and the overlay cap; both core legs sit outside the cap and the sector gate.
+- **Risk Manager** (`risk_manager.py`): 8 programmatic gates between the plan and the broker; flat slot sizing (25% of the dip sleeve = 10% of equity) trimmed by cash and the overlay cap; both core legs sit outside the cap and the sector gate. A reported account value ±50% off the recorded peak is broker data corruption: the whole run keeps the stops and places no order (Decision 084).
 - **Executor** (`executor.py` with `entries.py`, `protection.py`, `core_allocation.py`): orphan close → gap check → residual SPY core, then the SPMO sleeve → stop-out cooldowns → NEW entries (one near-market bracket, GTC stop on fill) → HOLD management (stop coverage, +target / holding-limit exits through a cancel-settle-close).
 - **Curator** (`curator.py`, Claude, manual only since Decision 082): universe proposal + post-mortem, advisory, no scheduled run.
 - **API + scheduler** (`api.py`, `scheduler.py`): FastAPI serving the state files at trade.praguefun.cz (Cloudflare tunnel); APScheduler jobs from `data/schedule.json` run inside the API container.

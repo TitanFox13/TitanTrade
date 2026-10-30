@@ -37,6 +37,8 @@ class TestDrawdownBreaker:
         assert tripped and dd > SUSPECT_VALUE_DEVIATION_PCT
         assert update_peak_value(100_000 * 2) == 100_000                 # spike refused
         assert json.loads((tmp_state_dir / "peak_portfolio.json").read_text())["peak_value"] == 100_000
+        tripped, dd = check_drawdown_circuit_breaker(100_000 * 1.6)         # Decision 084: the upside phantom blocks entries too
+        assert tripped and dd < 0
 
 
 class TestCashReserve:
