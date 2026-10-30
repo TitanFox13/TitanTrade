@@ -95,6 +95,30 @@ def aqr_qmj(column="USA"):
     return out
 
 
+def aqr_monthly(filename, sheet, header_test):
+    """Every numeric column of an AQR monthly sheet → {column: {"YYYY-MM": decimal return}}. ``header_test(row)`` picks
+    the header row (the Century file's starts with "Date", the TSMOM file's with None then "TSMOM"); a cell that is not
+    a number is skipped. Needs openpyxl (``uv run --with openpyxl``)."""
+    import openpyxl
+    ws = openpyxl.load_workbook(f"{S}/external/aqr/{filename}", read_only=True)[sheet]
+    cols, out = None, {}
+    for row in ws.iter_rows(values_only=True):
+        if cols is None:
+            if row and header_test(row):
+                cols = [(j, str(c)) for j, c in enumerate(row) if j > 0 and c not in (None, "")]
+                out = {c: {} for _, c in cols}
+            continue
+        if not row or row[0] in (None, ""):
+            continue
+        d = row[0] if isinstance(row[0], str) else row[0].strftime("%Y-%m-%d")
+        ym = f"{d[6:10]}-{d[0:2]}" if "/" in d else d[:7]
+        for j, c in cols:
+            v = row[j] if j < len(row) else None
+            if isinstance(v, (int, float)):
+                out[c][ym] = float(v)
+    return out
+
+
 def french_levels(filename, sub="french"):
     """Value-weighted daily total-return index per column of a French portfolio file (first VW section)."""
     cols, rows = _french_section(f"{S}/{sub}/{filename}", "Average Value Weighted Returns")
