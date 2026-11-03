@@ -46,7 +46,7 @@
 | item | status | note |
 |---|---|---|
 | **Momentum weight 60 → 70** | 🔑 decision | +0.5 … +0.9 pp/yr on the decade, a bumpier ride (DD −21 vs −20, Sharpe −0.03); the century wants more momentum. A preference, measured |
-| **Insurance on / off** | 🔑 decision | off = +1.6 on the decade, −15 … −20 in a 1929 / 1973 / 2008. The operator keeps it on; revisit only with a stated drawdown tolerance |
+| **Insurance on / off** | 🔑 decision | off (shock trigger on) = +1.7 pp/yr on the decade at the same −20 % worst fall; over the century the two switches together cost nothing (+0.2) and take the worst fall from −82 to −59 %; the insurance's keep is the slow bears (2007–09: −27 with it, −41 without; 1973–74: −19 vs −37; 1929–32: −52 vs −57), the shock trigger's the fast crashes (2020: −10 vs −16) — Decision 087 addendum. The operator keeps it on; revisit only with a stated drawdown tolerance |
 | **Volatility-managed momentum share** (Barroso–Santa-Clara, long-only) | 🚫 until B11 or a live momentum crash | the one century-only survivor (+0.3 … +0.4, beats its placebo, Sharpe 0.86 → 0.90), invisible on the decade; reopen when investable data covers a momentum crash |
 | **SPMO vs 30 / 30 SPMO + MTUM** | 🔑 decision | ~1 pp/yr this decade for diversification of index-construction risk; the century cannot separate them |
 | **Leverage to SPY's volatility** | 🚫 until live proof | +1.5 … +2 net *if* the live book keeps its Sharpe; scales every drawdown; never before years of live evidence |
