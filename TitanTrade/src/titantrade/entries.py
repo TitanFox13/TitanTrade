@@ -307,7 +307,8 @@ def handle_entry(
             log.info(f"NEAR MISS recorded for {ticker}: {len(failed)} gate(s) failed")
         return None
     for flag in check.get("flags", []):
-        log.warning(flag)
+        # A slot trimmed to the cash or the overlay headroom is the sizing working as designed, not a warning (Decision 091)
+        (log.info if flag.startswith("Position reduced") else log.warning)(flag)
 
     # Brackets need whole shares (Alpaca 422s fractional brackets).
     shares = float(int(check["shares"]))

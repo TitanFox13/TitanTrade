@@ -45,10 +45,10 @@
 
 | item | status | note |
 |---|---|---|
-| **Momentum weight 60 → 70** | 🔑 decision | +0.5 … +0.9 pp/yr on the decade, a bumpier ride (DD −21 vs −20, Sharpe −0.03); the century wants more momentum. A preference, measured |
+| **Momentum weight 60 → 70** | 🔑 decision — **the whole curve read out 2026-11-03 (Decision 091, `momweight.py`)** | the exact book is flat from 20 to 80 % on the decade (+1.4 … +1.7, the live 60 % at +1.48, 70 % at +1.62); the century adds ≈ 0.4 pp/yr per ten points of momentum in every era (60 % +3.6, 70 % +4.1, 100 % +5.3) but the worst relative year degrades fast above 75 % (−22 → −35, the momentum crashes) and the drawdown is near its best at 60–70 on both windows. 60 → 70 = +0.14 decade / +0.43 century for a point more drawdown. A preference, measured |
 | **Insurance on / off** | 🔑 decision | off (shock trigger on) = +1.7 pp/yr on the decade at the same −20 % worst fall; over the century the two switches together cost nothing (+0.2) and take the worst fall from −82 to −59 %; the insurance's keep is the slow bears (2007–09: −27 with it, −41 without; 1973–74: −19 vs −37; 1929–32: −52 vs −57), the shock trigger's the fast crashes (2020: −10 vs −16) — Decision 087 addendum. The operator keeps it on; revisit only with a stated drawdown tolerance |
 | **Volatility-managed momentum share** (Barroso–Santa-Clara, long-only) | 🚫 until B11 or a live momentum crash | the one century-only survivor (+0.3 … +0.4, beats its placebo, Sharpe 0.86 → 0.90), invisible on the decade; reopen when investable data covers a momentum crash |
-| **SPMO vs 30 / 30 SPMO + MTUM** | 🔑 decision | ~1 pp/yr this decade for diversification of index-construction risk; the century cannot separate them |
+| **SPMO vs 30 / 30 SPMO + MTUM** | ✅ decided 2026-11-03: **"just SPMO"** (Decision 091) | ~1 pp/yr this decade for diversification of index-construction risk; the century cannot separate them; the operator keeps the one fund |
 | **Leverage to SPY's volatility** | 🚫 until live proof | +1.5 … +2 net *if* the live book keeps its Sharpe; scales every drawdown; never before years of live evidence |
 | **The operator's stated risk preference** (2026-10-29) | ✅ stated | No fixed numbers: "there is always a trade-off; something that projects a high return but hurts the safe side I will evaluate case by case; the future belongs to those willing to take risks." Two named fears: **an AI-bubble burst** and **a weaker US market after a political change** (the current strength suspected to be policy-flattered). Replayed on the data: in the three bubble bursts we have (1929, 1973, 2000) the book fell −58 / −27 / −32 vs the market's −84 / −48 / −49, the momentum sleeve fell with the market every time (it *is* the leaders), the dip sleeve was flat at the 2000 trough and +97 five years on; the book was +13 five years after the 2000 peak vs the market's −18. A US lost decade is real history: 2000–2009 US −0.4 %/yr vs developed ex-US +2.5, Europe +3.3, and EUR/USD went 0.90 → 1.60 in 2002–08 — for a CZK-based investor the dollar is the larger risk. Consequences: the 40/60 split stands (50/50 is the cheap extra bubble insurance, ≈ −0.3 pp/yr); Track E (other markets) and the currency question move to the front; B1's collar index prices an explicit hedge |
 
@@ -174,7 +174,7 @@ Free sources were searched first for each of these (2026-10-30: SEC XBRL, SimFin
 
 ## Track G — Toward real money
 
-The order the evidence imposes: A1 checkups → A3 the first selloff (the drawdown leg) → the go-live checklist (C5) → fund at ≥ $25k with the cash sweep or the SGOV leg → the return judged only after three years, with its band. Nothing in Tracks B–E changes that order; they change what the book *is* when it goes live, and each change restarts the clean window.
+The order the evidence imposes: A1 checkups → A3 the first selloff (the drawdown leg) → the go-live checklist (C5) → fund at ≥ $25k with the cash programme (Decision 087) → the return judged only after three years, with its band. **Operator, 2026-11-03: "going live I will give you instructions when we have no other tasks left in the roadmap"** — nobody raises it before then. Nothing in Tracks B–E changes that order; they change what the book *is* when it goes live, and each change restarts the clean window.
 
 ---
 

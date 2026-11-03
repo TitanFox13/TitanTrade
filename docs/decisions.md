@@ -1,5 +1,27 @@
 # Important Decisions Log
 
+## Decision 091: The operator's calls on the open dials — just SPMO, rotation closed, the slot-trimming log line informational, go-live on the operator's word once the roadmap is empty; the momentum weight read out as a whole curve for the decision still open (operator, 2026-11-03)
+**Date**: 2026-11-03
+**Why**: asked for every decision the roadmap leaves to them, the operator answered four at once and asked for the momentum weight as a continuous curve rather than two numbers. Recorded here; the curve is `scripts/param_search/momweight.py` (a read-out of the C1 dial, not a test — nothing pre-registered, nothing changes live).
+
+**The calls.** (1) **"Just SPMO"** — the momentum sleeve stays one fund; the 30 / 30 split with MTUM (≈ 1 pp/yr this decade for diversification of index-construction risk, the century unable to separate them) is closed. (2) **"Going live I will give you instructions when we have no other tasks left in the roadmap"** — Track G's order stands and nobody raises it before then. (3) **"7 close it"** — asset rotation as a sleeve, kept for later since Decision 068, is closed: rotation is momentum in a worse vehicle (Decision 067 addendum). (4) **"Make informational"** — the entry gate's "Position reduced to N shares (cash reserve / overlay cap)" flags log at INFO; the drawdown flag stays a WARNING. One line in `entries.py`; tests green; **deploys with the next build**.
+
+**The momentum weight as a curve** (`w_mom` from 0 to 100 % in steps of 5; the harness blend — constant daily weights, free rebalancing, no reserve, the series every Decision 067 → 080 number came from — on the decade 2017 → and the century 1927 →; and the live book path-exact through the package engine on the decade, the 2 % reserve, 10 % slots and the 5 % band, in steps of 10):
+
+| w_mom | decade blend: excess · DD · Sharpe · worst yr | decade engine (the live book): excess · halves · DD · Sharpe | century blend: excess · DD · Sharpe · worst yr · eras |
+|---|---|---|---|
+| 0 % (dip sleeve only) | +0.28 · −21.0 · 1.12 · −13.1 | +1.22 · +1.97 / +0.46 · −21.5 · 1.16 | +0.73 · −61.6 · 0.72 · −25.3 · +3.9 +0.6 −1.4 −0.5 |
+| 20 % | +0.69 · −20.6 · 1.14 · −12.5 | +1.46 · +1.53 / +1.39 · −20.9 · 1.17 | +1.76 · −60.2 · 0.79 · −20.9 · +4.3 +2.3 +0.2 +0.2 |
+| 40 % | +1.05 · −20.3 · 1.13 · −11.9 | +1.43 · +0.72 / +2.14 · −20.2 · 1.15 | +2.72 · −59.3 · 0.84 · −21.5 · +4.5 +3.9 +1.8 +0.7 |
+| **60 % (live)** | **+1.36 · −20.0 · 1.10 · −11.3** | **+1.48 · +0.19 / +2.79 · −19.7 · 1.12** | **+3.63 · −58.6 · 0.86 · −22.2 · +4.6 +5.5 +3.3 +1.2** |
+| 70 % | +1.50 · −21.2 · 1.08 · −11.0 | +1.62 · +0.25 / +3.01 · −20.0 · 1.10 | +4.06 · −58.3 · 0.87 · −22.5 · +4.6 +6.4 +4.0 +1.4 |
+| 80 % | +1.63 · −22.3 · 1.06 · −10.7 | +1.69 · +0.08 / +3.32 · −21.2 · 1.07 | +4.48 · −58.0 · 0.87 · −24.5 · +4.6 +7.2 +4.8 +1.6 |
+| 100 % (SPMO only) | +1.84 · −24.6 · 1.01 · −11.8 | +1.51 · −0.58 / +3.63 · −24.6 · 1.01 | +5.25 · −59.8 · 0.86 · −35.0 · +4.5 +8.8 +6.3 +1.9 |
+
+**Reading.** On the decade the exact book is **flat from 20 to 80 %** (+1.4 … +1.7, inside the noise of a t of 0.25); the first half falls and the second half rises as the weight goes up, which is the two sleeves taking turns. On the century each ten points of momentum adds about 0.4 pp/yr, in every era (the century's lesson from Decision 066: momentum is harvested by holding), but above 75 % the worst relative year degrades fast (−22 → −35: the momentum crashes of 1932 / 2009, when the leaders fall and the dips rebound) and the drawdown deepens again. The drawdown is near its best around 60–70 % on both windows (decade −20.0 at 60, century −58.3 at 70). **60 → 70**: +0.14 on the decade either way, +0.43 on the century, one point more drawdown on the decade blend (0.3 on the exact book), the worst year 0.3 worse on the century. A preference, as the C1 row says; **the operator's call stays open**, with the curve in hand.
+
+**Scripts / docs**: `scripts/param_search/momweight.py` (→ `data/param_search/momweight.json`, the chart), `entries.py`; roadmap C1 rows (SPMO ✅, the momentum row's numbers), Track G note, C3 / C4; todo Phases 2.7 and 2.2 boxes, Phase 2.31; handover; README row.
+
 ## Decision 090: The working cash reserve set to 2 % — the smallest whole percent that can never borrow — with the core-buy guard that makes it safe; **built, tested, deployed 12:36 UTC** (operator: "we never want to borrow from the broker. So find the optimal number of cash to hold and then do the code changes necessary to make this work", 2026-11-03)
 **Date**: 2026-11-03
 **Why**: Decision 089 priced the 5 % working reserve (about half a point a year on the decade) and found that 2 % was unsafe as the code stood — a core leg's buy ignored the brackets still pending from the morning run. The operator's rule turned that into a design question with one constraint: cash never below zero, and as little idle as that allows. Done the Decision 062 way: hypotheses V1–V3 and the rule in `scripts/param_search/reserve.py`, **committed before the first run** (`66a43e3`). **The guard and the new constant are in the code and the tests; the server still runs 5 % until the operator's deploy go.**
