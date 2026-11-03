@@ -2,11 +2,18 @@
 
 ## Open items — the index (2026-11-03, Decision 088)
 What is actually open, by where it waits; the phases below are the record and keep their boxes. Newest phase first.
+- **The operator, first**: the cash-reserve step (2.29 — the guard, then 5 → 2 % on the go; Decision 089).
 - **Live time**: the checkup ≈ 2026-11-12, written in the order of `docs/how_to_read_a_checkup.md` (Phases 2.26, 2.23) — verify: the first ETF entry and its fill-ledger row, the benchmark wording at 20 trading days (2.9), SPMO rebalanced only outside its 5 % band and no orphan-close attempt on it (2.7), a settled-close exit seen live (2.2), no "SUSPECT ACCOUNT VALUE" / "target not confirmed" line without a real glitch (Decision 084), DXCM's clock against its stop's expiry (≈ Jan 21 / 22); the go/stop rule needs a ≥ 10 % SPY drawdown (2.0).
 - **The operator**: the go-live checklist (2.0 — fund ≥ $25k, W-8BEN, enrol the cash programme and leave `cash_ticker` off (Decision 087), the healthchecks URL (2.10), the tax line); the free Tiingo and Alpha Vantage keys (2.11 → roadmap B11 / B10); the WARNING → INFO cosmetic on the operator's go (2.2); asset rotation kept for later (2.7).
 - **Housekeeping at the next checkup**: `external/sec_facts/` and `alpaca_hist/quality/` archived on titanserver if not yet (2.16); `git pull --ff-only` on the server (docs and research scripts only — nothing to deploy); titanserver disk and build cache (1.36).
 - **Research**: nothing ready to run — the B track is done except the keyed B10 / B11; E6 at the back (roadmap); the 2.1 "next search" boxes predate the sector universe (Decision 070) and Track D's closed doors.
 - **Phases 1.37 and earlier** (the LLM-era book) keep their open boxes as history; the conversion (Decisions 061–063) superseded them.
+
+## Phase 2.29: The working cash reserve 5 % → 2 % — checked, proposed, not applied (2026-11-03) — Decision 089
+Operator: "why do we even hold cash?" → "Yes, check it". The reserve traced to its three uses, Decision 081's reserve-2 % number re-run (+1.48 vs +1.03), one chaos-drill scenario at both levels (`tests/test_reserve_check.py`). Nothing changed.
+- [x] **Found**: the core legs' buys are capped at cash − reserve but not net of a pending bracket; with SPY inside its band above target, a 2 % reserve leaves the bracket's fill up to 3 % of equity short (the drill: −1.2 %), a 5 % reserve never (the reserve equals the band). The Decision 055 bug's shape through the other door.
+- [ ] **On the operator's go, in this order**: (1) the guard — the core buy capped at cash − reserve − pending buys (`open_buy_commitment` passed from the executor), the drill test flipped to the invariant; (2) `MIN_CASH_RESERVE_PCT` 5 → 2 (a parameter: targets restated to momentum 58.8 % / dip sleeve 39.2 %, the clean window noted), worth ≈ +0.45 pp/yr on the decade, ≈ +0.35 net at go-live.
+- [x] Roadmap C5 row; CLAUDE.md test count 291; handover note.
 
 ## Phase 2.28: Track F housekeeping — the luck meter in `master.score`, `docs/todo.md` reordered (2026-11-03) — Decision 088
 Operator: "do all the ready to run". No `src/` change, no deploy.

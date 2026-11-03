@@ -1,5 +1,30 @@
 # Important Decisions Log
 
+## Decision 089: The working cash reserve, 5 % → 2 % — checked, worth about half a point a year, **not safe as the code stands** (the reserve is also covering the rebalance band's slack against a pending bracket), safe with one guard; **proposed, not applied** (operator: "why do we even hold cash?" → "Yes, check it", 2026-11-03)
+**Date**: 2026-11-03
+**Why**: the book holds cash in two places — the half the switches idle (the insurance, kept on by the operator's call the same day) and a 5 % working reserve that sits in cash at all times. The reserve is plumbing: entry brackets are day-limit orders that take no cash until they fill, so several pending buys once counted the same dollar and drove the live account $6,379 negative into margin (Decision 055; the entry gate has netted out pending buys since). It also absorbs whole-share rounding, fees and the $500 dust floor. Decision 081's gap table had already priced it: the path-exact book with a 2 % reserve makes **+1.48 pp/yr against +1.03** at 5 % (re-run today, same to the hundredth), the first half +0.19 instead of −0.27, the drawdown −19.7 against −19.3. The question was whether 2 % is safe. Checked by reading every use of the reserve and by one chaos-drill scenario at both levels (`tests/test_reserve_check.py`). **Nothing changed; the reserve is 5 %.**
+
+**Where the reserve acts.** Three places, one constant (`risk_manager.MIN_CASH_RESERVE_PCT`): (1) the plan's targets — the momentum leg is `exposure × (1 − reserve) × 0.6` of equity and the dip sleeve's investable share `exposure × (1 − reserve) × 0.4`, so the reserve is 3 % more of the book out of the market than a 2 % reserve would leave; (2) the entry gate — a new slot is sized from `cash − reserve − pending buys`; (3) the core legs' buys — capped at `cash − reserve`, **not net of pending buys**.
+
+**The hole.** Once both core legs are at target the cash left is exactly `reserve + the planned slots`; the pending bracket then fills from its own planned cash and the reserve is what remains. But SPY may sit up to one band (5 % of equity) *above* its target without being sold, and the momentum leg buys to its target with every dollar above the reserve, pending bracket or not. So the cash left for the bracket's fill is `reserve − SPY's in-band excess`: with a 5 % reserve and a 5 % band never below zero; with a 2 % reserve up to **3 % of equity short — the account in margin**. The drill, today's live shape (two slots held, SPMO far under its target and filling, one bracket pending from the morning run, SPY 3.2 % above its target inside the band):
+
+| reserve | the momentum leg buys | cash after | the pending bracket | cash after it fills |
+|---|---|---|---|---|
+| 5 % (live) | 216 SPMO | $10,608 | $9,990 | **+$618** (+0.6 % of equity) |
+| 2 % | 229 SPMO | $8,827 | $9,990 | **−$1,163** (−1.2 % of equity) |
+
+The same shape the Decision 055 bug had, through the other door: the entry gate counts pending buys, the core buy does not. At 5 % the reserve happens to equal the band, which is why it has never shown.
+
+**What would make 2 % safe.** One guard: the core legs' buy capped at `cash − reserve − pending buys` (the executor already has `entries.open_buy_commitment`; pass it to `manage_core_position` as the entry gate does — `core_allocation` cannot import `entries`, the dependency flows the other way). The momentum leg then waits up to one band's worth until SPY's excess is sold or an exit frees cash — the same "under target, no spendable cash, waiting" path the code already takes. With the guard the drill's 2 % case leaves the bracket's cash alone and the invariant holds; the drill test flips its expectation when the guard lands (it asserts today's behaviour on purpose, so it fails loudly then).
+
+**The $25k arithmetic.** At the go-live minimum a 2 % reserve is $500 — one share of SPY and the dust floor exactly. Whole-share rounding on the two core legs can leave or take up to one share each (≈ $500 + $140), so at that size the reserve and the rounding slop are the same order; the "no spendable cash — waiting" path handles a short run, and nothing sizes an order below the floor. Workable, thin.
+
+**Worth.** +0.45 pp/yr on a decade like the last one (Decision 081's table), 0.4 points more drawdown; at go-live the cash programme pays ≈ 3.5 % on the reserve either way, so the net of 5 → 2 is ≈ 3 % × (the market's return − 3.5 %) ≈ +0.35 pp/yr. Small, real, the first measured improvement of the day.
+
+**Decision.** Proposed, not applied: (1) the guard first (a few lines in `executor.py` / `core_allocation.py`, the drill test flipped to the invariant), (2) then `MIN_CASH_RESERVE_PCT` 5 → 2 — a parameter change, so on the operator's explicit go, with the targets restated (momentum 58.8 % of equity, the dip sleeve 39.2 %) and the clean window noted. Until then 5 % stands, and the guard is worth having at 5 % too (a band wider than the reserve would open the same hole).
+
+**Scripts / docs**: `tests/test_reserve_check.py` (291 tests); roadmap C5 row; todo Phase 2.29; handover note; CLAUDE.md test count.
+
 ## Decision 088: Track F housekeeping — the luck meter folded into `master.score`, `docs/todo.md` reordered newest first with an open-items index (roadmap Track F, operator: "do all the ready to run", 2026-11-03)
 **Date**: 2026-11-03
 **Why**: two 💡 rows of Track F that needed no data and no go beyond the operator's "do all the ready to run" — the luck meter was a separate script (`luck.py`) nobody ran after a result, and the todo file had its phases interleaved from a day of appending. No `src/` change, no deploy, nothing live.
