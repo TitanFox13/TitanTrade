@@ -13,7 +13,7 @@ What is actually open, by where it waits; the phases below are the record and ke
 Operator: "just spmo" · "going live i will give you instructions when we have no other tasks left in the roadmap" · "7 close it" · "make informational" · the momentum weight "as a continuous graph".
 - [x] SPMO alone (the MTUM split closed); rotation closed; the go-live order stands until the roadmap is empty; the slot-trimming flags log at INFO (`entries.py`, one line, tests green).
 - [x] `momweight.py`: the blend on both windows in steps of 5 %, the exact book on the decade in steps of 10 % → `data/param_search/momweight.json` and the chart shown to the operator; roadmap C1 rows; Decision 091.
-- [ ] **The momentum weight**: the operator's call, with the curve in hand (the C1 row). Deploy of the log-line change with the next build.
+- [x] **The momentum weight**: "Keep 60 %" (operator, same day, with the curve in hand). Deploy of the log-line change with the next build.
 
 ## Phase 2.30: The working cash reserve set to 2 % with the core-buy guard — built, tested, deployed (2026-11-03) — Decision 090
 Operator: "we never want to borrow from the broker. So find the optimal number of cash to hold and then do the code changes necessary to make this work". Hypotheses V1–V3 and the rule committed before the first run (`66a43e3`, `reserve.py`); results in Decision 090.
