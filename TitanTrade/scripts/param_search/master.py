@@ -7,6 +7,7 @@ Scores: excess CAGR vs the market, IS / OOS halves, max DD, Sharpe, worst calend
 (decade) or min era excess (century). Read marginal effects first, leaderboards second, walk-forward third.
 Run: uv run --with numpy python -I scripts/param_search/master.py"""
 import itertools
+import math
 import os
 import sys
 
@@ -54,7 +55,48 @@ def book(w_dip, r_dip, r_mom, r_mkt, bear, ins, shock, volt, own, mom12_pos):
 shock_scale_holder = [0.5]; volt_vol_holder = [None]
 
 
-def score(r, r_mkt, dates, split, eras=None):
+# --- the luck meter's per-series half (Decision 088): moved from luck.py verbatim so every score can carry its band
+def sharpe_daily(x):
+    s = x.std(ddof=1)
+    return x.mean() / s if s > 0 else 0.0
+
+
+def ncdf(x):
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def stationary_bootstrap(rb, rm, B=1000, mean_block=63, seed=3):
+    rng = np.random.default_rng(seed); T = len(rb); p = 1 / mean_block; ex, dsh = [], []
+    for _ in range(B):
+        idx = np.empty(T, dtype=int); i = rng.integers(T)
+        for t in range(T):
+            if t == 0 or rng.random() < p: i = rng.integers(T)
+            else: i = (i + 1) % T
+            idx[t] = i
+        b, m = rb[idx], rm[idx]
+        cb = np.prod(1 + b) ** (252 / T) - 1; cm = np.prod(1 + m) ** (252 / T) - 1
+        ex.append(cb - cm); dsh.append((sharpe_daily(b) - sharpe_daily(m)) * math.sqrt(252))
+    ex, dsh = np.array(ex), np.array(dsh)
+    return np.percentile(ex, [5, 50, 95]), np.percentile(dsh, [5, 50, 95]), float(np.mean(ex > 0))
+
+
+def luck(r, r_mkt, draws=400):
+    """What one series can say about its own luck (the pool-level statistics — deflated Sharpe at N, PBO — stay in luck.py):
+    the active return's t-statistic, the probabilistic Sharpe ratio (Bailey & López de Prado: P(true Sharpe > 0) with the
+    skew and kurtosis in), the stationary-block-bootstrap 5 / 50 / 95 % band of the excess CAGR and P(excess > 0)."""
+    a = r - r_mkt; T = len(a); sr = sharpe_daily(a)
+    z = (a - a.mean()) / a.std(ddof=1); g3 = float(np.mean(z ** 3)); g4 = float(np.mean(z ** 4))
+    psr = ncdf(sr * math.sqrt(T - 1) / math.sqrt(1 - g3 * sr + (g4 - 1) / 4 * sr * sr))
+    ex, _, pos = stationary_bootstrap(r, r_mkt, B=draws)
+    return {"t": sr * math.sqrt(T), "psr": psr, "band": (float(ex[0]), float(ex[1]), float(ex[2])), "p_pos": pos}
+
+
+def luck_line(s):
+    """One printable clause for a score that carries the luck keys."""
+    return f"t {s['t']:+.2f}, P(Sharpe > 0) {s['psr']:.0%}, excess 5–95 % {s['band'][0]:+.1%} … {s['band'][2]:+.1%} (median {s['band'][1]:+.1%}), P(excess > 0) {s['p_pos']:.0%}"
+
+
+def score(r, r_mkt, dates, split, eras=None, luck_draws=0):
     c = np.concatenate([[1.0], np.cumprod(1 + r)]); m = np.concatenate([[1.0], np.cumprod(1 + r_mkt)])
     mm, mk = fastbt.metrics(c, []), fastbt.metrics(m, [])
     ks = next(k for k, d in enumerate(dates) if d >= split)
@@ -74,6 +116,8 @@ def score(r, r_mkt, dates, split, eras=None):
     else:
         wins = [(c[k] / c[k - 756]) ** (1 / 3) - (m[k] / m[k - 756]) ** (1 / 3) for k in range(756, len(c), 63)]
         out["roll3_pos"] = sum(1 for x in wins if x > 0) / len(wins)
+    if luck_draws:   # the luck meter, on request (a bootstrap per call is too slow for the grids)
+        out.update(luck(r, r_mkt, luck_draws))
     return out
 
 

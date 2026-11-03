@@ -34,11 +34,9 @@ import carry  # noqa: E402
 import datasets  # noqa: E402
 import master  # noqa: E402
 
+from master import ncdf, sharpe_daily, stationary_bootstrap  # noqa: E402  (Decision 088: the per-series half lives in master.py)
+
 EULER = 0.5772156649
-
-
-def ncdf(x):
-    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
 
 def nppf(p):
@@ -48,11 +46,6 @@ def nppf(p):
         if ncdf(mid) < p: lo = mid
         else: hi = mid
     return (lo + hi) / 2
-
-
-def sharpe_daily(x):
-    s = x.std(ddof=1)
-    return x.mean() / s if s > 0 else 0.0
 
 
 def pool(name, dd, lvl, r, bear, split, eras):
@@ -111,21 +104,6 @@ def pbo(M, S=16, chunk=2000):
     lam, is_sr, oos_sr = np.array(lam), np.array(is_sr), np.array(oos_sr)
     slope = np.polyfit(is_sr, oos_sr, 1)[0]
     return float(np.mean(lam < 0)), float(slope), float(np.mean(oos_loss)), float(np.mean(oos_sr) * math.sqrt(252)), float(np.mean(is_sr) * math.sqrt(252))
-
-
-def stationary_bootstrap(rb, rm, B=1000, mean_block=63, seed=3):
-    rng = np.random.default_rng(seed); T = len(rb); p = 1 / mean_block; ex, dsh = [], []
-    for _ in range(B):
-        idx = np.empty(T, dtype=int); i = rng.integers(T)
-        for t in range(T):
-            if t == 0 or rng.random() < p: i = rng.integers(T)
-            else: i = (i + 1) % T
-            idx[t] = i
-        b, m = rb[idx], rm[idx]
-        cb = np.prod(1 + b) ** (252 / T) - 1; cm = np.prod(1 + m) ** (252 / T) - 1
-        ex.append(cb - cm); dsh.append((sharpe_daily(b) - sharpe_daily(m)) * math.sqrt(252))
-    ex, dsh = np.array(ex), np.array(dsh)
-    return np.percentile(ex, [5, 50, 95]), np.percentile(dsh, [5, 50, 95]), float(np.mean(ex > 0))
 
 
 def main():
