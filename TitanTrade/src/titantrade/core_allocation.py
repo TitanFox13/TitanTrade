@@ -37,12 +37,15 @@ def core_tickers(cfg: Config) -> tuple[str, ...]:
 
 
 def manage_core_position(
-    cfg: Config, target_pct: float | None = None, ticker: str | None = None,
+    cfg: Config, target_pct: float | None = None, ticker: str | None = None, committed_cash: float = 0.0,
 ) -> dict[str, Any] | None:
     """Rebalance a core leg (default SPY; the momentum ETF when ``ticker``
     says so) toward ``target_pct`` of equity (default: the whole investable
-    book). Skipped off-hours (market orders). Returns the trade record if an
-    order fired, else None."""
+    book). Skipped off-hours (market orders). A buy spends only the cash above
+    the reserve *and* above ``committed_cash`` — the notional of entry brackets
+    still pending from an earlier run, which take their cash when they fill
+    (Decision 090: without this a 2 % reserve could fill into margin). Returns
+    the trade record if an order fired, else None."""
     if not is_market_open(cfg):
         log.info("Core position management deferred — market closed")
         return None
@@ -73,7 +76,7 @@ def manage_core_position(
 
     if drift < 0:
         # Under target: buy with the cash on hand, keeping the reserve.
-        spendable = min(-drift, max(cash_balance - portfolio_value * MIN_CASH_RESERVE_PCT / 100, 0.0))
+        spendable = min(-drift, max(cash_balance - portfolio_value * MIN_CASH_RESERVE_PCT / 100 - max(committed_cash, 0.0), 0.0))
         qty = float(int(spendable / current_price))
         if qty < 1:
             log.info(f"Core: under target by ${-drift:,.0f} but no spendable cash — waiting")

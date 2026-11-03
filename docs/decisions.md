@@ -1,5 +1,53 @@
 # Important Decisions Log
 
+## Decision 090: The working cash reserve set to 2 % — the smallest whole percent that can never borrow — with the core-buy guard that makes it safe; **built, tested, not yet deployed** (operator: "we never want to borrow from the broker. So find the optimal number of cash to hold and then do the code changes necessary to make this work", 2026-11-03)
+**Date**: 2026-11-03
+**Why**: Decision 089 priced the 5 % working reserve (about half a point a year on the decade) and found that 2 % was unsafe as the code stood — a core leg's buy ignored the brackets still pending from the morning run. The operator's rule turned that into a design question with one constraint: cash never below zero, and as little idle as that allows. Done the Decision 062 way: hypotheses V1–V3 and the rule in `scripts/param_search/reserve.py`, **committed before the first run** (`66a43e3`). **The guard and the new constant are in the code and the tests; the server still runs 5 % until the operator's deploy go.**
+
+**The reasoning, in plain words.** After the guard, every order the executor places either rounds down (whole shares), fills at or under its limit (an entry bracket), or adds cash (every sell). The one way left to spend more than the sizing allowed is a *market* buy of a core leg: it is sized at the last price and fills a moment later, so an adverse fill overspends by the slip × the order. The reserve's one job is to cover that slip on the largest single buy the executor can place. "Optimal" is therefore the smallest whole percent that does it, because the return cost of idle cash is linear.
+
+**V1 — the return cost per point** (the live book, path-exact, on the sector-ETF decade 2017-01 → 2026-10, vs SPY; the trade list is the same 61 trades at every reserve):
+
+| reserve | excess | first / second half | max DD | Sharpe | worst year | gain vs 5 % |
+|---|---|---|---|---|---|---|
+| 0 % | +1.72 | +0.49 / +2.96 | −19.9 | 1.11 | −10.7 | +0.70 |
+| 1 % | +1.63 | +0.34 / +2.93 | −19.8 | 1.12 | −10.8 | +0.60 |
+| **2 %** | **+1.48** | **+0.19 / +2.79** | **−19.7** | **1.12** | **−11.0** | **+0.46** |
+| 3 % | +1.32 | +0.04 / +2.62 | −19.5 | 1.11 | −11.2 | +0.29 |
+| 5 % (was live) | +1.03 | −0.27 / +2.34 | −19.3 | 1.12 | −11.5 | — |
+
+Slope −0.143 pp/yr per point of reserve (written ≈ 0.15); the drawdown 0.15 deeper per point less (written ≈ 0.13); Sharpe within 0.01; trades unchanged. **V1 holds.** At 2 % the first half turns positive — Decision 081's H2 failure was mostly the reserve.
+
+**V2 — the cover an adverse fill needs** (slip × the largest single buy, as % of equity):
+
+| buy | size | 0.5 % slip | 1 % | 2 % | 3.5 % |
+|---|---|---|---|---|---|
+| day one, the momentum leg from all cash (after SPY's buy) | 59 % | 0.29 | 0.59 | **1.18** | 2.06 |
+| re-risking when a switch releases (×0.5 → ×1) | 29 % | 0.15 | 0.29 | 0.59 | 1.03 |
+| the SPY leg after an exit (one slot's cash back) | 10 % | 0.05 | 0.10 | 0.20 | 0.35 |
+
+The pre-registered rule — the smallest whole percent that covers a 2 % slip on the day-one buy, the Oct 1987-open kind of day (liquid ETFs at 10:15 / 15:30 ET slip basis points on an ordinary day) — gives **1.18 → 2 %**. 1 % covers a 1.7 % slip; 0 % covers nothing and turns every rounding and fee into a loan.
+
+**V3 — the drill** (`tests/test_reserve_check.py`, the fake broker now lends like a margin account and can fill a market buy above its sizing price; the invariant: cash after every pending buy fills ≥ 0):
+
+| scenario | reserve | slip | cash after the pending fills |
+|---|---|---|---|
+| (a) today's live shape — two slots held, the momentum leg filling, SPY inside its band above target, a bracket pending | 2 % | 0 | **+$2,125** (+2.1 %; Decision 089's −$1,163 is gone — the momentum leg bought 205 instead of 229) |
+| (b) the same with a 2 % adverse fill on the momentum leg's buy | 2 % | 2 % | **+$1,563** |
+| (c) go-live day one from all cash, 2 % adverse fills on both legs | 2 % | 2 % | **+$856** (+0.9 %) |
+| (d) the boundary | 2 % | 4 % | −$277 — the documented limit |
+| why not 1 % | 1 % | 2 % | −$123 — fails the rule's own case |
+
+**V3 holds** at 2 %: (a)–(c) ≥ 0, (d) and the 1 % case negative as written. The nine chaos scenarios (Decision 084) pass unchanged at 2 %.
+
+**What changed in the code.** (1) `risk_manager.MIN_CASH_RESERVE_PCT` 5.0 → **2.0** — the one constant, read by the plan's targets (the momentum leg is now `exposure × 0.98 × 0.6` = **58.8 %** of equity, the dip sleeve's investable share 39.2 %), the entry gate and the core legs' buys. (2) **The guard**: `core_allocation.manage_core_position` takes `committed_cash` and a buy spends only `cash − reserve − committed`; the executor reads `entries.open_buy_commitment` once before the legs and passes it — brackets pending from an earlier run keep their cash. A leg can therefore stop short of its target by up to one band's worth until SPY's in-band excess is sold or an exit frees cash; it logs "under target … no spendable cash — waiting", the path that already existed. (3) The backtester's default `cash_reserve_pct` follows the live constant, so backtest and live stay one book. (4) Tests: the fake broker gained `fill_slip` and `margin`; the five expectations that encoded 0.95 are 0.98; `test_reserve_check.py` holds the six scenarios above; **295 tests**.
+
+**What does not change.** The slots (10 % of equity each, three of them), the stops and targets, the switches, the band, the $500 floor. The clean benchmark window is **not** re-stamped: `design` is still 070 and the book is the same book 3 % more invested; the operator may restart it at the deploy if they prefer a clean read. At go-live the account type decides what an overspend would be — a margin account lends, a cash account rejects the order; the 2 % reserve is sized so neither happens.
+
+**Decision.** The reserve is 2 % with the guard; the backtest expectation for a decade like the last one moves from +1.0 to **≈ +1.5 pp/yr** vs SPY (the roadmap and CLAUDE.md restated). Deploy on the operator's go — both images; the first run after the deploy will buy the momentum leg toward 58.8 % and SPY toward its new residual, each inside its band, so most likely nothing trades until a leg drifts past 5 %.
+
+**Scripts / docs**: `scripts/param_search/reserve.py` (pre-registration `66a43e3`, the run), `tests/test_reserve_check.py`, `tests/test_chaos.py` (the fake's two switches); `risk_manager.py`, `core_allocation.py`, `executor.py`, `backtest/mechanical.py`; roadmap C5 row and the expectation line; todo Phase 2.30; features, risk_management, security, data_schemas, how_to_read_a_checkup, architecture, handover, CLAUDE.md.
+
 ## Decision 089: The working cash reserve, 5 % → 2 % — checked, worth about half a point a year, **not safe as the code stands** (the reserve is also covering the rebalance band's slack against a pending bracket), safe with one guard; **proposed, not applied** (operator: "why do we even hold cash?" → "Yes, check it", 2026-11-03)
 **Date**: 2026-11-03
 **Why**: the book holds cash in two places — the half the switches idle (the insurance, kept on by the operator's call the same day) and a 5 % working reserve that sits in cash at all times. The reserve is plumbing: entry brackets are day-limit orders that take no cash until they fill, so several pending buys once counted the same dollar and drove the live account $6,379 negative into margin (Decision 055; the entry gate has netted out pending buys since). It also absorbs whole-share rounding, fees and the $500 dust floor. Decision 081's gap table had already priced it: the path-exact book with a 2 % reserve makes **+1.48 pp/yr against +1.03** at 5 % (re-run today, same to the hundredth), the first half +0.19 instead of −0.27, the drawdown −19.7 against −19.3. The question was whether 2 % is safe. Checked by reading every use of the reserve and by one chaos-drill scenario at both levels (`tests/test_reserve_check.py`). **Nothing changed; the reserve is 5 %.**

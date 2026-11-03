@@ -49,6 +49,6 @@ class TestCore:
         assert _run(fake_config, target=0.90, cash=50_000, spy_value=10_000, spy_qty=20, market_open=False)[0] is None
 
     def test_no_cash_means_wait(self, fake_config, tmp_state_dir):
-        trade, buy, _ = _run(fake_config, target=0.90, cash=4_000, spy_value=10_000, spy_qty=20)
+        trade, buy, _ = _run(fake_config, target=0.90, cash=1_500, spy_value=10_000, spy_qty=20)   # under the 2 % reserve
         assert trade is None
         buy.assert_not_called()

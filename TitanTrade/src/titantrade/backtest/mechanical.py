@@ -24,6 +24,7 @@ from bisect import bisect_right
 from typing import Any
 
 from titantrade.backtest.data_loader import load_historical_data
+from titantrade.risk_manager import MIN_CASH_RESERVE_PCT
 from titantrade.signals import (
     above_sma_flags, breadth, dip_state, insurance_state, rank_dips, shock_state,
 )
@@ -32,7 +33,7 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "dip_pct": 0.10, "dip_lookback_days": 60, "trend_sma_days": 200,
     "slot_pct": 0.20, "max_slots": 3, "tp_pct": 0.10, "stop_pct": 0.12,
     "max_hold_days": 40, "insurance_sma_days": 200, "insurance_breadth": 0.5,
-    "insurance_scale": 0.5, "cash_reserve_pct": 0.05, "cost_per_side": 0.0005,
+    "insurance_scale": 0.5, "cash_reserve_pct": MIN_CASH_RESERVE_PCT / 100, "cost_per_side": 0.0005,
     "core_band_pct": 0.05,
     # Decision 068: the momentum ETF's share of the investable book (0 = the
     # dip-only book) and the shock trigger (drop 0 = off), combined by min().

@@ -47,6 +47,8 @@ class FakeBroker:
         self.refuse_close: dict[str, int] = {}  # market sells refused (with the shares free), per symbol, n times
         self.refuse_cancel: set[str] = set()
         self.dead = False
+        self.fill_slip: dict[str, float] = {}   # a market buy fills this much above the price it was sized at
+        self.margin = False                     # True: the broker lends instead of refusing (a margin account)
         for s, stop in stops.items():
             self._add_order(s, "sell", "stop_limit", self.pos[s]["qty"], stop_price=stop, limit_price=round(stop * 0.99, 2))
 
@@ -157,8 +159,8 @@ class FakeBroker:
 
     def place_market_buy(self, sym, qty, cfg):
         self._alive()
-        price = self.quotes.get(sym, self.pos[sym]["mark"] if sym in self.pos else 60.0)
-        if qty * price > self.cash:
+        price = self.quotes.get(sym, self.pos[sym]["mark"] if sym in self.pos else 60.0) * (1 + self.fill_slip.get(sym, 0.0))
+        if qty * price > self.cash and not self.margin:
             raise _err(40310000, "insufficient buying power")
         self.cash -= qty * price
         p = self.pos.setdefault(sym, {"qty": 0.0, "avg": price, "mark": price})

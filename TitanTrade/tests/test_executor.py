@@ -120,7 +120,7 @@ class TestExecuteTradesEndToEnd:
         trades = execute_trades(cfg)
 
         mock_orphan.assert_called_once()
-        assert mock_core.call_args.kwargs["target_pct"] == 0.70                  # 0.95 − one planned 25% slot
+        assert mock_core.call_args.kwargs["target_pct"] == 0.73                  # 0.98 − one planned 25% slot (the 2 % reserve, Decision 090)
         assert mock_bracket.call_args.kwargs["qty"] == 283.0                     # 25% of $100k at $88.26
         assert trades and trades[0]["ticker"] == "AAA" and trades[0]["action"] == "BUY"
         snap = json.loads((tmp_state_dir / "portfolio.json").read_text())
@@ -145,7 +145,7 @@ class TestExecuteTradesEndToEnd:
         _write(tmp_state_dir, "data_bundle.json", {"generated_at": NOW, "stocks": {}})
         execute_trades(cfg)
         calls = [(c.kwargs["ticker"], c.kwargs["target_pct"]) for c in mock_core.call_args_list]
-        assert calls == [("SPY", 0.19), ("SPMO", 0.285)]      # the combined scale 0.5: 0.5 × 0.95 × 0.4 / × 0.6
+        assert calls == [("SPY", 0.196), ("SPMO", 0.294)]    # the combined scale 0.5: 0.5 × 0.98 × 0.4 / × 0.6
 
     @patch("titantrade.executor.get_account")
     @patch("titantrade.executor.check_gap_down_protection", return_value=[])

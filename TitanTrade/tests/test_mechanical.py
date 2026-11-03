@@ -115,7 +115,7 @@ class TestBuildPlan:
         plan = build_plan(cfg, bundle, [], set(), started_at=STARTED)
         assert plan["shock"]["active"] is True and plan["insurance"]["risk_off"] is False
         assert plan["exposure_scale"] == 0.5 and plan["new_signals"] == 0
-        assert plan["sleeve"] == {"ticker": "SPMO", "weight": 0.6, "target_pct": 0.285}        # 0.5 × 0.95 × 0.6
+        assert plan["sleeve"] == {"ticker": "SPMO", "weight": 0.6, "target_pct": 0.294}        # 0.5 × 0.98 × 0.6
         assert any("shock trigger" in w["reason"] for w in plan["watch"] if w["ticker"] == "AAA")
         both = build_plan(cfg, _bundle(spy_above=False, pct=0.3, spy_closes=SHOCKED, AAA=_inp(88, 100, 80)), [], set(), started_at=STARTED)
         assert both["exposure_scale"] == 0.5                                                     # min(), not 0.25
@@ -167,17 +167,17 @@ class TestCoreTarget:
         from titantrade.mechanical import core_target_pct
         cfg = _cfg(fake_config)
         positions = [{"symbol": "SPY", "market_value": "60000"}, {"symbol": "BBB", "market_value": "20000"}]
-        assert core_target_pct(cfg, 100_000, positions, planned_new_slots=1, exposure_scale=1.0) == 0.50
-        assert core_target_pct(cfg, 100_000, positions, planned_new_slots=1, exposure_scale=0.5) == 0.025
-        assert core_target_pct(cfg, 100_000, positions, planned_new_slots=3, exposure_scale=1.0) == 0.0
+        assert core_target_pct(cfg, 100_000, positions, planned_new_slots=1, exposure_scale=1.0) == 0.53    # 0.98 − 0.2 held − 0.25 planned
+        assert core_target_pct(cfg, 100_000, positions, planned_new_slots=1, exposure_scale=0.5) == 0.04    # 0.49 − 0.45
+        assert core_target_pct(cfg, 100_000, positions, planned_new_slots=3, exposure_scale=1.0) == 0.03    # 0.98 − 0.2 − 0.75
 
     def test_two_sleeve_targets(self, fake_config):
         from titantrade.mechanical import core_target_pct, momentum_target_pct
         cfg = _cfg(fake_config, momentum_weight=0.6)
         assert cfg.trading.overlay_slot_pct == 0.1                                               # 25% of the 40% dip sleeve
         positions = [{"symbol": "SPY", "market_value": "20000"}, {"symbol": "SPMO", "market_value": "50000"}, {"symbol": "BBB", "market_value": "20000"}]
-        assert core_target_pct(cfg, 100_000, positions, planned_new_slots=1, exposure_scale=1.0) == 0.08   # 0.95 × 0.4 − 0.2 held − 0.1 planned
-        assert momentum_target_pct(cfg, 1.0) == 0.57 and momentum_target_pct(cfg, 0.5) == 0.285
+        assert core_target_pct(cfg, 100_000, positions, planned_new_slots=1, exposure_scale=1.0) == 0.092  # 0.98 × 0.4 − 0.2 held − 0.1 planned
+        assert momentum_target_pct(cfg, 1.0) == 0.588 and momentum_target_pct(cfg, 0.5) == 0.294
         assert core_target_pct(cfg, 100_000, positions, planned_new_slots=0, exposure_scale=0.5) == 0.0    # 0.19 − 0.2 held
 
 

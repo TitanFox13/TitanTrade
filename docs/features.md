@@ -19,7 +19,7 @@ Every trading decision is a rule on prices; parameters are the Decision 062 plat
 ### Eight Entry Gates (ALL must pass)
 1. **Earnings blackout**: no entry within 2 days of earnings (Finnhub calendar)
 2. **Drawdown circuit breaker**: halt at 8% below the portfolio peak. A value ±50% off the peak, either way, is treated as broker data corruption (Decisions 054 / 084): entries pause, Discord alert, the peak file is never written — and the whole run does nothing but keep the stops (no core rebalance, no entry, no target or clock exit) while the account value is suspect
-3. **Cash reserve**: 5% minimum, net of cash committed to pending buy orders (035); the account is re-read after every executed entry in a run (058)
+3. **Cash reserve**: 2% minimum (Decision 090; was 5%), net of cash committed to pending buy orders (035); the account is re-read after every executed entry in a run (058)
 4. **Overlay cap**: overlay positions ≤ 70% of equity (both core legs excluded)
 5. **Position size**: the slot (`slot_pct` × (1 − momentum weight) = 10% of equity), reduced to the cash and overlay headroom; anything below $500 notional is blocked as dust (054)
 6. **Sector exposure**: ≤ 50% of equity in one sector after the trade (core legs excluded)
@@ -54,7 +54,7 @@ A blocked entry that failed ≤ 2 gates is recorded in `state/near_misses.json` 
 | Stop after fill | Stop-limit, GTC | Replaces the bracket's stop leg; clamps to the broker-reported available qty on a race |
 | Target / holding-limit / orphan exit | Market sell | After cancel-settle of the resting stop; stop restored on failure |
 | Gap-down exit | Market sell | After cancel-settle; quote + corporate-actions cross-check |
-| Core rebalance | Market buy / sell | Toward the residual target, keeping the cash reserve; capped at held qty |
+| Core rebalance | Market buy / sell | Toward the residual target, keeping the cash reserve and the cash of brackets still pending (090); capped at held qty |
 
 Safety rails: no entry while the ticker has open orders or is held; positions and cash re-read after each trade; every trade logged with the plan reason, levels, gate results and a market snapshot.
 

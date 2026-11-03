@@ -35,7 +35,7 @@ from titantrade.broker import (  # re-exported: patch targets
 from titantrade.market_context import load_stock_sectors
 from titantrade.market_data import get_latest_price
 from titantrade.protection import check_gap_down_protection, close_orphaned_positions, close_position_settled
-from titantrade.entries import handle_entry, record_stop_out_cooldowns
+from titantrade.entries import handle_entry, open_buy_commitment, record_stop_out_cooldowns
 from titantrade.core_allocation import _is_core_ticker, manage_core_position
 from titantrade.mechanical import cash_target_pct, core_target_pct, momentum_target_pct
 from titantrade.risk_manager import _notify_suspect_value, account_value_suspect, load_peak_value
@@ -317,6 +317,7 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
         + (f" | {sleeve} target {sleeve_target:.0%}" if sleeve_target is not None else "")
     )
     if market_open and not suspect:
+        committed = open_buy_commitment(cfg)   # brackets pending from an earlier run keep their cash (Decision 090)
         legs = [(cfg.trading.core_ticker, core_target)]
         if sleeve_target is not None:
             legs.append((sleeve, sleeve_target))   # SPY first: its sale funds the sleeve and the entries
@@ -330,7 +331,7 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
             log.info(f"{cash_leg} target {cash_target:.0%} of equity (idle capital), now {cash_now:.0%}")
         for leg, target in legs:
             try:
-                core_trade = manage_core_position(cfg, target_pct=target, ticker=leg)
+                core_trade = manage_core_position(cfg, target_pct=target, ticker=leg, committed_cash=committed)
                 if core_trade:
                     executed.append(core_trade)
                     positions = get_positions(cfg)

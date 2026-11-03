@@ -44,8 +44,8 @@ class TestDrawdownBreaker:
 class TestCashReserve:
     def test_reserve_and_committed_cash(self):
         assert max_investable_amount(100_000, 20_000) == 20_000 - 100_000 * MIN_CASH_RESERVE_PCT / 100
-        assert max_investable_amount(100_000, 5_000) == 0
-        assert max_investable_amount(100_000, 20_000, committed_cash=16_000) == 0
+        assert max_investable_amount(100_000, 2_000) == 0                                   # exactly the 2% reserve
+        assert max_investable_amount(100_000, 20_000, committed_cash=18_000) == 0
 
 
 class TestOverlayCap:
@@ -84,15 +84,15 @@ class TestPreTradeCheck:
         assert check["allowed"] and check["shares"] == 100.0            # 25% × 40% = 10% slot; SPMO is core, not overlay
 
     def test_cash_and_overlay_reduce_the_slot(self, fake_config, tmp_state_dir, monkeypatch):
-        check = pre_trade_check("AAA", _item(100.0), 100_000, 15_000, [], earnings_blocked=False, cfg=fake_config)
-        assert check["allowed"] and check["shares"] == 100.0            # $15k − 5% reserve = $10k
+        check = pre_trade_check("AAA", _item(100.0), 100_000, 12_000, [], earnings_blocked=False, cfg=fake_config)
+        assert check["allowed"] and check["shares"] == 100.0            # $12k − 2% reserve = $10k (the slot would be $25k)
         monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: {"SPY": "ETF", "BBB": "Financials"}.get(t, "Technology"))
         positions = [{"symbol": "SPY", "market_value": "30000"}, {"symbol": "BBB", "market_value": "60000"}]
         check = pre_trade_check("CCC", _item(100.0), 100_000, 60_000, positions, earnings_blocked=False, cfg=fake_config)
         assert check["allowed"] and check["shares"] == 100.0            # 70% cap − 60% held = $10k headroom
 
     def test_every_gate_is_evaluated_and_dust_is_blocked(self, fake_config, tmp_state_dir):
-        check = pre_trade_check("AAA", _item(100.0), 100_000, 5_300, [], earnings_blocked=True, cfg=fake_config)
+        check = pre_trade_check("AAA", _item(100.0), 100_000, 2_300, [], earnings_blocked=True, cfg=fake_config)   # $2.3k − 2% reserve = $300
         assert not check["allowed"]
         assert "earnings" in check["failed_gates"] and "position_size" in check["failed_gates"]
         assert check["gate_results"]["position_size"]["detail"].startswith("Position $300 below")

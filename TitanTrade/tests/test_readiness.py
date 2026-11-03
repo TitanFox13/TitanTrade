@@ -17,7 +17,7 @@ class TestCashLeg:
         from titantrade.mechanical import cash_target_pct
         assert fake_config.trading.cash_ticker == "" and cash_target_pct(fake_config, 0.5) == 0.0
         cfg = _cfg(fake_config, cash_ticker="SGOV")
-        assert cash_target_pct(cfg, 1.0) == 0.0 and cash_target_pct(cfg, 0.5) == 0.475   # (1 − 0.5) × 95 %
+        assert cash_target_pct(cfg, 1.0) == 0.0 and cash_target_pct(cfg, 0.5) == 0.49    # (1 − 0.5) × 98 %
 
     def test_it_is_a_core_leg_for_the_plan_and_the_gates(self, fake_config):
         from titantrade.core_allocation import _is_core_ticker, core_tickers
@@ -31,7 +31,7 @@ class TestCashLeg:
         (tmp_state_dir / "trade_log.json").write_text(json.dumps({"trades": []}))
         bundle = {"stocks": {}, "market_context": {"breadth": {"spy_above_sma": False, "pct": 0.3}}}
         plan = build_plan(_cfg(fake_config, watchlist=[], cash_ticker="SGOV"), bundle, [], set(), started_at=NOW)
-        assert plan["insurance"]["risk_off"] and plan["cash_leg"] == {"ticker": "SGOV", "target_pct": 0.475}
+        assert plan["insurance"]["risk_off"] and plan["cash_leg"] == {"ticker": "SGOV", "target_pct": 0.49}
         assert build_plan(_cfg(fake_config, watchlist=[]), bundle, [], set(), started_at=NOW)["cash_leg"] is None
 
     @patch("titantrade.executor.record_stop_out_cooldowns", return_value=0)
@@ -48,11 +48,11 @@ class TestCashLeg:
         from titantrade.executor import execute_trades
         cfg = _cfg(fake_config, watchlist=["AAA"], momentum_weight=0.6, cash_ticker="SGOV")
         (tmp_state_dir / "data_bundle.json").write_text(json.dumps({"generated_at": NOW, "stocks": {}}))
-        # de-risked (scale 0.5), no SGOV yet → SPY, SPMO, then SGOV buys the idle 47.5 %
+        # de-risked (scale 0.5), no SGOV yet → SPY, SPMO, then SGOV buys the idle 49 % (0.5 × 0.98, the 2 % reserve)
         (tmp_state_dir / "plan.json").write_text(json.dumps({"generated_at": NOW, "exposure_scale": 0.5, "items": [], "watch": [{"ticker": "AAA", "reason": "no signal"}]}))
         mock_positions.return_value = [{"symbol": "SPY", "qty": "70", "market_value": "60000"}]
         execute_trades(cfg)
-        assert [(c.kwargs["ticker"], c.kwargs["target_pct"]) for c in mock_core.call_args_list] == [("SPY", 0.19), ("SPMO", 0.285), ("SGOV", 0.475)]
+        assert [(c.kwargs["ticker"], c.kwargs["target_pct"]) for c in mock_core.call_args_list] == [("SPY", 0.196), ("SPMO", 0.294), ("SGOV", 0.49)]
         # back to full exposure with SGOV held → SGOV sells first so its cash funds the re-risking
         mock_core.reset_mock()
         (tmp_state_dir / "plan.json").write_text(json.dumps({"generated_at": NOW, "exposure_scale": 1.0, "items": [], "watch": [{"ticker": "AAA", "reason": "no signal"}]}))

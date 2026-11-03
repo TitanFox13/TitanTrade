@@ -15,7 +15,7 @@
 ## Trading Safety
 
 - Paper trading is the default and the current state (todo Phase 2.0 gates going live).
-- Position limits are code, not configuration the LLM can reach: 25% slots, max 3, 70% overlay cap, 5% cash reserve, $500 minimum notional, 8% drawdown breaker, 50% sector cap, 75% correlation cap.
+- Position limits are code, not configuration the LLM can reach: 25% slots, max 3, 70% overlay cap, 2% cash reserve, $500 minimum notional, 8% drawdown breaker, 50% sector cap, 75% correlation cap.
 - Every entry is a bracket with a −12% stop; a GTC stop replaces the DAY leg on fill, and the stop-coverage job re-places a missing stop five minutes into every session.
 - Every exit cancels the resting stop, waits for the cancel to settle, sells at market and restores the stop if the sell fails — a position is never left bare by a failed exit.
 - The only LLM output the system reads is the universe proposal (manual since Decision 082, no scheduled call), and it is applied by a human.

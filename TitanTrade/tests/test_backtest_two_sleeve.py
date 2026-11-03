@@ -41,7 +41,7 @@ def test_momentum_leg_holds_its_target_and_moves_only_outside_the_band():
     mom = _bars(_rise(400, 0.001))
     res = run_mechanical_backtest({"AAA": flat}, flat, None, LIVE, momentum_bars=mom)
     daily = run_mechanical_backtest({"AAA": flat}, flat, None, {**LIVE, "core_band_pct": 0.0}, momentum_bars=mom)
-    assert 0.55 <= res["avg_momentum_share"] <= 0.63          # target 0.95 × 0.6 = 57 %, drifting inside the band
+    assert 0.55 <= res["avg_momentum_share"] <= 0.63          # target 0.98 × 0.6 = 58.8 %, drifting inside the band
     assert 2 <= res["core_trades"]["momentum"] <= 4 < 100 < daily["core_trades"]["momentum"]
     assert res["metrics"]["trades"] == 0 and res["shock_days"] == 0
 

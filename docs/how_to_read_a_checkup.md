@@ -34,14 +34,14 @@ Why stops matter most: the broker's stop is the only protection that works while
 
 The book has three kinds of holdings and one reserve:
 
-- **The momentum sleeve** — one ETF of the index's strongest recent names, held at 60 % of the investable book. "Investable" means equity minus the 5 % cash reserve, so the target is 57 % of equity. It is bought and sold only when it drifts more than 5 points of equity away from that target, so it normally sits anywhere between 52 % and 62 %. Since 2026-10-29 it has been well below that because it fills only from cash freed by the old positions; that is the transition, not a fault.
+- **The momentum sleeve** — one ETF of the index's strongest recent names, held at 60 % of the investable book. "Investable" means equity minus the 2 % cash reserve, so the target is 59 % of equity. It is bought and sold only when it drifts more than 5 points of equity away from that target, so it normally sits anywhere between 52 % and 62 %. Since 2026-10-29 it has been well below that because it fills only from cash freed by the old positions; that is the transition, not a fault.
 - **The dip slots** — up to three positions of 10 % of equity each, bought when a sector ETF closes 8 % or more below its 90-day high while still above its 150-day average. Each has a stop 12 % below its entry, a target 20 % above, and a 60-trading-day clock.
 - **SPY** — whatever is left of the dip sleeve's 40 % after the slots. With three slots held it is about 8 %; while the old 25 %-sized positions are still held it is zero.
-- **Cash** — about 5 %, the reserve the entries need.
+- **Cash** — about 2 %, the reserve that covers a bad fill on a big buy (Decision 090; it was 5 % until November 2026).
 
 | what the checkup says | normal | a problem |
 |---|---|---|
-| "SPMO n % of its 57 % target" | Within the band, or below it while old positions run out | Far below target with free cash sitting idle for more than a run or two |
+| "SPMO n % of its 59 % target" | Within the band, or below it while old positions run out | Far below target with free cash sitting idle for more than a run or two |
 | "DXCM / URI / JPM held" (the transition names) | Each with its stop, target and clock from the plan; they leave only by those three exits | A forced sale of one of them; one without a plan item |
 | "n free slots, candidates: …" | 0 free slots while the three old names are held; afterwards 0–3 | A free slot with a valid candidate and no entry, with no gate named as the reason |
 | "SPY n %" | 0 during the transition; later the small remainder | SPY above the remainder while slots are held (money double-counted) |

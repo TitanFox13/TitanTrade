@@ -24,7 +24,7 @@ log = get_logger("risk_manager")
 
 MAX_DRAWDOWN_PCT = 8.0          # Halt new entries if portfolio drops >8% from peak
 MAX_SECTOR_EXPOSURE_PCT = 50.0  # Max % of equity in one sector
-MIN_CASH_RESERVE_PCT = 5.0      # Cash is transit, not destination
+MIN_CASH_RESERVE_PCT = 2.0      # Cash is transit, not destination; 2 % covers a 2 % adverse fill on the largest core buy (Decision 090)
 MACRO_BLACKOUT_HOURS = 6        # No new entries within 6h of high-impact macro events
 
 # Minimum dollar value for a new position. When nearly all cash is committed,
