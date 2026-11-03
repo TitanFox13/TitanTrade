@@ -17,7 +17,7 @@ When you have read everything, report back in a few plain sentences: what the sy
 1. `CLAUDE.md` (repo root) — what the system is, commands, architecture, documentation rules.
 2. `docs/roadmap.md` — the living plan: tracks A–H, a status mark per item, the running order at the end. **This is where the work comes from.**
 3. `docs/decisions.md` — newest first: the Check 2026-10-30 section, then Decisions 080 → 073 (the eight research results of 2026-10-29/30), 072 (the data library), 071 (go-live readiness), 070 (+ addendum: the sector universe, live), 069 (the go/stop rule, the fill ledger), 068 (+ addenda: the two-sleeve book), 067 (+ four addenda), 066, 065. The project's memory: every design choice, every number, every rejected idea with the numbers that rejected it.
-4. `docs/todo.md` — Phase 2.0 (the go-live checklist), then Phases 2.20 → 2.7 (newest first), the rest for history.
+4. `docs/todo.md` — the open-items index at the top, Phase 2.0 (the go-live checklist), then the phases newest first (2.28 → 2.7), the rest for history.
 5. `docs/insights.md` — the lessons dated 2026-10-27, 2026-10-29 and 2026-10-30; each one was paid for.
 6. `TitanTrade/scripts/param_search/README.md` — the research harness, one row per script, the data, the external library.
 7. `TitanTrade/docs/deployment.md` (the deploy procedure, backups, the server-down runbook), then `architecture.md`, `data_schemas.md`, `risk_management.md`, `api_reference.md`.

@@ -1,5 +1,18 @@
 # TitanTrade TODO
 
+## Open items — the index (2026-11-03, Decision 088)
+What is actually open, by where it waits; the phases below are the record and keep their boxes. Newest phase first.
+- **Live time**: the checkup ≈ 2026-11-12, written in the order of `docs/how_to_read_a_checkup.md` (Phases 2.26, 2.23) — verify: the first ETF entry and its fill-ledger row, the benchmark wording at 20 trading days (2.9), SPMO rebalanced only outside its 5 % band and no orphan-close attempt on it (2.7), a settled-close exit seen live (2.2), no "SUSPECT ACCOUNT VALUE" / "target not confirmed" line without a real glitch (Decision 084), DXCM's clock against its stop's expiry (≈ Jan 21 / 22); the go/stop rule needs a ≥ 10 % SPY drawdown (2.0).
+- **The operator**: the go-live checklist (2.0 — fund ≥ $25k, W-8BEN, enrol the cash programme and leave `cash_ticker` off (Decision 087), the healthchecks URL (2.10), the tax line); the free Tiingo and Alpha Vantage keys (2.11 → roadmap B11 / B10); the WARNING → INFO cosmetic on the operator's go (2.2); asset rotation kept for later (2.7).
+- **Housekeeping at the next checkup**: `external/sec_facts/` and `alpaca_hist/quality/` archived on titanserver if not yet (2.16); `git pull --ff-only` on the server (docs and research scripts only — nothing to deploy); titanserver disk and build cache (1.36).
+- **Research**: nothing ready to run — the B track is done except the keyed B10 / B11; E6 at the back (roadmap); the 2.1 "next search" boxes predate the sector universe (Decision 070) and Track D's closed doors.
+- **Phases 1.37 and earlier** (the LLM-era book) keep their open boxes as history; the conversion (Decisions 061–063) superseded them.
+
+## Phase 2.28: Track F housekeeping — the luck meter in `master.score`, `docs/todo.md` reordered (2026-11-03) — Decision 088
+Operator: "do all the ready to run". No `src/` change, no deploy.
+- [x] `master.score(…, luck_draws=N)` adds `t`, `psr` (the probabilistic Sharpe ratio), `band` (the excess CAGR's 5 / 50 / 95 % by stationary block bootstrap) and `p_pos`; `master.luck_line(s)` prints them; `sharpe_daily` / `ncdf` / `stationary_bootstrap` moved from `luck.py` verbatim (its output byte-identical before and after); the pool-level statistics (deflated Sharpe at N, PBO) stay in `luck.py`. `rates.py` is the first script to print the line; older scripts untouched (their outputs stay reproducible).
+- [x] This file reordered: the open-items index at the top, then every phase newest first (2.28 → 2.0, 1.37 → 1.5, 1), then the original build plan's Phases 1–5 and the two closing sections; every non-blank line kept; the stale "Next" boxes of Phases 2.4 → 2.19 ticked with the Decision each ran into.
+
 ## Phase 2.27: Rates by era — roadmap B4 run, the cash programme alone at go-live (2026-11-03) — Decision 087
 Operator: "do all the ready to run". Hypotheses R1–R7 and the rule committed before the first run (`2ea35b9`, `rates.py`); the rate-level series corrected after the first run (French's daily bill return is rounded to 0.01 % per day — three values across the decade; the level now comes from FRED's daily bill from 1954 and French's monthly file before); results in Decision 087. Nothing live changed.
 - [x] **R1 / R3 / R5 hold**: the rate by era 0.85 / 3.54 / 6.80 / 1.93 %; the pickup by era +0.10 / +0.78 / +0.94 / +0.33 (century +0.52, decade +0.17 — Decision 068 reproduced); the leg is worth 0.15 pp/yr per point of bill rate on the century's 15 % idle share, 0.08 on the decade's 7.8 %.
@@ -7,39 +20,6 @@ Operator: "do all the ready to run". Hypotheses R1–R7 and the rule committed b
 - [x] **R6**: the two switches cost about a point a year since 1975 at a zero rate, half a point in bills; earned their keep only in 1927–50; on for the drawdown as before. The hypothesis had misread Decision 068's +1.6 (that was the insurance off with the shock on — reproduced as +1.67).
 - [x] **R7 decides**: the cash programme alone +0.45 pp/yr at today's 4.05 % bill (the reserve included); SGOV / SHY on top +0.03 / +0.06 — under the pre-registered 0.1 → **the programme alone, the `cash_ticker` leg off; SHY only if the programme is unavailable**. Phase 2.0's checklist and Phase 2.20's go-live box updated.
 - [x] Roadmap B4 ✅, the C5 go-live row, the running order; `fetch_external.py` lists the monthly French factors file; README row; one insight; handover note.
-
-## Phase 1.37: October 13 checkup — ADR 059 verified live, bracket-leg stop coverage fixed, selection-vs-execution attribution (2026-10-13) — Decision 060
-Sweep Sep 29 → Oct 12 close: 0 ERROR/CRITICAL in 3,029 log lines (14 d), 75 WARNINGs all expected (sentry noise/abort, cooldown override, ADJUST live-price floor ×3 on JPM, FRED 502 retries ×5), 8 scheduler jobs `completed`, both images = Sep 29 12:20 build, git clean at `ef42847`, AI $3.03 Oct-to-date ($6.30 Sep). Equity $112,682; 8 overlay positions + SPY core 34.5%, all 8 GTC stop-covered at check time, cash 6.3%. Disk 62% (build cache 7.3 GB, 6 dangling PG 15 volumes 498 MB).
-- [x] **Decision 059 verified live:** `benchmark_metrics.json` computed Oct 12 20:30 UTC has `window_end = 2026-10-12` (fix 2 ✓). Override log lines read "≥1% above the $X exit" (fix 1 ✓): 3 overrides allowed (FCX Oct 2 +4.2% above the $68.91 exit, EQIX Oct 2 +3.0% above $998.13, EQIX Oct 9 +2.6% above $998.23), ≥5 evaluations refused (JPM ×2 at +0.0…+0.4% above the $333.08 exit, DXCM ×3 at +0.5…+0.6% above $83.91). Both refused tickers went nowhere: JPM $334.30 on Oct 12 (+0.4%) and was dropped by the Oct 4 review; DXCM re-dipped −5% on Oct 8 before +1.8%. DASH's legacy record (no `exit_price`) fired the old-wording override ×4 Sep 30 – Oct 2; every attempt was dust-blocked ($90–99 budget behind the pending DXCM bracket), so no harm.
-- [ ] **Performance to Oct 12 (strategy / SPY):** new clean window since the Sep 29 deploy (9 td) **+1.05% vs +1.82%** (−0.77 pp; max DD −1.27% vs −0.66%); clean since Jul 8 (67 td) +4.22% vs +4.39% (beta 0.69, Sharpe 1.37 vs 1.54, up-cap 0.77 / down-cap 0.71, max DD −4.64% vs −3.38%); since the Aug 12 peak −1.56% vs +0.73%; since Decision 057 (Sep 2) +2.17% vs +1.69%; since Decision 046 (May 12) +11.41% vs +5.41% (CRWD-split polluted); inception +12.76% vs +23.12%. Go/stop rule (Phase 1.36) unchanged: no SPY drawdown yet (max −0.66% in the window).
-- [ ] **Churn in the new window:** 5 exits (JPM Sep 30, FCX Oct 1, EQIX Oct 1, DXCM Oct 6, EQIX Oct 8), all broker stops at analyst levels, all losers, realised −$629 (FIFO on Alpaca fills); 3 of 5 re-bought within 7 d at a higher price (FCX +4.2%, EQIX +3.0%, EQIX +2.6%), re-entry gap ≈ $562. Exits + gap ≈ $1.2k ≈ 1.05% of equity ≈ the whole lag vs SPY. Watch: CRWD $258 and ANET $206.50 analyst stops sit 1.0–1.1% below the Oct 12 close.
-- [x] **Fixed — bracket legs are DAY orders and the two post-fill paths disagreed (Decision 060).** A filled bracket's TP/stop legs inherit the parent's `tif=day` and die at 20:00 UTC. (1) Held ticker with `review_action == ADJUST` re-opened after the review: the Decision 056 guard `continue`d past *all* management, so the DAY legs expired and the position had no stop until the next market-open run — FCX none from Fri Oct 2 20:00 to Mon Oct 5 14:15; EQIX (Fri Oct 9 19:46 fill) none until Mon Oct 12 14:15. (2) `_manage_held_bullish`: Alpaca keeps the bracket's stop leg in `held` (not returned by `status=open`), so the executor saw "TP leg but no stop", cancelled the TP and placed a GTC stop at the *thesis* level instead of the adapted bracket's — EQIX Oct 2: $969.95 → $1000, tagged Oct 8 (−$119) and re-bought Oct 9 (+$128 gap); URI: $987.09 → $970. Shipped: `_ensure_coverage` / `_ensure_protective_stop` (one helper, both paths), `_coverage_stop_price` (entry-time stop from `trade_state.position_entry_stop` for positions newer than the review), `ensure_stop_coverage` run by the 13:35 gapcheck job and CLI. 9 tests (`tests/test_stop_coverage.py`), 587 total.
-- [x] **Deployed 2026-10-13 09:29 UTC** (commit `452a6e1`): both images rebuilt (`api` + `titantrade`, both verified to import `ensure_stop_coverage` and carry the gapcheck wiring — the CLI image must be checked through its `uv run` entrypoint, a bare `/app/.venv/bin/python` cannot import the package there), API restarted, health ok, 8 scheduler jobs registered, smoke `ensure_stop_coverage(load_config())` → 0 (market closed, all 8 positions already covered) — 3.5 h before the day's 13:00 UTC fetch. **Verify at the next checkup:** no "has no stop, market closed" line after any fill; the 13:35 gapcheck result reads "N positions closed, M stops placed"; a re-opened ticker's GTC stop equals its trade-log `stop_loss_price`.
-- [ ] **Selection vs execution (operator question, Oct 13)** — counterfactual in Decision 060 Evidence: over the clean window the analyst's equal-weight basket made +2.56% vs SPY +4.39% while the strategy made +4.22% — execution *added* 1.2–1.7 pp over passively holding the picks; since Aug 12 the basket lost 4.6% vs SPY +0.7% (selection drove the lag, execution recovered ~1 pp); only the Sep 29 → Oct 12 fortnight shows execution as the net cost (−0.6 pp, five stop-outs). Static buy-and-hold of every selected name beat the weekly re-selected basket by 2.7 pp — the weekly rotation is a drag. Next lever, if any, is the analyst's selection/rotation, fills-first test required before anything ships; the risk machinery stays frozen.
-- [ ] **Watchlist size (operator question, Oct 13) — answered, nothing shipped** (Decision 060 Evidence 2): the analyst's weekly selection has no ranking skill at the weekly horizon (Spearman(confidence, next-week return) −0.05; selected +12.6% vs left-out +29.8% vs whole watchlist +18.6% vs SPY +5.2% since May 10). A bigger watchlist does not help a picker with no skill; the book is capital-bound anyway. Candidate follow-ups, fills/history-first: (a) 4-week-horizon version of the skill test; (b) trade the gated watchlist instead of the confidence-ranked subset; (c) universe curation. Not under the hold's strategy freeze until tested.
-## Phase 2.0: Conversion to the mechanical strategy (2026-10-13) — Decision 061
-Operator's call after the component audit: "fully convert with all the points made; the large parameter search comes after, on my call".
-- [x] **Sentry and price-check exit authority retired**; broker stop + target + holding limit are the only exits (`executor._manage_held_mechanical`).
-- [x] **LLM selection / direction / confidence retired**; `mechanical.py` generates the thesis file from the dip-in-uptrend rule with flat 20% slots (max 3); the nine gates and the bracket path are unchanged.
-- [x] **SPY core is the residual** of exposure scale × 95% − overlay (`mechanical.core_target_pct`); **insurance** = two-signal confirmation (SPY < SMA200 and sector breadth < 50% → 50% exposure, no new entries).
-- [x] **LLM reassigned**: monthly universe-curation proposal + post-mortem (`curator.py`, `curate` job, `/api/universe-proposal`). No orders.
-- [x] **Backtester for the mechanical strategy** (`backtest/mechanical.py`, `backtest-mech`, `download-history --days N` with sector ETFs) using the same `signals.py` code as live; walk-forward helper and a coarse built-in grid.
-- [x] Schedule rewritten (`data/schedule.json`); `strategy: "mechanical"` in `data/watchlist.json`; 612 tests green.
-- [x] **Deployed 2026-10-13 12:42 UTC** (commit `bdc558a`, both images, 7 jobs, health ok); first signals run 12:43 UTC: strategy started, insurance on, DASH signal, 8 legacy positions queued for the 14:15 UTC orphan close. **Verify after the 14:15 UTC run**: legacy positions sold, SPY at ≈75% of equity, DASH bracket placed/filled at ≈20%, `/api/signals` served.
-- [x] ~~Flutter app follow-ups~~ — the app was deleted in Decision 063 (unused); `/api/plan` replaced `/api/signals`.
-- [ ] **Go/stop rule (recalibrated 2026-10-29, Decision 069; the Decision 061 wording is withdrawn)**: fund ≥ $25k only when, over the clean window since `window_started_at` (2026-10-27): (1) **behaviour** — every trade-log action is one the rules prescribe (entries on plan NEW items at the plan's levels; exits only by stop / target / holding limit / orphan close / core rebalance; exposure halved exactly on trigger sessions) and the median fill-vs-backtest gap (fill vs the next close after the signal) is reported at each checkup — by hand from `trade_log.json` vs `plan.json` until the ledger exists, no numeric threshold before 20 trades; (2) **drawdown** — at least one SPY drawdown ≥ 10 % in the window; in every SPY drawdown ≥ 10 % the book fell no further than SPY, in any ≥ 20 % at most 0.7 × SPY's fall; (3) **return** — reported with its bootstrap band, never a condition under 3 years.
-- [x] **Decision 069 code follow-ups built 2026-10-29 (operator's go)**: (a) fill-vs-backtest ledger — `fill_ledger.py`, `fill_price` on the BUY record, `state/fill_ledger.json` appended by the daily summary, `GET /api/fill-ledger`, a Discord summary field; (b) benchmark verdict under 3 years → "Too short to judge the return … excess ±band" (`tracking_error_annual_pct`, `excess_annual_pct`, `MIN_RETURN_VERDICT_DAYS` 756), the summary line shows the band instead of α. 256 tests, ruff clean. **Not deployed — needs the operator's go** (both images). **Verify after deploy**: the first entry after the deploy gets a `fill_price` in the trade log and a ledger row at that day's 16:30 ET summary; the summary's benchmark line reads "excess … ±… pp/yr (too short to judge)"; `/api/fill-ledger` serves the rows.
-- [ ] **Go-live checklist (Decision 071, answers researched 2026-10-29)** — what only the operator can do: (a) open / fund the live account at ≥ $25k (every ETF slot ≥ 13 whole shares; $10k is the floor, $5k hits the dust guard) with a W-8BEN on file (15 % treaty withholding on US dividends, which a live account does receive — paper does not); (b) in the Alpaca dashboard, Plans and Features: enrol in **High-Yield Cash** (up to 3.56 % APY variable, FDIC sweep, usable as buying power, non-PDT accounts) — if the account can enrol, leave `cash_ticker` off (**Decision 087: an ETF leg on top of the programme adds only +0.03 … +0.06 pp/yr at today's rate**); if it cannot, set `cash_ticker: "SHY"` (a 1–3-year Treasury ETF; Decision 080's proposal: +0.3 pp/yr over bills on fifty years, −0.1 in a 2020s-type regime; the leg is built, off by default; SGOV was the Decision 071 placeholder, IEF is the higher-return / rate-shock-exposed dial, the operator's call); (c) create one healthchecks.io check (free: 20 checks; schedule `35 16 * * 1-5`, timezone America/New_York, grace 2 h), put its URL in the server `.env` as `HEALTHCHECK_PING_URL`, `docker compose up -d api`, confirm the first ping after the next 16:30 ET summary; (d) the tax line to the advisor: dip-sleeve trades are taxable (inside the 3-year time test; 15 % / 23 % as other income; the CZK 100,000 gross-proceeds exemption will not apply at this size), the SPY / SPMO / SGOV lots become exempt lot by lot after three years (the CZK 40 m cap no longer applies to securities from 2026), US dividends withheld 15 % with credit; (e) read the server-down runbook once. Done by the agent: backups daily on the host + `scripts/pull_backup.sh` for the off-server copy at every checkup; the 90-day GTC expiry confirmed in Alpaca's docs (aged-order policy, cancelled at 16:15 ET on `expires_at`, re-placed by the 09:35 ET coverage job); the go/stop rule (069).
-
-## Phase 2.1: Parameter search on long history (2026-10-13) — Decision 062
-- [x] Data: Alpaca SIP 2016 → (all 28 symbols; `download-history` switched to SIP) and Yahoo adjusted daily closes 1993/1999 → 2026 (SPY, QQQ, 11 sectors, 15 names). Stooq blocked (JS challenge); Yahoo needs `period1=0&period2=<now>` for daily granularity and a cookie jar.
-- [x] Harness: `scripts/param_search/` (fastbt validated trade-for-trade vs `backtest/mechanical.py`; stage 1 grid 6,000 × 4 datasets; stage 2 insurance × sizing; stage 3 walk-forward of the selection procedure; plateau scoring).
-- [x] Chosen plateau midpoint applied to `data/watchlist.json` settings.mechanical: dip 8% / 90 d / SMA150 / 60 d / +20% / −12%, 25% × 3 slots, insurance unchanged (SMA200, breadth 0.5, scale 0.5).
-- [ ] **Watch**: the first weeks under the new parameters — candidate count per run (expect more than under 10%/60 d), the 70% overlay cap trimming the third slot, and that targets/time exits fire at 20% / 60 d.
-- [ ] **Next search (not before 6 months of live data)**: extend the sector universe test with a hindsight-free *name* universe (e.g. the S&P 100 constituents as of 2010 from a point-in-time list), add a second hold-out era, and re-run stage 3 only. Add the exit-side variants from the 2026-10-27 outlier test (target 25–40% / none, hold 90–250, `trail_pct` 10–20%, now supported by `fastbt.py`) on the 1999 → datasets.
-- [x] **Datasets rebuilt and archived 2026-10-27**: Alpaca SIP 2016 → for the 15 names + SPY + sectors (back from the server), **E** the S&P 500 as of 2016-01-04 (502 names incl. 94 delisted — survivorship-free) and **F** French 49 industries 1926 → (`scripts/param_search/datasets.py`); all under `/home/TitanTrade/archive/param_search/` on titanserver (copy back with the base64 pipe). Still missing: the Yahoo 1999 → files for B / C — Yahoo returns 429 from both machines; `scratchpad/yahoo_patient.py` keeps probing; when it succeeds, archive `data/param_search/yahoo` on the server too. If it never lifts, a free Tiingo key (operator sign-up) is the clean replacement.
-- [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
-- [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
 
 ## Phase 2.26: Trend and carry over a century — roadmap B3 run, no sleeve (2026-10-30) — Decision 086
 Operator: "let's do the century trend". Hypotheses T1–T5 and the drop rule committed before the first run (`1809250`, `trend.py`); the monthly book construction corrected before any number was read; results in Decision 086. Nothing live changed.
@@ -95,14 +75,14 @@ Operator's go. Hypotheses G1–G5 committed before the first run (`2f52478`), th
 - [x] **The sleeves fail, as pre-registered**: on 1971 → every gold sleeve costs 0.2 … 0.9 pp/yr against the book (−0.68 for 10 % from SPMO) for 4 … 9 points less drawdown and +0.04 … +0.09 of Sharpe, not both halves; the decade (GLD) reproduces Decision 068 exactly (−0.32, Sharpe 1.18 vs 1.10, DD −18.3). Gold alone 8.6 %/yr vs 11.3, DD −62, correlation −0.01.
 - [x] **The parking place was 1973–74**: the idle half in gold +4.71 vs bills +3.34 on 1971 → passed the letter of the bar; gold earned 14.6 %/yr in the de-risked windows over 1971 → and 7.0 (vs 7.2 overall) from 1975; from 1975 it is behind bills in the first half (+3.4 vs +4.3) and at the timing placebo's median (48 % of draws); 1971 → above 84 % of draws (the bar 90 %). A candidate, folded into B8.
 - [x] Roadmap B7 ✅, B8 amended (cash / bills / bonds / gold together, the next pick), Track D and C3; README row; one insight; handover note.
-- [ ] **Next**: B8 — the de-risk destination judged together (Treasury yields 1954 / 1962 → as a total-return series; gold's step series; the timing placebo; the eras) — on the operator's go; then the first checkup under design 070 (≈ 2026-11-05) and the Track F cleanup.
+- [x] ~~**Next**: B8~~ (run 2026-10-30 → Decision 080) — the de-risk destination judged together (Treasury yields 1954 / 1962 → as a total-return series; gold's step series; the timing placebo; the eras) — on the operator's go; then the first checkup under design 070 (≈ 2026-11-05) and the Track F cleanup.
 
 ## Phase 2.18: A VIX-based shock trigger — roadmap B6 run, the price rule stays (2026-10-30) — Decision 078
 Operator's go. Variants, hypotheses X1–X5 and the Decision 067 bar committed before the run (`a2eb604`, `vixshock.py`); results in Decision 078. Nothing live changed.
 - [x] **No VIX cell beats the price rule**: 1990 → the best level cell (VIX > 40 / hold 10) +1.74 vs the price rule +1.75, same drawdown, neighbours within 0.5 (no plateau), worse on the decade (+1.14 vs +1.36, DD −22.0 vs −20.0); VIX > 25 / 30 lose 1 … 3 pp/yr on both windows (they fire 27–45 % of sessions and give the 2008 / 2020 rebounds back twice over); the jump cells of 12 … 16 points match the price rule because they are the same event; the inverted term structure is the worst of the family.
 - [x] **Timing**: median lead zero sessions over thirteen bears (2008 +45 the one early call; 2020 −1, 2022 −2); the VIX > 30 rule agrees with the price rule on only 45 % of de-risked sessions.
 - [x] Roadmap B6 ✅ closed, Track D; README row; one insight; handover note. The shock trigger stays the −7 % / 10 / 20 price rule.
-- [ ] **Next**: B7 — gold over a century (datahub monthly 1833 → against the French market), on the operator's go.
+- [x] ~~**Next**: B7~~ (run 2026-10-30 → Decision 079) — gold over a century (datahub monthly 1833 → against the French market), on the operator's go.
 
 ## Phase 2.17: Credit stress as the insurance's second signal — roadmap B5 run, a candidate that failed its robustness check (2026-10-30) — Decision 077
 Operator's go. Hypotheses C1–C6 and the caveats committed before the first run (`27457b8`), the addendum S1–S3 before the second (`227e040`); results in Decision 077. Nothing live changed.
@@ -110,7 +90,7 @@ Operator's go. Hypotheses C1–C6 and the caveats committed before the first run
 - [x] **The revision finding** — ALFRED: the NFCI's 2020-04-03 week read +0.07 in real time, +0.31 today; first-release histories fetched via the FRED API on the server (NFCI / ANFCI from 2011-06, STLFSI4 from 2022-11; `external/fred/*_initial.csv`); Moody's BAA / AAA (monthly 1919 →), DBAA / DAAA / BAA10Y / AAA10Y (daily) and TEDRATE added to the library and the fetcher.
 - [x] **Run 2 fails** — the unrevised Moody's spread gate on 1971 →: +2.74 (+3.6 / +2.0) vs +2.62 (+3.8 / +1.5), DD −46.3 vs −35.6, placebo beaten 35 %; century: two of four eras ahead, era drawdowns 15 and 10 points deeper; daily spreads the same at every threshold; a spread confirms a bear late (1973–74 +5 vs +21, 2008 +10 vs +21). Real-time NFCI 2011 →: max +0.07 in 2020, the > 0.5 rule never fires in either vintage.
 - [x] Roadmap B5 ✅ → closed, Track D row, B6 note; README row; two insights; handover note. **The insurance keeps its two signals.**
-- [ ] **Next**: B6 (a VIX-based shock trigger, the fast-fact mechanism) / B7 (gold over a century), on the operator's go.
+- [x] ~~**Next**: B6 / B7~~ (run 2026-10-30 → Decisions 078 / 079): B6 (a VIX-based shock trigger, the fast-fact mechanism) / B7 (gold over a century), on the operator's go.
 
 ## Phase 2.16: The quality stage 1 — our own profitability picks on free SEC data, no sleeve (2026-10-30) — Decision 076
 Operator: "if the data says it is profitable, diversifies and stands the test of time, why not" → free data first → go. Design, hypotheses S1–S6 and drop rules committed before any data (`a086fdc`); results in Decision 076. Nothing live changed.
@@ -122,7 +102,7 @@ Operator: "if the data says it is profitable, diversifies and stands the test of
 - [x] **S5 fails** — the sleeve costs the book 0.6 … 0.9 pp/yr for the same Sharpe. **S6** — 39–42 % turnover; $100 / $400 per name at $25k / $100k against the $500 dust floor.
 - [x] Roadmap Track H: stage 1 ✅, stage 2 (the value-weighted picks, confound first) 💡, the paid long-history item not worth buying unless stage 2 survives; README rows; `screens.simulate(score_matrix, weights)`; two insights.
 - [x] **Stage 2 run the same day (operator: "stage 2"; `qualpick2.py`, checks T1–T6 committed first, `64af97c`)**: the weighted picks were Apple, Nvidia and Lilly (top-5 share 54–72 %; the top-30 57 % Apple in 2026); after SPMO and a size tilt no alpha survives (t −0.5 … +1.2); capped at 5 % every variant loses out of sample (−1.7 … −4.1 vs SPY), the within-size and over-assets constructions included; the fifty largest names alone made +2.3 in the January window; the sleeve fails on all four variants; the smallest cap-weighted position $5 at $25k. **The quality question is closed on free data; the paid extension is not bought.**
-- [ ] **Next**: B5 / B6 / B7 — credit stress as a second insurance signal, a VIX shock trigger, gold over a century — on the operator's go.
+- [x] ~~**Next**: B5 / B6 / B7~~ (run 2026-10-30 → Decisions 077 / 078 / 079) — credit stress as a second insurance signal, a VIX shock trigger, gold over a century — on the operator's go.
 - [ ] At the next checkup: archive `data/param_search/external/sec_facts/` (118 MB) and `alpaca_hist/quality/` on titanserver beside the other research data.
 
 ## Phase 2.15: Quality over a century — roadmap B2 run, no sleeve, B9 closed (2026-10-30) — Decision 075
@@ -135,7 +115,7 @@ The next pick after B1, on the operator's go. Hypotheses Q1–Q6 and the drop ru
 - [x] Roadmap B2 ✅, B9 🚫, Track D and C2 closed, Track H: quality ETFs (SPHQ / JQUA / DGRW) as the cheap reopening condition; README row; three loaders; one insight.
 - [x] **Addendum — the quality funds as vehicles (same day, operator's pick)**: eleven funds fetched on titanserver (data API only, SIP, `adjustment=all`, archived), the list and hypotheses V1–V3 committed before the fetch (`b2c914f`, `quality_etfs.py`). **0 of 12 beat SPY in both halves** (JQUA +0.1, SPHQ −0.6, QUAL −0.7, FQAL −0.9, the dividend family −1.2 … −3.9, all behind through 2025) while the French top-30 % / top-decile portfolios beat SPY by +1.6 / +3.4 over the same decade (the French market = SPY to the decimal); the funds load on RMW (0.05–0.27, a quarter to half of the real tilt) with negative alphas. The vehicle is not the premium; door closed; a self-built held profitability sleeve from point-in-time fundamentals is the only route left, recorded in Track H, not proposed.
 - [x] **The data rule (operator, 2026-10-30)**: free first, always; paid-only data → the "needs paid data" group at the back of the roadmap, bought once and together. Free fundamentals found: the SEC's XBRL APIs / data sets, every US filer from 2010-Q4, point-in-time by filing date (probed; cleaning = 1–2 days); nothing free before 2009 (SimFin 5 years, OSAP no tickers). Quality stage 1 = ready on free data 2010 → (Track H, operator's call); its 2000–02 / 2008 confirmation = paid (EODHD / Sharadar), parked in the paid group with the option chains, B10 / B11 (free keys first) and the MSCI histories.
-- [ ] **Next**: B5 / B6 / B7 — credit stress as a second insurance signal, a VIX shock trigger, gold over a century — on the operator's go.
+- [x] ~~**Next**: B5 / B6 / B7~~ (run 2026-10-30 → Decisions 077 / 078 / 079) — credit stress as a second insurance signal, a VIX shock trigger, gold over a century — on the operator's go.
 
 ## Phase 2.14: Put-writing and the collar indices — roadmap B1 run, nothing adopted (2026-10-29) — Decision 074
 The next pick after E2, on the operator's go. Hypotheses O1–O5 and the drop rules committed before the run (`cf51d75`, `scripts/param_search/putwrite.py`); results and tables in Decision 074. Nothing live changed.
@@ -144,7 +124,7 @@ The next pick after E2, on the operator's go. Hypotheses O1–O5 and the drop ru
 - [x] **O3 fails** — the idle half in a protective put: +0.3 vs bills over 40 years with the drawdown 12 points deeper (−48 vs −36); on the decade +3.45 vs +1.36 at −22.8 vs −20.0 (the era's preference for less insurance; still over the 2-point bar); the permanent put costs 3.1 pp/yr for −42 % against the free signals' 0.7 for −39 %.
 - [x] **O4** — the bought protection protects as much as the rules in the fall and loses far more in the rebound year (2009 −37, 2020 −44 vs −26 / −16).
 - [x] Roadmap B1 ✅, Track D "put-writing" closed with numbers, C3 "options" answered; README row; `datasets.cboe`; one insight.
-- [ ] **Next**: B2 — quality over a century (French profitability / investment sorts, AQR QMJ), on the operator's go.
+- [x] ~~**Next**: B2~~ (run 2026-10-30 → Decision 075) — quality over a century (French profitability / investment sorts, AQR QMJ), on the operator's go.
 
 ## Phase 2.13: The international book — roadmap E2 run, no book, no blend (2026-10-29) — Decision 073
 The handover's first task, on the operator's go. Hypotheses I1–I7 and the drop rules committed before the run (`eb94dbc`, `scripts/param_search/intl.py`); results and tables in Decision 073. Nothing live changed.
@@ -155,18 +135,18 @@ The handover's first task, on the operator's go. Hypotheses I1–I7 and the drop
 - [x] **I5 fails** — every blend gives back 0.7–3.8 pp/yr vs SPY, no better than ACWX held in the slot, inside the random-country spread; DD gain ≤ 1.3 points, crash weeks ±1–2 points; no blend positive vs SPY in both halves. Post hoc: IDMO alone in a 10 % slot is the one cell beside the live book (+1.22 vs +1.36, DD −20.9, Sharpe 1.12) — a C1-style dial, recorded, not proposed.
 - [x] **I7 knowledge** — in euros the decade's ranking is unchanged (dollar drift −0.7 %/yr); 2002–08: US stocks −4.9 %/yr in euros vs developed ex-US +3.5 (the fear, in history); 1999–2026 the dollar round-tripped and the US won by 2.5 pp/yr in both currencies; DBEF beat EFA +2.3 (the rate differential, E4 reference).
 - [x] Roadmap: E2 ✅, E3 🚫 (reopened only by Tiingo's longer country-ETF history, B11, or a pre-registered IDMO-dial test), E4 priced; README row; `datasets.french_regional`; todo 2.12 order corrected (E2 was always first after the risk statement).
-- [ ] **Next**: B1 — put-writing and the collar indices on 40 years of Cboe data (roadmap B1), on the operator's go.
+- [x] ~~**Next**: B1~~ (run 2026-10-29 → Decision 074) — put-writing and the collar indices on 40 years of Cboe data (roadmap B1), on the operator's go.
 
 ## Phase 2.12: The roadmap (2026-10-29)
 Operator: "build some roadmap and store it … see if the new data reopens closed decisions … dive into the freedom areas … run strategies on other markets too." Written as `docs/roadmap.md` (tracks A live evidence, B tests the new data unlocks, C the freedom areas, D closed doors the data reopens, E other markets, F method, G toward real money) with a status mark per item; the first international data fetched the same day (French regional factors / momentum 1990 →, 39 region / country ETFs 2016 →, archived on titanserver). Updated whenever an item moves; results stay in `docs/decisions.md`.
-- [ ] Next in the roadmap's own order (revised 2026-10-29 after the operator's risk statement: the international track first), each on the operator's go: E2 the international book (run 2026-10-29 → Decision 073, Phase 2.13) → B1 put-writing on the Cboe indices → B2 quality over a century → B5 / B6 / B7 afternoon tests.
+- [x] ~~Next in the roadmap's own order~~ (all run 2026-10-29 / 30 → Decisions 073–079) (revised 2026-10-29 after the operator's risk statement: the international track first), each on the operator's go: E2 the international book (run 2026-10-29 → Decision 073, Phase 2.13) → B1 put-writing on the Cboe indices → B2 quality over a century → B5 / B6 / B7 afternoon tests.
 
 ## Phase 2.11: The external data library (2026-10-29) — Decision 072
 Operator: find and store everything beyond prices that could matter, free first. `scripts/param_search/fetch_external.py` → `data/param_search/external/` (271 MB, 122 of 127 items, manifest), archived on titanserver (`archive/param_search/external/`, SEC zips excluded).
 - [x] Fetched: Cboe option-writing benchmarks 1986 → and the VIX family; FRED rates / curve / stress / macro / recessions since 1954; CFTC positioning 1986 →; Shiller 1871 →; AQR century of factor premia, TSMOM, QMJ, BAB, VME; French profitability / investment / size / 5-factor / industry daily sorts; FINRA margin; gold monthly; two SEC statement quarters.
 - [x] Walled / gone recorded: Stooq, Yahoo, LBMA, AAII, Cboe put/call archive, FRED Wilshire + gold; NAAIM needs a manual download.
 - [ ] **Operator (free keys, a minute each)**: Tiingo (the 1999 → ETF and name history), Alpha Vantage (historical earnings dates for the gate valuation); optional small spend: EODHD (~€20/mo) or historicaloptiondata.com (~$100/yr) if the put-writing question goes beyond the Cboe indices.
-- [ ] **Next tests this unlocks (each pre-registered, operator's call)**: (1) put-writing vs the S&P on 40 years of Cboe indices (PUT / BXM / PPUT / CLL inside the book); (2) a century of profitability deciles vs momentum (the quality question before any fundamentals pipeline); (3) AQR trend / carry premia on the operator's eras; (4) rates by era for the carry and insurance pricing.
+- [x] ~~**Next tests this unlocks (each pre-registered, operator's call)**~~ (all run → Decisions 073–080, 086, 087; the keyed B10 / B11 wait on the keys): (1) put-writing vs the S&P on 40 years of Cboe indices (PUT / BXM / PPUT / CLL inside the book); (2) a century of profitability deciles vs momentum (the quality question before any fundamentals pipeline); (3) AQR trend / carry premia on the operator's eras; (4) rates by era for the carry and insurance pricing.
 
 ## Phase 2.10: Go-live readiness — backups, heartbeat, the T-bill leg, the runbook (2026-10-29) — Decision 071
 Operator: "you can now do 2" (the readiness track). Findings and builds in Decision 071; nothing live changed, code not deployed.
@@ -225,13 +205,13 @@ Operator asked for three more ideas after the master search; all three run with 
 - [x] **Master search run 2026-10-27** (`master.py`): 4,140 decade + 765 century books; a family emerged, not a cell — dip 30–50% / SPMO 50–70%, shock trigger on, no vol target, no own-momentum; insurance = the one era-dependent knob (bull-decade cost ~1.7 pp/yr, long-bear payoff +15–20 pp). Recommended: dip 40 / SPMO 60 + shock + insurance ×0.5.
 - [x] **Operator decision 2026-10-27: GO** → Decision 068 built (Phase 2.7): 40 % dip book on the live list, 60 % SPMO, shock trigger −7 % / 10 / 20 / ×0.5, insurance ×0.5 on the whole book by min(), SPY residual, slots 10 % of equity, new clean window from `window_started_at`.
 - [x] Crash scenarios page (every recorded bear, 4 books) and regime-switching test: slow regime rules add nothing beyond the live insurance; the shock trigger (SPY −7% in 10 sessions → ×0.5 for 20) cuts the worst drawdown by a third at 0–1 pp/yr, robust over 81 cells on the century. Recommended as part of Decision 068 (same `exposure_scale` mechanism, second trigger).
-- [ ] If yes, open design points: sleeve weight (recommended 50/50), rebalance band for the sleeve, whether the insurance scales the sleeve ×0.5 like the rest (tested: costs ~0.5 pp/yr of the ETF's excess, cuts little drawdown — momentum crashes are not regime-flagged), minimum account size for 1 + 2 + 3 whole-share legs.
+- [x] ~~If yes, open design points~~ (decided in Decision 068: 40 / 60, a 5 % band, the insurance as min with the shock trigger): sleeve weight (recommended 50/50), rebalance band for the sleeve, whether the insurance scales the sleeve ×0.5 like the rest (tested: costs ~0.5 pp/yr of the ETF's excess, cuts little drawdown — momentum crashes are not regime-flagged), minimum account size for 1 + 2 + 3 whole-share legs.
 
 ## Phase 2.4: Universe research — can a rule find the names? (2026-10-27) — Decision 066
 - [x] Data: 742 S&P 500 members 2016 → 2026 with delisted names (Alpaca), French momentum / reversal / size×momentum deciles and 49 industries 1927 →; archived on titanserver `/home/TitanTrade/archive/param_search/`. Yahoo 1999 → still 429 (patient fetcher in the scratchpad; Tiingo key = clean fallback).
 - [x] Eight pre-registered screens tested IS / OOS vs SPY and vs EW-all; momentum the only survivor (+5 median, flat 2017–21, 2026-heavy); low vol, conservative, LT reversal, anti-momentum rejected; near-high / smooth / quiet ≈ noise. Century: top momentum decile +5.1 pp/yr with its own crashes; guards don't help.
 - [x] Dip rule × momentum picks = −14 pp/yr (3 slots): the overlay and momentum are antagonistic — momentum is harvested by holding. Trade-level entry features: nothing robust beyond the market regime (already in the design). Operator's list = high-vol, moderate-momentum names below their highs; +32% vs SPY +24% since Mar 30 at higher vol.
-- [ ] **Operator decision**: build a momentum sleeve beside the SPY core (15 names, 6-1 or 12-1, yearly, equal-weight, no dip rule on them; expect +1–1.5 pp/yr at 30%, +3–5 at 100%, −20% relative years, ~90% turnover)? If yes: stage-3 walk-forward of the selection rule + a second universe (S&P 400) first, then a paper sleeve (new module, new Decision, both images).
+- [x] ~~**Operator decision**~~ (superseded: the momentum *ETF* sleeve, Decisions 067–068): build a momentum sleeve beside the SPY core (15 names, 6-1 or 12-1, yearly, equal-weight, no dip rule on them; expect +1–1.5 pp/yr at 30%, +3–5 at 100%, −20% relative years, ~90% turnover)? If yes: stage-3 walk-forward of the selection rule + a second universe (S&P 400) first, then a paper sleeve (new module, new Decision, both images).
 
 ## Phase 2.2: Cleanup after the conversion — legacy freeze, plan schema, app deleted (2026-10-13) — Decision 063
 Operator: "larger cleanup — redundant code and docs, perhaps even the architecture"; answers: old LLM code → `legacy/` (not deleted), Flutter app → deleted, thesis/sentry schema → plain plan.
@@ -249,11 +229,45 @@ Operator: "larger cleanup — redundant code and docs, perhaps even the architec
 - [ ] **Cosmetic**: `entries` logs "Position reduced to N shares (cash reserve)" at WARNING; after any stop-out the next entry is cash-bound by construction (proceeds − 5% reserve), so this will fire on most entries. Downgrade to INFO with the slot and the cap stated.
 - [x] **Disk 2026-10-27**: 58% → 43% (6.4 GB build cache from two rebuilds + 2 resevolve PG 15 orphans). Deploy routine now ends with `docker builder prune -a -f`.
 - [x] **Decision 065 (2026-10-20)**: benchmark verdict + ratios withheld under 20 trading days; daily benchmark refresh anchored at the strategy start; "risk-off yes/no" wording in log / CLI / Discord; watch-list reason distinguishes "slots held" from "deeper dips took the free slot". 236 tests.
-- [ ] **Watch, no action**: CRWD / ANET at 18%+ dips cannot be taken while the three slots are held by shallower entries — no rotation rule by design (Decision 062). Revisit only with a backtest of a swap rule, not before the next parameter search.
+- [x] ~~**Watch, no action**~~ (moot since Decision 070 — the names are the shadow list): CRWD / ANET at 18%+ dips cannot be taken while the three slots are held by shallower entries — no rotation rule by design (Decision 062). Revisit only with a backtest of a swap rule, not before the next parameter search.
 - [x] **Unread state files archived 2026-10-16**: `weekly_thesis.json`, `sentry_signals.json`, `signals.json`, `trailing_stops.json`, `pricecheck_signals.json`, `thesis_history.json`, `cik_cache.json`, `backtest_results.json` moved to `state/archive/legacy_2026-10-13/` (1.3 MB; the thesis history stays available for audits). `state/` now holds only the Decision 063 files.
 - [x] **titanserver disk cleanup 2026-10-16** (operator's go): 6 anonymous dangling Postgres 15 volumes (resevolve orphans, 501 MB) removed after a PG_VERSION check, build cache pruned (6.8 GB), no dangling images; named resevolve volumes and both TitanTrade images untouched, all 16 containers up, API healthy. Disk 60% → 43%.
 - [x] **Expired-bracket scan removed (Decision 064, 2026-10-16)**: `resubmit_expired_brackets`, `get_expired_brackets`, `MAX_BRACKET_ATTEMPTS`, the `resubmit` CLI / scheduler command and `handle_entry`'s `trigger` parameter deleted — the NEW-item path already re-enters after an expiry. 233 tests.
 - [ ] **Technical debt left on purpose**: `scripts/param_search/` is research code (ruff E70x style only); `broker.py` (570 lines) and `benchmark.py` are unchanged from the LLM era and could lose a few unused helpers at the next pass.
+
+## Phase 2.1: Parameter search on long history (2026-10-13) — Decision 062
+- [x] Data: Alpaca SIP 2016 → (all 28 symbols; `download-history` switched to SIP) and Yahoo adjusted daily closes 1993/1999 → 2026 (SPY, QQQ, 11 sectors, 15 names). Stooq blocked (JS challenge); Yahoo needs `period1=0&period2=<now>` for daily granularity and a cookie jar.
+- [x] Harness: `scripts/param_search/` (fastbt validated trade-for-trade vs `backtest/mechanical.py`; stage 1 grid 6,000 × 4 datasets; stage 2 insurance × sizing; stage 3 walk-forward of the selection procedure; plateau scoring).
+- [x] Chosen plateau midpoint applied to `data/watchlist.json` settings.mechanical: dip 8% / 90 d / SMA150 / 60 d / +20% / −12%, 25% × 3 slots, insurance unchanged (SMA200, breadth 0.5, scale 0.5).
+- [ ] **Watch**: the first weeks under the new parameters — candidate count per run (expect more than under 10%/60 d), the 70% overlay cap trimming the third slot, and that targets/time exits fire at 20% / 60 d.
+- [ ] **Next search (not before 6 months of live data)**: extend the sector universe test with a hindsight-free *name* universe (e.g. the S&P 100 constituents as of 2010 from a point-in-time list), add a second hold-out era, and re-run stage 3 only. Add the exit-side variants from the 2026-10-27 outlier test (target 25–40% / none, hold 90–250, `trail_pct` 10–20%, now supported by `fastbt.py`) on the 1999 → datasets.
+- [x] **Datasets rebuilt and archived 2026-10-27**: Alpaca SIP 2016 → for the 15 names + SPY + sectors (back from the server), **E** the S&P 500 as of 2016-01-04 (502 names incl. 94 delisted — survivorship-free) and **F** French 49 industries 1926 → (`scripts/param_search/datasets.py`); all under `/home/TitanTrade/archive/param_search/` on titanserver (copy back with the base64 pipe). Still missing: the Yahoo 1999 → files for B / C — Yahoo returns 429 from both machines; `scratchpad/yahoo_patient.py` keeps probing; when it succeeds, archive `data/param_search/yahoo` on the server too. If it never lifts, a free Tiingo key (operator sign-up) is the clean replacement.
+- [ ] **Next search — add to the plan**: universe size × slot count (E: 3 × 25% deepest-first = −10 pp/yr adverse selection, 10 × 7.5% = +1.4) and the crash filter only on a broad universe (dip 8–20% +1.5 on E but 8–25% −1.9 — no plateau yet). The French century is the hindsight-free backbone for the exit-side variants (all within ±1 pp/yr out-of-sample).
+- [x] **Outlier question answered 2026-10-27** (Decision 065 Evidence): the live design is not outlier-driven (best decile = 28% of gains, profitable without it); let-winners-run variants gain +5–6 pp/yr on the hindsight names and lose on the hindsight-free sectors in every variant — not adopted.
+
+## Phase 2.0: Conversion to the mechanical strategy (2026-10-13) — Decision 061
+Operator's call after the component audit: "fully convert with all the points made; the large parameter search comes after, on my call".
+- [x] **Sentry and price-check exit authority retired**; broker stop + target + holding limit are the only exits (`executor._manage_held_mechanical`).
+- [x] **LLM selection / direction / confidence retired**; `mechanical.py` generates the thesis file from the dip-in-uptrend rule with flat 20% slots (max 3); the nine gates and the bracket path are unchanged.
+- [x] **SPY core is the residual** of exposure scale × 95% − overlay (`mechanical.core_target_pct`); **insurance** = two-signal confirmation (SPY < SMA200 and sector breadth < 50% → 50% exposure, no new entries).
+- [x] **LLM reassigned**: monthly universe-curation proposal + post-mortem (`curator.py`, `curate` job, `/api/universe-proposal`). No orders.
+- [x] **Backtester for the mechanical strategy** (`backtest/mechanical.py`, `backtest-mech`, `download-history --days N` with sector ETFs) using the same `signals.py` code as live; walk-forward helper and a coarse built-in grid.
+- [x] Schedule rewritten (`data/schedule.json`); `strategy: "mechanical"` in `data/watchlist.json`; 612 tests green.
+- [x] **Deployed 2026-10-13 12:42 UTC** (commit `bdc558a`, both images, 7 jobs, health ok); first signals run 12:43 UTC: strategy started, insurance on, DASH signal, 8 legacy positions queued for the 14:15 UTC orphan close. **Verify after the 14:15 UTC run**: legacy positions sold, SPY at ≈75% of equity, DASH bracket placed/filled at ≈20%, `/api/signals` served.
+- [x] ~~Flutter app follow-ups~~ — the app was deleted in Decision 063 (unused); `/api/plan` replaced `/api/signals`.
+- [ ] **Go/stop rule (recalibrated 2026-10-29, Decision 069; the Decision 061 wording is withdrawn)**: fund ≥ $25k only when, over the clean window since `window_started_at` (2026-10-27): (1) **behaviour** — every trade-log action is one the rules prescribe (entries on plan NEW items at the plan's levels; exits only by stop / target / holding limit / orphan close / core rebalance; exposure halved exactly on trigger sessions) and the median fill-vs-backtest gap (fill vs the next close after the signal) is reported at each checkup — by hand from `trade_log.json` vs `plan.json` until the ledger exists, no numeric threshold before 20 trades; (2) **drawdown** — at least one SPY drawdown ≥ 10 % in the window; in every SPY drawdown ≥ 10 % the book fell no further than SPY, in any ≥ 20 % at most 0.7 × SPY's fall; (3) **return** — reported with its bootstrap band, never a condition under 3 years.
+- [x] **Decision 069 code follow-ups built 2026-10-29 (operator's go)**: (a) fill-vs-backtest ledger — `fill_ledger.py`, `fill_price` on the BUY record, `state/fill_ledger.json` appended by the daily summary, `GET /api/fill-ledger`, a Discord summary field; (b) benchmark verdict under 3 years → "Too short to judge the return … excess ±band" (`tracking_error_annual_pct`, `excess_annual_pct`, `MIN_RETURN_VERDICT_DAYS` 756), the summary line shows the band instead of α. 256 tests, ruff clean. **Not deployed — needs the operator's go** (both images). **Verify after deploy**: the first entry after the deploy gets a `fill_price` in the trade log and a ledger row at that day's 16:30 ET summary; the summary's benchmark line reads "excess … ±… pp/yr (too short to judge)"; `/api/fill-ledger` serves the rows.
+- [ ] **Go-live checklist (Decision 071, answers researched 2026-10-29)** — what only the operator can do: (a) open / fund the live account at ≥ $25k (every ETF slot ≥ 13 whole shares; $10k is the floor, $5k hits the dust guard) with a W-8BEN on file (15 % treaty withholding on US dividends, which a live account does receive — paper does not); (b) in the Alpaca dashboard, Plans and Features: enrol in **High-Yield Cash** (up to 3.56 % APY variable, FDIC sweep, usable as buying power, non-PDT accounts) — if the account can enrol, leave `cash_ticker` off (**Decision 087: an ETF leg on top of the programme adds only +0.03 … +0.06 pp/yr at today's rate**); if it cannot, set `cash_ticker: "SHY"` (a 1–3-year Treasury ETF; Decision 080's proposal: +0.3 pp/yr over bills on fifty years, −0.1 in a 2020s-type regime; the leg is built, off by default; SGOV was the Decision 071 placeholder, IEF is the higher-return / rate-shock-exposed dial, the operator's call); (c) create one healthchecks.io check (free: 20 checks; schedule `35 16 * * 1-5`, timezone America/New_York, grace 2 h), put its URL in the server `.env` as `HEALTHCHECK_PING_URL`, `docker compose up -d api`, confirm the first ping after the next 16:30 ET summary; (d) the tax line to the advisor: dip-sleeve trades are taxable (inside the 3-year time test; 15 % / 23 % as other income; the CZK 100,000 gross-proceeds exemption will not apply at this size), the SPY / SPMO / SGOV lots become exempt lot by lot after three years (the CZK 40 m cap no longer applies to securities from 2026), US dividends withheld 15 % with credit; (e) read the server-down runbook once. Done by the agent: backups daily on the host + `scripts/pull_backup.sh` for the off-server copy at every checkup; the 90-day GTC expiry confirmed in Alpaca's docs (aged-order policy, cancelled at 16:15 ET on `expires_at`, re-placed by the 09:35 ET coverage job); the go/stop rule (069).
+
+## Phase 1.37: October 13 checkup — ADR 059 verified live, bracket-leg stop coverage fixed, selection-vs-execution attribution (2026-10-13) — Decision 060
+Sweep Sep 29 → Oct 12 close: 0 ERROR/CRITICAL in 3,029 log lines (14 d), 75 WARNINGs all expected (sentry noise/abort, cooldown override, ADJUST live-price floor ×3 on JPM, FRED 502 retries ×5), 8 scheduler jobs `completed`, both images = Sep 29 12:20 build, git clean at `ef42847`, AI $3.03 Oct-to-date ($6.30 Sep). Equity $112,682; 8 overlay positions + SPY core 34.5%, all 8 GTC stop-covered at check time, cash 6.3%. Disk 62% (build cache 7.3 GB, 6 dangling PG 15 volumes 498 MB).
+- [x] **Decision 059 verified live:** `benchmark_metrics.json` computed Oct 12 20:30 UTC has `window_end = 2026-10-12` (fix 2 ✓). Override log lines read "≥1% above the $X exit" (fix 1 ✓): 3 overrides allowed (FCX Oct 2 +4.2% above the $68.91 exit, EQIX Oct 2 +3.0% above $998.13, EQIX Oct 9 +2.6% above $998.23), ≥5 evaluations refused (JPM ×2 at +0.0…+0.4% above the $333.08 exit, DXCM ×3 at +0.5…+0.6% above $83.91). Both refused tickers went nowhere: JPM $334.30 on Oct 12 (+0.4%) and was dropped by the Oct 4 review; DXCM re-dipped −5% on Oct 8 before +1.8%. DASH's legacy record (no `exit_price`) fired the old-wording override ×4 Sep 30 – Oct 2; every attempt was dust-blocked ($90–99 budget behind the pending DXCM bracket), so no harm.
+- [ ] **Performance to Oct 12 (strategy / SPY):** new clean window since the Sep 29 deploy (9 td) **+1.05% vs +1.82%** (−0.77 pp; max DD −1.27% vs −0.66%); clean since Jul 8 (67 td) +4.22% vs +4.39% (beta 0.69, Sharpe 1.37 vs 1.54, up-cap 0.77 / down-cap 0.71, max DD −4.64% vs −3.38%); since the Aug 12 peak −1.56% vs +0.73%; since Decision 057 (Sep 2) +2.17% vs +1.69%; since Decision 046 (May 12) +11.41% vs +5.41% (CRWD-split polluted); inception +12.76% vs +23.12%. Go/stop rule (Phase 1.36) unchanged: no SPY drawdown yet (max −0.66% in the window).
+- [ ] **Churn in the new window:** 5 exits (JPM Sep 30, FCX Oct 1, EQIX Oct 1, DXCM Oct 6, EQIX Oct 8), all broker stops at analyst levels, all losers, realised −$629 (FIFO on Alpaca fills); 3 of 5 re-bought within 7 d at a higher price (FCX +4.2%, EQIX +3.0%, EQIX +2.6%), re-entry gap ≈ $562. Exits + gap ≈ $1.2k ≈ 1.05% of equity ≈ the whole lag vs SPY. Watch: CRWD $258 and ANET $206.50 analyst stops sit 1.0–1.1% below the Oct 12 close.
+- [x] **Fixed — bracket legs are DAY orders and the two post-fill paths disagreed (Decision 060).** A filled bracket's TP/stop legs inherit the parent's `tif=day` and die at 20:00 UTC. (1) Held ticker with `review_action == ADJUST` re-opened after the review: the Decision 056 guard `continue`d past *all* management, so the DAY legs expired and the position had no stop until the next market-open run — FCX none from Fri Oct 2 20:00 to Mon Oct 5 14:15; EQIX (Fri Oct 9 19:46 fill) none until Mon Oct 12 14:15. (2) `_manage_held_bullish`: Alpaca keeps the bracket's stop leg in `held` (not returned by `status=open`), so the executor saw "TP leg but no stop", cancelled the TP and placed a GTC stop at the *thesis* level instead of the adapted bracket's — EQIX Oct 2: $969.95 → $1000, tagged Oct 8 (−$119) and re-bought Oct 9 (+$128 gap); URI: $987.09 → $970. Shipped: `_ensure_coverage` / `_ensure_protective_stop` (one helper, both paths), `_coverage_stop_price` (entry-time stop from `trade_state.position_entry_stop` for positions newer than the review), `ensure_stop_coverage` run by the 13:35 gapcheck job and CLI. 9 tests (`tests/test_stop_coverage.py`), 587 total.
+- [x] **Deployed 2026-10-13 09:29 UTC** (commit `452a6e1`): both images rebuilt (`api` + `titantrade`, both verified to import `ensure_stop_coverage` and carry the gapcheck wiring — the CLI image must be checked through its `uv run` entrypoint, a bare `/app/.venv/bin/python` cannot import the package there), API restarted, health ok, 8 scheduler jobs registered, smoke `ensure_stop_coverage(load_config())` → 0 (market closed, all 8 positions already covered) — 3.5 h before the day's 13:00 UTC fetch. **Verify at the next checkup:** no "has no stop, market closed" line after any fill; the 13:35 gapcheck result reads "N positions closed, M stops placed"; a re-opened ticker's GTC stop equals its trade-log `stop_loss_price`.
+- [ ] **Selection vs execution (operator question, Oct 13)** — counterfactual in Decision 060 Evidence: over the clean window the analyst's equal-weight basket made +2.56% vs SPY +4.39% while the strategy made +4.22% — execution *added* 1.2–1.7 pp over passively holding the picks; since Aug 12 the basket lost 4.6% vs SPY +0.7% (selection drove the lag, execution recovered ~1 pp); only the Sep 29 → Oct 12 fortnight shows execution as the net cost (−0.6 pp, five stop-outs). Static buy-and-hold of every selected name beat the weekly re-selected basket by 2.7 pp — the weekly rotation is a drag. Next lever, if any, is the analyst's selection/rotation, fills-first test required before anything ships; the risk machinery stays frozen.
+- [ ] **Watchlist size (operator question, Oct 13) — answered, nothing shipped** (Decision 060 Evidence 2): the analyst's weekly selection has no ranking skill at the weekly horizon (Spearman(confidence, next-week return) −0.05; selected +12.6% vs left-out +29.8% vs whole watchlist +18.6% vs SPY +5.2% since May 10). A bigger watchlist does not help a picker with no skill; the book is capital-bound anyway. Candidate follow-ups, fills/history-first: (a) 4-week-horizon version of the skill test; (b) trade the gated watchlist instead of the confidence-ranked subset; (c) universe curation. Not under the hold's strategy freeze until tested.
 
 ## Phase 1.36: September 29 checkup — exit-anchored cooldown override, closed-session benchmark equity, ATR floor rejected (2026-09-29) — Decision 059
 Prompted by the operator's "the bot has been underperforming for months". Checkup (Sep 22 → Sep 28): 0 errors in 30 days, 8 jobs `completed`, $6.26 AI in September, both images current, every position stop-covered, cash 5.7%. Windows to Sep 28: clean since Jul 8 (57 td) **+3.18% vs SPY +2.71%** (beta 0.64, Sharpe 1.22 vs 1.09); since the Aug 12 peak **−2.55% vs −0.89%**; since ADR 057 +1.15% vs +0.06%; since ADR 046 +10.30% vs +3.72%; inception +11.64% vs +21.15% (all of it April). Verdict given: three months ≈ tie with SPY in a flat market; the lag since the peak is churn — 20 of 37 exits since Aug 13 re-bought within 7 days at a higher price ($1,915 re-entry gap ≈ 1.7% of equity). **Operator decisions (2026-09-29): keep the bot in paper, do not fund it, ship the data-backed fixes, judge the bot on a new clean window from the deploy date, and decide funding by the rule below.**
@@ -440,117 +454,35 @@ From a 14-day paper-log review (see Decision 035). All six found bugs fixed:
 - [x] 12 new tests (437 total passing); de-flaked the brittle qty-race-timeout test
 - [ ] Follow-up: make Pass-2 selection trend-aware so it stops ranking downtrend names into the buy set (deferred — changes non-deterministic AI output)
 
-## Phase 1: Core Infrastructure
-- [x] Project structure and configuration
-- [x] Config management (env vars, watchlist)
-- [x] Logging system (structured JSON)
-- [x] Retry/backoff utility (3 retries, exponential)
-- [x] Data fetcher (FMP prices/news + SEC filings)
-- [x] Weekly analyst (Claude integration)
-- [x] Daily sentry (Gemini Flash integration)
-- [x] Trade executor (Alpaca integration)
-- [x] GitHub Actions workflows
-- [x] State management (portfolio, thesis, trade log)
+## Phase 1.18: Strategy & operational hardening (2026-05-12)
+- [x] Re-entry cooldown (72h) after ABORT — stops whipsaw cycles
+- [x] Narrowed macro blackout: 24h → 6h, only high-impact events (FOMC, NFP, CPI, core PCE, GDP)
+- [x] `pre_trade_check` now uses `adjusted_confidence` from Pass-2 (fixed confidence-scaling bug)
+- [x] Bracket resubmission capped at 5 expired attempts per ticker (price-chase guard)
+- [x] Pass 2 target count scales with regime (6/5/4/3/2/1 for strong_bullish → crisis)
+- [x] Sentry price-move uses broker `avg_entry_price` for held positions (not stale thesis target)
+- [x] Earnings blackout narrowed 5 → 2 calendar days
+- [x] State-file archival: trade_log/near_misses auto-trim to most recent N, overflow → state/archive/
+- [x] Discord alert when bot is >70% cash for 3+ days
+- [x] Discord alert when a ticker round-trips 2+ times in 7 days
+- [x] 24 new tests (342 total passing)
 
-## Phase 1.5: Advanced Features
-- [x] Technical indicators (RSI, MACD, Bollinger, ATR, SMA, volume)
-- [x] Market context (SPY, QQQ, VIX, Treasury yields, sector rotation)
-- [x] Two-pass weekly analysis (per-stock + portfolio ranking)
-- [x] Three-layer daily sentry (market-wide + price-based + news-based)
-- [x] Earnings calendar gate (5-day blackout)
-- [x] Volatility-adjusted position sizing (ATR-based)
-- [x] Drawdown circuit breaker (8% from peak)
-- [x] Cash reserve enforcement (20% minimum)
-- [x] Sector exposure limits (40% max)
-- [x] Confidence threshold gate (>= 0.70)
-- [x] Performance feedback loop (win rate, calibration, per-ticker stats)
-- [x] Broker-native stop-losses (bracket orders)
-- [x] Comprehensive documentation
-
-## Phase 1.6: Infrastructure
-- [x] Docker containerization (Dockerfile + docker-compose.yml + .dockerignore)
-- [x] Server-based cron deployment documentation
-- [x] Flutter desktop app project setup and foundation
-
-## Phase 1.7: Trade Intelligence
-- [x] All-gate evaluation in risk manager (no short-circuit, reports all failures)
-- [x] Trade context snapshots (market regime, VIX, technicals, news at trade time)
-- [x] Near-miss recording (blocked by <= 2 gates, saved to state/near_misses.json)
-- [x] Watchlist write function (save_watchlist in config.py)
-- [x] Enriched trade detail screen (context, gate results, risk flags)
-- [x] Near misses screen + detail screen in Flutter app
-- [x] Watchlist management screen in Flutter app (add/remove tickers)
-
-## Phase 1.8: Statistics & Cost Tracking
-- [x] Operational cost logger (state/costs.json with per-API-call token usage)
-- [x] Claude token usage capture in weekly_analyst.py
-- [x] Gemini token usage capture in daily_sentry.py
-- [x] Cost model and provider in Flutter app
-- [x] Statistics screen: open positions P&L (unrealized)
-- [x] Statistics screen: closed trades P&L with BUY->SELL round-trip matching
-- [x] Statistics screen: operational costs breakdown by service
-- [x] Statistics screen: net P&L (trading P&L minus operational costs)
-
-## Phase 1.9: Reliability & Testing
-- [x] Pytest infrastructure (pyproject.toml, conftest.py, fixtures)
-- [x] Unit tests for indicators: SMA, EMA, RSI, MACD, Bollinger, ATR, volume, price_vs_sma (31 tests)
-- [x] Unit tests for AI output parsing: extract_json, parse_ai_json, validate_thesis/sentry/ranking (29 tests)
-- [x] Unit tests for risk manager: all 6 gates individually + pre_trade_check integration (32 tests)
-- [x] Mocked weekly analyst tests: analyze_stock, rank_and_select with canned Claude responses (5 tests)
-- [x] Mocked daily sentry tests: check_stock with canned Gemini responses, price override (5 tests)
-- [x] Executor tests: build_trade_context, handle_bullish_entry, near-miss recording (12 tests)
-- [x] Bracket order resubmission (expired brackets auto-resubmitted with fresh risk checks)
-- [x] Bracket resubmission tests (valid/invalid/already holding scenarios)
-- [x] Settings screen in Flutter app (change data path, configurable refresh interval)
-- [x] Dynamic refresh interval across all 7 providers (10s/15s/30s/60s/120s)
-- [x] Dual Alpaca credentials (separate paper and live key pairs in .env)
-- [x] Trading mode API endpoints (`GET /api/settings`, `PUT /api/settings/mode`)
-- [x] Trading mode toggle in Flutter settings (SwitchListTile with confirmation dialog)
-- [x] Backward compatibility for legacy `ALPACA_KEY`/`ALPACA_SECRET` env vars
-- [x] Built-in APScheduler (all cron jobs run inside API container)
-- [x] Schedule config in `data/schedule.json` (editable, version-controlled)
-- [x] Scheduler API endpoints (list, trigger, enable/disable)
-- [x] Scheduler screen in Flutter app (status, toggle, manual trigger)
-
-## Phase 1.10: Position Protection & Monitoring
-- [x] Trailing stop mechanism (5% trigger, 3% trail below HWM)
-- [x] Thesis expiry: force-close orphaned positions with no active monitoring
-- [x] Dynamic entry price adjustment on bracket resubmission (current price awareness)
-- [x] Lightweight intraday price checks between sentry runs (zero LLM cost)
-- [x] Gap-down protection: detect unfilled stop-limits and market-sell immediately
-- [x] New CLI commands: `pricecheck`, `gapcheck`
-- [x] FastAPI HTTP server for Flutter app to connect remotely
-- [x] Cloudflare tunnel integration (docker-compose with cloudflared service)
-
-## Phase 1.11: Strategy Improvements
-- [x] Economic calendar awareness (FMP /economic_calendar + Gate 7 macro blackout)
-- [x] Analyst ratings and price target consensus (FMP upgrades/downgrades)
-- [x] Relative strength vs SPY (5d/20d/60d outperformance metric)
-- [x] Insider trading data (Form 4 filings via SEC-API)
-- [x] Pairwise correlation matrix (60-day rolling) + Gate 8 correlation limit
-- [x] Sentiment divergence detection (prompt enrichment)
-- [x] Mean reversion setup detection (RSI < 30 + 200-SMA proximity)
-- [x] Earnings run-up strategy (10-15 days before earnings)
-- [x] Two-tranche entry (60% at target + 40% at 1.5% discount)
-- [x] Time-of-day entry optimization (shifted to 10:15 AM ET, after opening volatility)
-
-## Phase 1.12: Flexible Holding & Backtesting
-- [x] Diversified watchlist: 15 stocks across 8 sectors (tech, healthcare, finance, energy, industrial, consumer, materials, real estate)
-- [x] Flexible hold horizons: short_term (1-2w), medium_term (2-6w), long_term (6w+)
-- [x] Weekly review pipeline: held positions get CONTINUE/ADJUST/CLOSE review, not forced expiry
-- [x] Removed 14-day hard thesis expiry — replaced with weekly review cycle
-- [x] CLOSE review action triggers position exit (Claude's explicit decision)
-- [x] ADJUST review action updates stop/TP levels
-- [x] Backtesting engine: synthetic thesis, portfolio simulator, metrics computation
-- [x] Backtest CLI: `python -m titantrade backtest [data-dir]`
-- [x] Historical data downloader: `python -m titantrade download-history [data-dir]`
-- [x] Backtest metrics: return, alpha vs SPY, win rate, Sharpe, Sortino, max drawdown, profit factor
-
-## Phase 1.13: Bear Market Hedging & Execution Quality
-- [x] Inverse ETF hedging: SH/PSQ/SDS analyzed in bearish/crisis regimes
-- [x] Slippage model in backtester (0.15% per fill, configurable)
-- [x] Slippage-aware limit exits for non-urgent ABORT signals
-- [x] Limit sell function for executor (reduces market order slippage)
+## Phase 1.17: Off-hours awareness + ABORT-noise reduction (2026-05-12)
+- [x] Diagnosed live: cancel orders submitted off-hours sit in `pending_cancel`
+      for 10+ minutes (sometimes hours) until next market open
+- [x] New `is_market_open(cfg)` using Alpaca `/v2/clock`
+- [x] New `get_order(order_id, cfg)` and `_wait_for_order_canceled()` that
+      polls the specific blocking order's status (from `related_orders` in
+      Alpaca's 403 body), replacing the qty_available polling that didn't work
+- [x] ADJUST, orphan-close, and trailing-stop adjustments now skip during
+      off-hours (old stop remains protective on the book)
+- [x] Bracket math sanity check in `_handle_bullish_entry` and
+      `resubmit_expired_brackets`: refuse to send invalid (stop >= entry)
+      brackets to Alpaca that would only get HTTP 422 anyway
+- [x] Graduated price-ABORT severity: 3-5% adverse only ABORTs with Gemini
+      news confirmation; >=5% adverse always ABORTs; `price_check.py`
+      (no news context) only fires on the catastrophic threshold
+- [x] 14 new unit tests covering all three fixes; 318 total passing
 
 ## Phase 1.16: Reliability & Cost Reduction (2026-04-18)
 - [x] Hardened retry policy: 5 attempts, 30s cap per delay, 60s timeout, full jitter
@@ -586,36 +518,6 @@ From a 14-day paper-log review (see Decision 035). All six found bugs fixed:
       window observed in production when Alpaca's `pending_cancel` took
       longer than expected to settle
 
-## Phase 1.18: Strategy & operational hardening (2026-05-12)
-- [x] Re-entry cooldown (72h) after ABORT — stops whipsaw cycles
-- [x] Narrowed macro blackout: 24h → 6h, only high-impact events (FOMC, NFP, CPI, core PCE, GDP)
-- [x] `pre_trade_check` now uses `adjusted_confidence` from Pass-2 (fixed confidence-scaling bug)
-- [x] Bracket resubmission capped at 5 expired attempts per ticker (price-chase guard)
-- [x] Pass 2 target count scales with regime (6/5/4/3/2/1 for strong_bullish → crisis)
-- [x] Sentry price-move uses broker `avg_entry_price` for held positions (not stale thesis target)
-- [x] Earnings blackout narrowed 5 → 2 calendar days
-- [x] State-file archival: trade_log/near_misses auto-trim to most recent N, overflow → state/archive/
-- [x] Discord alert when bot is >70% cash for 3+ days
-- [x] Discord alert when a ticker round-trips 2+ times in 7 days
-- [x] 24 new tests (342 total passing)
-
-## Phase 1.17: Off-hours awareness + ABORT-noise reduction (2026-05-12)
-- [x] Diagnosed live: cancel orders submitted off-hours sit in `pending_cancel`
-      for 10+ minutes (sometimes hours) until next market open
-- [x] New `is_market_open(cfg)` using Alpaca `/v2/clock`
-- [x] New `get_order(order_id, cfg)` and `_wait_for_order_canceled()` that
-      polls the specific blocking order's status (from `related_orders` in
-      Alpaca's 403 body), replacing the qty_available polling that didn't work
-- [x] ADJUST, orphan-close, and trailing-stop adjustments now skip during
-      off-hours (old stop remains protective on the book)
-- [x] Bracket math sanity check in `_handle_bullish_entry` and
-      `resubmit_expired_brackets`: refuse to send invalid (stop >= entry)
-      brackets to Alpaca that would only get HTTP 422 anyway
-- [x] Graduated price-ABORT severity: 3-5% adverse only ABORTs with Gemini
-      news confirmation; >=5% adverse always ABORTs; `price_check.py`
-      (no news context) only fires on the catastrophic threshold
-- [x] 14 new unit tests covering all three fixes; 318 total passing
-
 ## Phase 1.15: Capital Deployment Improvements (2026-04-05)
 - [x] Confidence-proportional position sizing (linear 0.7x-1.3x scaling)
 - [x] `confidence_scaled_risk()` helper in risk_manager.py
@@ -632,6 +534,118 @@ From a 14-day paper-log review (see Decision 035). All six found bugs fixed:
 - [x] Sector cache initialization in executor (load_stock_sectors at startup)
 - [x] SPY change fallback: compute from price/previousClose when changesPercentage missing
 - [x] Live portfolio API endpoint (fetches from Alpaca instead of stale static file)
+
+## Phase 1.13: Bear Market Hedging & Execution Quality
+- [x] Inverse ETF hedging: SH/PSQ/SDS analyzed in bearish/crisis regimes
+- [x] Slippage model in backtester (0.15% per fill, configurable)
+- [x] Slippage-aware limit exits for non-urgent ABORT signals
+- [x] Limit sell function for executor (reduces market order slippage)
+
+## Phase 1.12: Flexible Holding & Backtesting
+- [x] Diversified watchlist: 15 stocks across 8 sectors (tech, healthcare, finance, energy, industrial, consumer, materials, real estate)
+- [x] Flexible hold horizons: short_term (1-2w), medium_term (2-6w), long_term (6w+)
+- [x] Weekly review pipeline: held positions get CONTINUE/ADJUST/CLOSE review, not forced expiry
+- [x] Removed 14-day hard thesis expiry — replaced with weekly review cycle
+- [x] CLOSE review action triggers position exit (Claude's explicit decision)
+- [x] ADJUST review action updates stop/TP levels
+- [x] Backtesting engine: synthetic thesis, portfolio simulator, metrics computation
+- [x] Backtest CLI: `python -m titantrade backtest [data-dir]`
+- [x] Historical data downloader: `python -m titantrade download-history [data-dir]`
+- [x] Backtest metrics: return, alpha vs SPY, win rate, Sharpe, Sortino, max drawdown, profit factor
+
+## Phase 1.11: Strategy Improvements
+- [x] Economic calendar awareness (FMP /economic_calendar + Gate 7 macro blackout)
+- [x] Analyst ratings and price target consensus (FMP upgrades/downgrades)
+- [x] Relative strength vs SPY (5d/20d/60d outperformance metric)
+- [x] Insider trading data (Form 4 filings via SEC-API)
+- [x] Pairwise correlation matrix (60-day rolling) + Gate 8 correlation limit
+- [x] Sentiment divergence detection (prompt enrichment)
+- [x] Mean reversion setup detection (RSI < 30 + 200-SMA proximity)
+- [x] Earnings run-up strategy (10-15 days before earnings)
+- [x] Two-tranche entry (60% at target + 40% at 1.5% discount)
+- [x] Time-of-day entry optimization (shifted to 10:15 AM ET, after opening volatility)
+
+## Phase 1.10: Position Protection & Monitoring
+- [x] Trailing stop mechanism (5% trigger, 3% trail below HWM)
+- [x] Thesis expiry: force-close orphaned positions with no active monitoring
+- [x] Dynamic entry price adjustment on bracket resubmission (current price awareness)
+- [x] Lightweight intraday price checks between sentry runs (zero LLM cost)
+- [x] Gap-down protection: detect unfilled stop-limits and market-sell immediately
+- [x] New CLI commands: `pricecheck`, `gapcheck`
+- [x] FastAPI HTTP server for Flutter app to connect remotely
+- [x] Cloudflare tunnel integration (docker-compose with cloudflared service)
+
+## Phase 1.9: Reliability & Testing
+- [x] Pytest infrastructure (pyproject.toml, conftest.py, fixtures)
+- [x] Unit tests for indicators: SMA, EMA, RSI, MACD, Bollinger, ATR, volume, price_vs_sma (31 tests)
+- [x] Unit tests for AI output parsing: extract_json, parse_ai_json, validate_thesis/sentry/ranking (29 tests)
+- [x] Unit tests for risk manager: all 6 gates individually + pre_trade_check integration (32 tests)
+- [x] Mocked weekly analyst tests: analyze_stock, rank_and_select with canned Claude responses (5 tests)
+- [x] Mocked daily sentry tests: check_stock with canned Gemini responses, price override (5 tests)
+- [x] Executor tests: build_trade_context, handle_bullish_entry, near-miss recording (12 tests)
+- [x] Bracket order resubmission (expired brackets auto-resubmitted with fresh risk checks)
+- [x] Bracket resubmission tests (valid/invalid/already holding scenarios)
+- [x] Settings screen in Flutter app (change data path, configurable refresh interval)
+- [x] Dynamic refresh interval across all 7 providers (10s/15s/30s/60s/120s)
+- [x] Dual Alpaca credentials (separate paper and live key pairs in .env)
+- [x] Trading mode API endpoints (`GET /api/settings`, `PUT /api/settings/mode`)
+- [x] Trading mode toggle in Flutter settings (SwitchListTile with confirmation dialog)
+- [x] Backward compatibility for legacy `ALPACA_KEY`/`ALPACA_SECRET` env vars
+- [x] Built-in APScheduler (all cron jobs run inside API container)
+- [x] Schedule config in `data/schedule.json` (editable, version-controlled)
+- [x] Scheduler API endpoints (list, trigger, enable/disable)
+- [x] Scheduler screen in Flutter app (status, toggle, manual trigger)
+
+## Phase 1.8: Statistics & Cost Tracking
+- [x] Operational cost logger (state/costs.json with per-API-call token usage)
+- [x] Claude token usage capture in weekly_analyst.py
+- [x] Gemini token usage capture in daily_sentry.py
+- [x] Cost model and provider in Flutter app
+- [x] Statistics screen: open positions P&L (unrealized)
+- [x] Statistics screen: closed trades P&L with BUY->SELL round-trip matching
+- [x] Statistics screen: operational costs breakdown by service
+- [x] Statistics screen: net P&L (trading P&L minus operational costs)
+
+## Phase 1.7: Trade Intelligence
+- [x] All-gate evaluation in risk manager (no short-circuit, reports all failures)
+- [x] Trade context snapshots (market regime, VIX, technicals, news at trade time)
+- [x] Near-miss recording (blocked by <= 2 gates, saved to state/near_misses.json)
+- [x] Watchlist write function (save_watchlist in config.py)
+- [x] Enriched trade detail screen (context, gate results, risk flags)
+- [x] Near misses screen + detail screen in Flutter app
+- [x] Watchlist management screen in Flutter app (add/remove tickers)
+
+## Phase 1.6: Infrastructure
+- [x] Docker containerization (Dockerfile + docker-compose.yml + .dockerignore)
+- [x] Server-based cron deployment documentation
+- [x] Flutter desktop app project setup and foundation
+
+## Phase 1.5: Advanced Features
+- [x] Technical indicators (RSI, MACD, Bollinger, ATR, SMA, volume)
+- [x] Market context (SPY, QQQ, VIX, Treasury yields, sector rotation)
+- [x] Two-pass weekly analysis (per-stock + portfolio ranking)
+- [x] Three-layer daily sentry (market-wide + price-based + news-based)
+- [x] Earnings calendar gate (5-day blackout)
+- [x] Volatility-adjusted position sizing (ATR-based)
+- [x] Drawdown circuit breaker (8% from peak)
+- [x] Cash reserve enforcement (20% minimum)
+- [x] Sector exposure limits (40% max)
+- [x] Confidence threshold gate (>= 0.70)
+- [x] Performance feedback loop (win rate, calibration, per-ticker stats)
+- [x] Broker-native stop-losses (bracket orders)
+- [x] Comprehensive documentation
+
+## Phase 1: Core Infrastructure
+- [x] Project structure and configuration
+- [x] Config management (env vars, watchlist)
+- [x] Logging system (structured JSON)
+- [x] Retry/backoff utility (3 retries, exponential)
+- [x] Data fetcher (FMP prices/news + SEC filings)
+- [x] Weekly analyst (Claude integration)
+- [x] Daily sentry (Gemini Flash integration)
+- [x] Trade executor (Alpaca integration)
+- [x] GitHub Actions workflows
+- [x] State management (portfolio, thesis, trade log)
 
 ## Phase 2: Testing & Validation
 - [x] Unit tests for indicators (known-good RSI/MACD values)
