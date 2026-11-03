@@ -1,6 +1,6 @@
 # Important Decisions Log
 
-## Decision 090: The working cash reserve set to 2 % — the smallest whole percent that can never borrow — with the core-buy guard that makes it safe; **built, tested, not yet deployed** (operator: "we never want to borrow from the broker. So find the optimal number of cash to hold and then do the code changes necessary to make this work", 2026-11-03)
+## Decision 090: The working cash reserve set to 2 % — the smallest whole percent that can never borrow — with the core-buy guard that makes it safe; **built, tested, deployed 12:36 UTC** (operator: "we never want to borrow from the broker. So find the optimal number of cash to hold and then do the code changes necessary to make this work", 2026-11-03)
 **Date**: 2026-11-03
 **Why**: Decision 089 priced the 5 % working reserve (about half a point a year on the decade) and found that 2 % was unsafe as the code stood — a core leg's buy ignored the brackets still pending from the morning run. The operator's rule turned that into a design question with one constraint: cash never below zero, and as little idle as that allows. Done the Decision 062 way: hypotheses V1–V3 and the rule in `scripts/param_search/reserve.py`, **committed before the first run** (`66a43e3`). **The guard and the new constant are in the code and the tests; the server still runs 5 % until the operator's deploy go.**
 
@@ -47,6 +47,8 @@ The pre-registered rule — the smallest whole percent that covers a 2 % slip on
 **Decision.** The reserve is 2 % with the guard; the backtest expectation for a decade like the last one moves from +1.0 to **≈ +1.5 pp/yr** vs SPY (the roadmap and CLAUDE.md restated). Deploy on the operator's go — both images; the first run after the deploy will buy the momentum leg toward 58.8 % and SPY toward its new residual, each inside its band, so most likely nothing trades until a leg drifts past 5 %.
 
 **Scripts / docs**: `scripts/param_search/reserve.py` (pre-registration `66a43e3`, the run), `tests/test_reserve_check.py`, `tests/test_chaos.py` (the fake's two switches); `risk_manager.py`, `core_allocation.py`, `executor.py`, `backtest/mechanical.py`; roadmap C5 row and the expectation line; todo Phase 2.30; features, risk_management, security, data_schemas, how_to_read_a_checkup, architecture, handover, CLAUDE.md.
+
+*Deployed 2026-11-03 12:36 UTC on the operator's "Deploy now" (`3247603`, both images, the build cache pruned; 07:36 ET, the first job of the day at 09:00 ET): the running container carries `MIN_CASH_RESERVE_PCT = 2.0` and the guard, the CLI image imports with the same constant, health ok, 7 scheduled jobs. The first execute run at 10:15 ET is the one to read: the "Core target" line should show the momentum target at 59 %, and no order should fire outside a band.*
 
 ## Decision 089: The working cash reserve, 5 % → 2 % — checked, worth about half a point a year, **not safe as the code stands** (the reserve is also covering the rebalance band's slack against a pending bracket), safe with one guard; **proposed, not applied** (operator: "why do we even hold cash?" → "Yes, check it", 2026-11-03)
 **Date**: 2026-11-03
