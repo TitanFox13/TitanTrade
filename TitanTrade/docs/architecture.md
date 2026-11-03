@@ -99,7 +99,7 @@ No module imports `executor`. `executor.py` re-exports the broker functions it c
 |---------|-------|-------------|
 | Slot size / max slots | 25% of the dip sleeve = 10% of equity × 3 (flat) | risk_manager (`pre_trade_check`) |
 | Overlay cap | 70% of equity, both core legs excluded (also from the sector gate) | risk_manager |
-| Cash reserve | 5%, net of pending buys, re-read after each entry | risk_manager / executor |
+| Cash reserve | 2% (Decision 090), net of pending buys for entries and for the core legs' buys, re-read after each entry | risk_manager / executor |
 | Min notional | $500 (dust guard, 054) | risk_manager |
 | Drawdown breaker | 8% from peak; ±50% → suspect data: entries blocked and the whole run keeps only the stops (054 / 084) | risk_manager / executor |
 | Earnings blackout | 2 days | earnings / risk_manager |
