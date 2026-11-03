@@ -46,7 +46,8 @@ SOURCES = {
                                            "Portfolios_Formed_on_VAR_Daily_CSV.zip", "Portfolios_Formed_on_RESVAR_Daily_CSV.zip",
                                            "25_Portfolios_ME_OP_5x5_Daily_CSV.zip", "25_Portfolios_ME_BM_5x5_Daily_CSV.zip",
                                            "10_Industry_Portfolios_Daily_CSV.zip", "30_Industry_Portfolios_Daily_CSV.zip",
-                                           "Portfolios_Formed_on_BETA_CSV.zip", "Portfolios_Formed_on_ME_Prior_12_2_Daily_CSV.zip")},
+                                           "Portfolios_Formed_on_BETA_CSV.zip", "Portfolios_Formed_on_ME_Prior_12_2_Daily_CSV.zip",
+                                           "F-F_Research_Data_Factors_CSV.zip")},   # monthly: RF to 0.01 %/month (the daily RF is rounded to 0.01 %/day — Decision 087)
     # Kenneth French international library (Track E of the roadmap): regional factors and momentum, daily where published
     "french_intl": {k: f"{FRENCH}{k}" for k in ("Developed_ex_US_3_Factors_Daily_CSV.zip", "Developed_ex_US_Mom_Factor_Daily_CSV.zip",
                                                 "Europe_3_Factors_Daily_CSV.zip", "Europe_Mom_Factor_Daily_CSV.zip",

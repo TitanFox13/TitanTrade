@@ -136,6 +136,20 @@ excess, never against the market, and the fourth "Sharpe tool, not return tool" 
 (options, quality, gold, trend) says the pattern is general: anything that pays in the fall
 duplicates the insurance, anything that pays in the rebound duplicates the dip sleeve.
 
+
+### Two Kinds of Bear (Decision 087)
+The cash the book parks when its switches fire earns the bill rate, and the obvious worry was
+that the Fed cuts into every bear, so the carry would be smallest exactly when the book is
+most out. A century says otherwise: over 1950–2000 the book sat out at rates one to one and a
+half points *above* the era's average, because those bears (1969, 1973, 1980) were caused by
+the tightening — the rate-shock bear pays the carry at its highest. Only 2008 and 2020 had the
+crash-and-cut shape where the idle half earned nothing. Over the whole century the two kinds
+average out to "de-risked at the ordinary rate", so the leg is worth a plain idle share × rate:
+0.15 pp/yr per point of bill rate on the century's idle share, 0.08 on this decade's. The
+switches themselves have cost about a point a year since 1975 with the cash at zero and half
+a point with it in bills; they earned their keep only in the Depression. They stay on for the
+drawdown, and the carry is what makes them cheaper — not a reason to turn them off, and not a
+reason to buy an ETF leg when the broker's cash programme already pays on every idle dollar.
 ### Bonds Rally When the Book Steps Aside; Gold Did Once (Decision 080)
 The idle half of the book, parked in a 10-year Treasury instead of bills, earned about
 0.8 points a year more over fifty-five years with a drawdown five points shallower, and

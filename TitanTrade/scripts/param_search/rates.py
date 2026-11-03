@@ -10,6 +10,11 @@ at today's rate for the go-live checklist — against Alpaca's cash programme, w
 order. Data, all free and in the library: Kenneth French's daily bill return 1926 → (`books.rf_daily`), FRED's 3-month
 bill rate 1954 → (`DTB3`, the cross-check) and CPI 1947 → (the real rate, for the record). The book = min(insurance ×0.5,
 shock ×0.5) × (0.4 dip + 0.6 momentum) on `books.sets()`: the century 1927-07 → (the four eras) and the ETF decade 2017 →.
+Two rate series, on purpose: the carry is compounded on Kenneth French's *daily* bill return (the series Decisions 068 and
+080 used, so the pickups reproduce), but that series is published to 0.01 % per *day* — three distinct values (0, 2.5,
+5.0 %/yr) across the whole decade — so the *level* of rates (the bins, the rate while de-risked, the real rate) is read
+from FRED's daily 3-month bill from 1954 and French's *monthly* bill rate before (0.01 % per month), and the carry is
+shown on that level series too as the cross-check (a correction made after the first run showed empty rate bins).
 
 Pre-registered hypotheses (the expected numbers were written before the first run):
   R1  the bill rate by era (French RF): 1927–50 ≈ 0.6 %/yr, 1950–75 ≈ 3.5, 1975–2000 ≈ 6.5, 2000–26 ≈ 1.6; French and
@@ -47,8 +52,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np  # noqa: E402
 
+import datasets  # noqa: E402
 import master  # noqa: E402
-from books import ERAS, align_rf, exposure, rf_daily, sets  # noqa: E402
+from books import align_rf, exposure, rf_daily, sets  # noqa: E402
 from stress import fred  # noqa: E402
 
 PROGRAMME = 0.0356       # Alpaca High-Yield Cash, the rate read on the dashboard 2026-10-29 (Decision 071)
@@ -57,70 +63,75 @@ BINS = [(0, 1), (1, 3), (3, 5), (5, 99)]
 LEVELS = [0.0, 0.01, 0.02, 0.03, 0.04, 0.05]
 
 
-def era_masks(dd, eras):
-    """Index masks over the return days dd[1:] for each era, plus the two halves."""
-    d = np.array(dd[1:]); out = []
-    for a, b in eras:
-        out.append((f"{a[:4]}–{b[:4]}", (d >= a) & (d < b)))
+def french_monthly_rf():
+    """Kenneth French's monthly bill rate, percent per month, by 'YYYY-MM' (the monthly factors file; dates are YYYYMM)."""
+    lines = open(f"{datasets.S}/external/french/F-F_Research_Data_Factors.csv", encoding="latin-1").read().splitlines()
+    h = next(k for k, ln in enumerate(lines) if ln.startswith(",Mkt-RF")); out = {}
+    for ln in lines[h + 1:]:
+        if not ln[:1].isdigit(): break
+        parts = [x.strip() for x in ln.split(",")]; out[f"{parts[0][:4]}-{parts[0][4:6]}"] = float(parts[-1])
     return out
 
 
-def fred_daily(name, dd):
-    """A FRED rate (percent, annual) as a decimal daily return on dd[1:]; a missing day carries the last reading."""
-    s = fred(name); out = np.zeros(len(dd) - 1); last = np.nan
+def rate_level(dd):
+    """The bill rate as an annual decimal on each return day dd[1:]: FRED's 3-month bill from 1954-01-04 (a missing day
+    carries the last reading), Kenneth French's monthly 1-month bill × 12 before that."""
+    dtb = fred("DTB3"); fm = french_monthly_rf(); out = np.zeros(len(dd) - 1); last = np.nan
     for k, x in enumerate(dd[1:]):
-        last = s.get(x, last); out[k] = last
-    return (1 + out / 100) ** (1 / 252) - 1
-
-
-def inflation_by_era(eras):
-    """CPI inflation, %/yr, averaged over each era (the 12-month change, monthly)."""
-    cpi = fred("CPIAUCSL"); ds = sorted(cpi); out = {}
-    for a, b in eras:
-        ys = [cpi[d] / cpi[ds[k - 12]] - 1 for k, d in enumerate(ds) if k >= 12 and a <= d < b]
-        out[f"{a[:4]}–{b[:4]}"] = float(np.mean(ys)) if ys else np.nan
+        if x >= "1954-01-04":
+            last = dtb.get(x, last); out[k] = last / 100
+        else:
+            out[k] = fm[x[:7]] * 12 / 100
     return out
+
+
+def inflation(a, b):
+    """CPI inflation, %/yr, averaged over [a, b): the 12-month change, monthly; NaN before 1948."""
+    cpi = fred("CPIAUCSL"); ds = sorted(cpi)
+    ys = [cpi[d] / cpi[ds[k - 12]] - 1 for k, d in enumerate(ds) if k >= 12 and a <= d < b]
+    return float(np.mean(ys)) if ys else np.nan
 
 
 def main():
-    rf = rf_daily(); infl = inflation_by_era(ERAS)
+    rf = rf_daily()
     for name, dd, lvl, r, bear, split, eras in sets():
-        rfd = align_rf(dd, rf); shock = master.shock_flags(lvl, -0.07, 10, 20); e = exposure(bear, shock); idle = 1 - e
-        core = 0.4 * r["dip"] + 0.6 * r["mom"]; base = e * core; naked = core
-        windows = era_masks(dd, eras) if eras else []
-        ks = next(k for k, d in enumerate(dd[1:]) if d >= split); halves = [("first half", np.arange(len(rfd)) < ks), ("second half", np.arange(len(rfd)) >= ks)]
-        panels = [("whole", np.ones(len(rfd), bool))] + halves + windows
+        rfd = align_rf(dd, rf); lv = rate_level(dd); lvd = (1 + lv) ** (1 / 252) - 1
+        shock = master.shock_flags(lvl, -0.07, 10, 20); e = exposure(bear, shock); idle = 1 - e
+        core = 0.4 * r["dip"] + 0.6 * r["mom"]; base = e * core
+        d1 = np.array(dd[1:]); ks = next(k for k, d in enumerate(dd[1:]) if d >= split)
+        panels = [("whole", np.ones(len(rfd), bool)), ("first half", np.arange(len(rfd)) < ks), ("second half", np.arange(len(rfd)) >= ks)]
+        panels += [(f"{a[:4]}–{b[:4]}", (d1 >= a) & (d1 < b)) for a, b in (eras or [])]
         sc = lambda rr, **kw: master.score(rr, r["mkt"], dd, split, eras, **kw)  # noqa: E731
         print(f"\n=== rates by era — {name} {dd[0]} → {dd[-1]}: de-risked {np.mean(e < 1):.1%} of sessions, idle capital {np.mean(idle):.1%} of the book on average")
-        # R1 / R2: the rate, the rate while de-risked, the idle share, the real rate
-        print(f"  {'window':12} {'bills %/yr':>10} {'FRED DTB3':>10} {'real':>6} | {'idle':>5} {'rate while idle':>15} {'gap':>6} | {'< 1 %':>6}")
-        dtb = fred_daily("DTB3", dd)   # NaN before 1954
+        # R1 / R2: the rate (the French daily carry series and the level series), the real rate, the idle share, the rate while de-risked
+        print(f"  {'window':12} {'French daily':>12} {'level':>7} {'infl.':>6} {'real':>6} | {'idle':>5} {'rate while idle':>15} {'gap':>6} | {'< 1 %':>6}")
         for label, m in panels:
             if not m.any(): continue
-            mean_rf = np.mean(rfd[m]) * 252; dm = m & (np.array(dd[1:]) >= "1954-01-04")
-            fr = np.mean(dtb[dm]) * 252 if dm.any() else np.nan
-            while_idle = np.sum(idle[m] * rfd[m]) / max(np.sum(idle[m]), 1e-9) * 252
-            real = mean_rf - infl.get(label, np.nan) if label in infl else np.nan
-            print(f"  {label:12} {mean_rf:10.2%} {fr:10.2%} {real:+6.1%} | {np.mean(idle[m]):5.1%} {while_idle:15.2%} {while_idle - mean_rf:+6.2%} | {np.mean(rfd[m] * 252 < 0.01):6.0%}")
-        # R3: the pickup by window (compounded, through master.score), with the luck meter on the two book lines
-        sb, sc_ = sc(base, luck_draws=400), sc(base + idle * rfd, luck_draws=400)
+            a, b = d1[m][0], d1[m][-1]; infl = inflation(a, b); mean_lv = np.mean(lv[m])
+            while_idle = np.sum(idle[m] * lv[m]) / max(np.sum(idle[m]), 1e-9)
+            print(f"  {label:12} {np.mean(rfd[m]) * 252:12.2%} {mean_lv:7.2%} {infl:6.1%} {mean_lv - infl:+6.1%} | {np.mean(idle[m]):5.1%} {while_idle:15.2%} {while_idle - mean_lv:+6.2%} | {np.mean(lv[m] < 0.01):6.0%}")
+        # R3: the pickup by window, compounded through master.score, on both rate series; the luck meter on the book lines
+        sb, sc_, sl = sc(base, luck_draws=400), sc(base + idle * rfd, luck_draws=400), sc(base + idle * lvd)
         print(f"  the book, idle at 0:      excess {sb['excess']:+.2%}  IS {sb['is']:+.2%}  OOS {sb['oos']:+.2%}" + (f"  eras {' '.join(f'{x:+.1%}' for x in sb['eras'])}" if eras else "") + f"  | {master.luck_line(sb)}")
         print(f"  the book, idle in bills:  excess {sc_['excess']:+.2%}  IS {sc_['is']:+.2%}  OOS {sc_['oos']:+.2%}" + (f"  eras {' '.join(f'{x:+.1%}' for x in sc_['eras'])}" if eras else "") + f"  | {master.luck_line(sc_)}")
-        print(f"  pickup: whole {sc_['excess'] - sb['excess']:+.2%}, IS {sc_['is'] - sb['is']:+.2%}, OOS {sc_['oos'] - sb['oos']:+.2%}" + (f", eras {' '.join(f'{y - x:+.2%}' for x, y in zip(sb['eras'], sc_['eras']))}" if eras else ""))
-        # R4: by the prevailing rate
-        ann = rfd * 252
+        print(f"  pickup (French daily): whole {sc_['excess'] - sb['excess']:+.2%}, IS {sc_['is'] - sb['is']:+.2%}, OOS {sc_['oos'] - sb['oos']:+.2%}" + (f", eras {' '.join(f'{y - x:+.2%}' for x, y in zip(sb['eras'], sc_['eras']))}" if eras else ""))
+        print(f"  pickup (level series): whole {sl['excess'] - sb['excess']:+.2%}, IS {sl['is'] - sb['is']:+.2%}, OOS {sl['oos'] - sb['oos']:+.2%}" + (f", eras {' '.join(f'{y - x:+.2%}' for x, y in zip(sb['eras'], sl['eras']))}" if eras else ""))
+        # R4: by the prevailing rate (the level series)
         print(f"  {'rate bin':10} {'sessions':>8} {'idle':>6} {'pickup/yr':>10}   (in-bin, annualised: mean(idle × rate))")
         for lo, hi in BINS:
-            m = (ann >= lo / 100) & (ann < hi / 100)
-            if m.any(): print(f"  {f'{lo}–{hi} %' if hi < 99 else f'> {lo} %':10} {np.mean(m):8.1%} {np.mean(idle[m]):6.1%} {np.mean(idle[m] * rfd[m]) * 252:+10.2%}")
+            m = (lv >= lo / 100) & (lv < hi / 100)
+            if m.any(): print(f"  {f'{lo}–{hi} %' if hi < 99 else f'> {lo} %':10} {np.mean(m):8.1%} {np.mean(idle[m]):6.1%} {np.mean(idle[m] * lv[m]):+10.2%}")
         # R5: constant rates, per window (arithmetic idle × rate, which is the compounded pickup to the hundredth)
         print(f"  {'leg at a constant rate':24} " + " ".join(f"{int(x * 100):>5} %" for x in LEVELS) + "   (pp/yr: idle share × rate)")
         for label, m in panels:
             if m.any(): print(f"  {label:24} " + " ".join(f"{np.mean(idle[m]) * x:+7.2%}" for x in LEVELS))
-        # R6: the switches' cost priced on rates
-        sn = sc(naked)
-        print(f"  the switches (both on vs both off): idle at 0 {sb['excess'] - sn['excess']:+.2%}/yr, idle in bills {sc_['excess'] - sn['excess']:+.2%}" + (f"; by era, at 0: {' '.join(f'{x - y:+.1%}' for x, y in zip(sb['eras'], sn['eras']))}, in bills: {' '.join(f'{x - y:+.1%}' for x, y in zip(sc_['eras'], sn['eras']))}" if eras else "")
-              + "; at a constant " + ", ".join(f"{int(x * 100)} % {sb['excess'] - sn['excess'] + np.mean(idle) * x:+.2%}" for x in (0.0, 0.03, 0.05)))
+        # R6: the switches' cost priced on rates — each switch alone and both, with idle capital at 0 and in bills
+        sn = sc(core)
+        print(f"  {'the switches vs none':34} {'idle at 0':>10} {'in bills':>10}" + ("   eras at 0 | in bills" if eras else ""))
+        for label, ee in (("insurance only", np.where(bear, 0.5, 1.0)), ("shock only", np.where(shock, 0.5, 1.0)), ("both (the live rule, min)", e)):
+            s0, s1 = sc(ee * core), sc(ee * core + (1 - ee) * rfd)
+            print(f"  {label:34} {s0['excess'] - sn['excess']:+10.2%} {s1['excess'] - sn['excess']:+10.2%}" + (f"   {' '.join(f'{x - y:+.1%}' for x, y in zip(s0['eras'], sn['eras']))} | {' '.join(f'{x - y:+.1%}' for x, y in zip(s1['eras'], sn['eras']))}" if eras else ""))
+        print("  both, at a constant rate: " + ", ".join(f"{int(x * 100)} % {sb['excess'] - sn['excess'] + np.mean(idle) * x:+.2%}" for x in (0.0, 0.03, 0.05)))
         if name == "decade":
             today = [v for k, v in sorted(fred("DTB3").items())][-1] / 100; share = np.mean(idle)
             print(f"\n=== the go-live number (the decade's idle share {share:.1%}, the reserve 5 % apart; today's 3-month bill {today:.2%})")

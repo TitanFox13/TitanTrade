@@ -1,5 +1,88 @@
 # Important Decisions Log
 
+## Decision 087: Rates by era — the carry on idle capital priced at every rate level, era by era: the leg is worth 0.15 pp/yr per point of bill rate on the century's idle share (0.08 on the decade's), the book was de-risked at *higher* rates in the inflation-era bears and at lower ones in 2008 / 2020, and at today's rate Alpaca's cash programme alone (no orders, the reserve included) is within 0.06 pp/yr of the best ETF leg — **the programme alone at go-live, the `cash_ticker` leg stays off** (roadmap B4, operator: "do all the ready to run", 2026-11-03)
+**Date**: 2026-11-03
+**Why**: the last unpriced piece of the cash question. Decision 068's addendum priced bills over whole windows (+0.17 pp/yr on the decade, +0.5 on the century), Decision 080 chose the vehicle (a 1–3-year Treasury ETF beats bills by +0.3 on fifty years); what was left was the *level*: what the leg is worth when rates are 0 and when they are 5 %, whether the book is de-risked when rates are high or after they have been cut, and the number for the go-live checklist against Alpaca's cash programme, which pays on every idle dollar without an order. Done the Decision 062 way: hypotheses R1–R7 and the rule in `scripts/param_search/rates.py`, **committed before the first run** (`2ea35b9`). Data, all free and in the library: Kenneth French's daily bill return 1926 → (the carry series every earlier script used), FRED's daily 3-month bill 1954 → and CPI 1947 →, and — fetched for this test after the first run — French's *monthly* factors file (`F-F_Research_Data_Factors_CSV.zip`, added to `fetch_external.py`). The book = min(insurance ×0.5, shock ×0.5) × (0.4 dip + 0.6 momentum) on `books.sets()`: the century 1927-07 → 2026-08 (the four eras) and the ETF decade 2017-01 → 2026-10. **Nothing live changes.**
+
+**One correction before the final run, recorded.** The first run's rate bins came out with the 3–5 % bin empty on both windows: French's *daily* bill return is published to 0.01 % per day, so across the whole decade it takes three values (0, 2.5 and 5.0 %/yr) and 2025's 4.2 % reads as 5.04. The carry is still compounded on that series (so the pickups reproduce Decisions 068 / 080 — and the level series gives the same numbers to 0.02); the *level* of rates — the bins, the rate while de-risked, the real rate — is read from FRED's daily 3-month bill from 1954 and French's monthly 1-month bill before that. A four-line panel (each switch alone and both) and per-window inflation were added at the same time. No hypothesis changed.
+
+**R1 — the rate by era** (the level series; the real rate = level − CPI inflation, CPI from 1947):
+
+| window | bill rate | inflation | real | sessions under 1 % |
+|---|---|---|---|---|
+| 1927–1950 | 0.85 % | 3.4 % (1948–50 only) | −2.5 | 76 % |
+| 1950–1975 | 3.54 | 3.0 | +0.5 | 3 % |
+| 1975–2000 | 6.80 | 5.0 | +1.8 | 0 % |
+| 2000–2026 | 1.93 | 2.6 | −0.7 | 45 % |
+| the ETF decade 2017 → | 2.49 (first half 1.07, second 3.98) | 3.4 | −0.9 | 28 % |
+
+As written (0.6 / 3.5 / 6.5 / 1.6 expected). French's daily series agrees with the level to 0.03 on the decade and to the cent on 2000–26, and reads 0.2 … 0.4 low in the earlier eras (the rounding) — immaterial to the carry (below).
+
+**R2 — when is the book de-risked, and at what rate?** The idle share of capital (mean of 1 − e): **15.0 % over the century, 7.8 % on the decade** (written: 15–20 and 8–12). The rate *while de-risked* against the era's mean:
+
+| window | idle share | rate while idle | era mean | gap |
+|---|---|---|---|---|
+| century | 15.0 % | 3.25 % | 3.23 % | **+0.02** |
+| 1927–1950 | 21.3 | 0.78 | 0.85 | −0.07 |
+| 1950–1975 | 13.7 | **5.07** | 3.54 | **+1.53** |
+| 1975–2000 | 10.5 | **7.93** | 6.80 | **+1.13** |
+| 2000–2026 | 14.1 | 2.01 | 1.93 | +0.08 |
+| the ETF decade | 7.8 | 2.03 | 2.49 | −0.46 (first half +0.31, second **−1.46**) |
+
+**R2's direction is rejected.** The hypothesis was "the Fed eases into bears, so the carry is least when the book needs it". Over the century the book was de-risked at the *average* rate, and in the two inflation eras at rates 1.1 … 1.5 points *above* the era's mean: the bears of 1969–70, 1973–74 and 1980–82 were rate-driven, so the idle half earned 5 … 8 % while it sat out. Only the 2008 and 2020 bears (and 2001–03 in part) had the cut-to-zero shape — the decade's second half shows it (−1.46). Two kinds of bear, then: the rate-shock bear pays the carry at its highest, the crash-and-cut bear pays nothing. The operator's named fear of a weaker US market after a policy change is, if it comes with inflation, the kind that pays.
+
+**R3 — the pickup by era** (compounded through `master.score`; French daily / level series):
+
+| window | idle at 0 | idle in bills | pickup | level series |
+|---|---|---|---|---|
+| century whole | +3.63 (IS +5.03 / OOS +2.18) | +4.15 (+5.45 / +2.80) | **+0.52** (IS +0.42, OOS +0.61) | +0.54 |
+| 1927–1950 | +4.6 | +4.7 | +0.10 | +0.18 |
+| 1950–1975 | +5.5 | +6.3 | +0.78 | +0.78 |
+| 1975–2000 | +3.3 | +4.2 | +0.94 | +0.96 |
+| 2000–2026 | +1.2 | +1.5 | +0.33 | +0.31 |
+| the ETF decade | +1.36 (+0.27 / +2.46) | +1.54 (+0.42 / +2.66) | **+0.17** (IS +0.15, OOS +0.20) | +0.18 |
+
+Every era inside the written range (0.1 / 0.5–0.8 / 0.8–1.2 / 0.2–0.3 — the last a hair above); the century's +0.52 and the decade's +0.17 reproduce Decision 068's addendum. The luck meter on the two book lines (the first script to print `master.luck_line`): the century book t +3.16 → +3.62 with bills, P(excess > 0) 100 % either way, the 5–95 % band +1.9 … +5.2 → +2.5 … +5.8; the decade t +0.25 → +0.30, P(excess > 0) 70 → 72 %, the band −2.7 … +5.4 → −2.5 … +5.5 — the carry moves nothing that matters to the verdict.
+
+**R4 — by the prevailing rate** (the century; sessions / idle share / the in-bin pickup, annualised): under 1 % — 30.5 % of sessions, idle 15.6 %, **+0.04**; 1–3 % — 21.1 %, 16.6 %, +0.30; 3–5 % — 21.1 %, 10.4 %, +0.41; over 5 % — 26.2 %, 16.0 %, **+1.24**. The decade: 27.5 / 30.7 / 28.0 / 13.8 % of sessions, the idle share 7.7 / 12.1 / 6.4 / 0.7 %, the pickup +0.02 / +0.25 / +0.25 / +0.04. The pickup is idle share × rate, as written (the 3–5 bin reads lower than written because the idle share is lowest there); **the second half of R4 fails**: the idle share is *not* largest in the lowest bin — it is flat across the bins on the century (15.6 / 16.6 / 10.4 / 16.0), the R2 finding seen the other way.
+
+**R5 — the leg at a constant rate** (idle share × rate, pp/yr):
+
+| window | 1 % | 3 % | 5 % |
+|---|---|---|---|
+| century (idle 15.0 %) | +0.15 | +0.45 | **+0.75** |
+| 1927–1950 / 1950–1975 / 1975–2000 / 2000–2026 | +0.21 / +0.14 / +0.10 / +0.14 | +0.64 / +0.41 / +0.31 / +0.42 | +1.07 / +0.69 / +0.52 / +0.71 |
+| the ETF decade (idle 7.8 %) | +0.08 | +0.23 | **+0.39** |
+
+Written: +0.8 … +1.0 at 5 % on the century (read +0.75, the idle share at the low end of its range), +0.4 … +0.6 on the decade (+0.39). The rule of thumb that survives: **0.15 pp/yr per point of bill rate on the century's idle share, 0.08 on the decade's** — and the crisis eras hold the most idle capital (1927–50: 21 %; 2000–26: 14 %), so the leg is worth most exactly where the rates have been lowest.
+
+**R6 — the two switches priced on rates** (each against neither, excess vs the market; idle at 0 / in bills; eras at 0 | in bills):
+
+| switch | century | by era | the ETF decade |
+|---|---|---|---|
+| insurance only | +0.01 / +0.50 | +2.6 +0.4 −1.5 −1.6 \| +2.7 +1.2 −0.6 −1.3 | −3.24 / −3.10 |
+| shock only | +0.02 / +0.18 | +1.5 −0.9 +0.3 −0.9 \| +1.6 −0.7 +0.6 −0.8 | −1.49 / −1.39 |
+| **both, min (the live rule)** | **+0.20 / +0.72** | +2.5 +0.3 −1.0 −1.2 \| +2.6 +1.1 −0.0 −0.9 | **−3.16 / −2.99** |
+| both at a constant 0 / 3 / 5 % | +0.20 / +0.65 / +0.95 | | −3.16 / −2.93 / −2.78 |
+
+The hypothesis misread Decision 068's "+1.6": that was the insurance *off with the shock on* (here −1.49 vs −3.16 = +1.67, reproduced); both switches off is worth +3.16 on this decade at a zero rate, +2.99 in bills. Crediting bills shrinks the decade's cost by 0.17 (written ≈ 0.2) and lifts the century's gain by 0.52 (written ≈ 0.5); at a constant 5 % the switches cost 0.39 less on the decade and gain 0.75 more on the century (written 0.5 / 0.9). The era line is the one worth keeping in plain words: the switches *made* money only in 1927–50 (+2.5) and about broke even in 1950–75; since 1975 they have cost about a point a year with the cash at zero and half a point with it in bills. They stay on for the drawdown (Decision 068: −15 … −20 points in a 1929 / 1973 / 2008), not for the return — nothing new, now priced per era and per rate.
+
+**R7 — the go-live number** (the decade's idle share 7.8 %, the 5 % reserve apart; the 3-month bill 4.05 % on 2026-10-27; the programme's 3.56 % as read on the dashboard 2026-10-29):
+
+| parking | on the idle share | on the reserve | total | increment over the programme |
+|---|---|---|---|---|
+| **Alpaca's cash programme alone** (every idle dollar, no orders) | +0.28 | +0.18 | **+0.45** | — |
+| SGOV on top (bills − 0.09 expense) | +0.31 | (reserve stays in the programme) | +0.49 | **+0.03** |
+| SHY on top (bills + the 2-year's +0.3, Decision 080) | +0.34 | (same) | +0.52 | **+0.06** |
+
+Both increments are under the pre-registered 0.1 → **the programme alone; the `cash_ticker` leg stays off**. Without the programme (an operator check — Decision 071 left the live cash interest unverified) the leg is worth the whole +0.31 … +0.34 and nothing on the reserve, and SHY is the vehicle (080). The level of rates changes neither 080's vehicle choice (a relative result) nor the case for the switches (a drawdown result).
+
+**Verdict on the pre-registered rules.** R1 holds. **R2 fails in its direction** — the book was de-risked at higher rates in the inflation-era bears, at lower ones in 2008 / 2020, at the average over the century. R3 holds to the hundredth. R4's arithmetic holds, its second claim (idle capital concentrated at low rates) fails for the R2 reason. R5 holds at the low edge of its range. R6 holds in its increments and misstated the baseline (now corrected to Decision 068's actual number). **R7 holds and decides**: the increment is +0.03 / +0.06, below 0.1.
+
+**Decision.** B4 is closed with its numbers; nothing live changes, nothing is deployed. The go-live checklist (Decision 071 / C5 / todo Phase 2.0) now reads: enrol the cash programme; leave the `cash_ticker` leg off; SHY only if the programme turns out to be unavailable to the account. Kept as knowledge: (1) the cash leg's value is 0.15 pp/yr per point of bill rate on the century's idle share (0.08 on this decade's) — a 5 % world is worth three quarters of a point, a zero world nothing; (2) **two kinds of bear**: the rate-shock bear (1969, 1973, 1980) pays the carry at its highest, the crash-and-cut bear (2008, 2020) pays nothing — over a century they average out to "the book is de-risked at the ordinary rate"; (3) the two switches have cost about a point a year since 1975 with the cash at zero and half a point with it in bills, and earned their keep only in the Depression era — they are on for the drawdown, and the carry is what makes them cheaper.
+
+**Scripts / docs**: `scripts/param_search/rates.py` (pre-registration `2ea35b9`, then the level-series correction and the final run); `fetch_external.py` lists the monthly French factors file; the harness README row; roadmap B4 ✅, the C5 go-live row, the running order; todo Phase 2.27; one insight; handover note.
+
 ## Decision 086: Trend and carry over a century — the premium is real and old, it pays in the same slow bears the book's insurance pays in, and a sleeve of it buys Sharpe and drawdown with return; no sleeve, B3 closed (roadmap B3, operator: "let's do the century trend", 2026-10-30)
 **Date**: 2026-10-30
 **Why**: trend following is the one published family with a century behind it that the book has never held, and its claim — "crisis alpha", money made in the bears — is exactly what the book's two switches are for. Futures are not on Alpaca, so the test was always going to be knowledge first: on AQR's published factor series, judged on the operator's own eras, before any instrument. Done the Decision 062 way: hypotheses T1–T5 and the drop rule in `scripts/param_search/trend.py`, **committed before the first run** (`1809250`); `datasets.aqr_monthly` is the loader. Data: AQR's Time Series Momentum factor (TSMOM and its four legs, monthly, 1985-01 → 2026-05 — the real trend series) and the Century of Factor Premia (1926-07 → 2026-02: "All Macro Momentum", 12-1 momentum *within* the macro asset classes, the century-long cousin of trend, cross-sectional not time-series; "All Macro Carry"; the multi-style composite). All long-short, gross of costs and fees; each sleeve candidate rescaled to a constant 10 % volatility (an investable managed-futures fund's) and shown gross and net of 2 pp/yr. The book = `books.century()` / `books.decade()` with the exposure rules applied day by day, compounded to months; only the sleeve blend is monthly. One correction before any number was read: the first run compounded the daily exposure factors across a month (a de-risked month went to zero exposure, the book read +9.5 and −13 %); the monthly book is now compounded from the daily path and reproduces the known numbers (+3.9 vs +3.6 daily-scored, DD −58 %, Sharpe 0.84). **Nothing live changes.**
