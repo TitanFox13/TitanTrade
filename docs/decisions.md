@@ -1,5 +1,60 @@
 # Important Decisions Log
 
+## Decision 100: Execution timing — the dip sleeve's trades re-priced with 15-minute bars at the 10:15 run, the 15:30 run and the open, with the stop and the target firing intraday as they do on the broker: on the live universe the live mechanics are worth **−0.05 pp/yr** against the close-filled backtest, the 10:15 run beats the 15:30 run by +0.02 with the halves disagreeing, the broker-side stop earns +3.5 % per event and the resting target gives up 0.5 % per event; on the names +0.5 pp/yr, all of it in the first half; **nothing changes — the runs stay where they are, the close-filled backtests stand** (roadmap C5, handover §8 idea 5, Alpaca 15-minute bars fetched on titanserver, 2026-11-04)
+**Date**: 2026-11-04
+**Why**: handover §8 idea 5, the last of the ideas block, run on the operator's word against my recommendation to skip it — "worth ≈ 0.06 pp/yr at this turnover". The live book trades at two scheduled runs (a NEW entry is a near-market bracket at the 10:15 ET run after the signal; its stop and target rest on the broker and fill intraday; the holding-limit exit is a settled close at the 10:15 run of the 60th session) while every backtest fills at the session close; the fill ledger (069) measures the gap live, one row so far (DXCM, −0.33 %). **Data**: SIP 15-minute bars 2016-01 → 2026-11, split- and dividend-adjusted, for SPY, SPMO, the 11 sector ETFs and the 15 shadow names — fetched on titanserver with the project's keys (`scripts/param_search/fetch_15min.py`; the research machine has no broker .env), carried over with the base64 trick (the server's login shell breaks scp), 28 files, 315 MB, in `external/alpaca_15min/` with manifest entries, archived at the source. Hypotheses X1–X4 and the drop rule in `scripts/param_search/exectiming.py`, **committed before the first run** (`b414da5`); one run, 10 s. The fastbt trades on universe **D** (the sector ETFs, the live universe — 61 trades 2017 → 2026-10: 7 targets, 6 stops, 48 holding limits) and **A** (the 15 names — 170 trades: 61 / 64 / 45), each re-priced: the entry at the open of the 10:15 bar (live), the 15:30 bar, the 09:30 bar and the close (the backtest); the stop at entry × 0.88 and the target at entry × 1.20 set from the live entry and filled at the first 15-minute bar that reaches them (at the level, or the bar's open through a gap); the holding limit at the 10:15 open of the 60th session. Intraday prices as ratios to the day's last bar on the daily close, so the two feeds' adjustments cancel; gross returns both sides; the sleeve-level effect = the per-trade difference × a 10 % slot per year; the band = a 400-draw bootstrap of the per-trade differences. **Nothing live changes.**
+
+**Context — SPY's own drift from a run to the close** (2,474 sessions): 10:15 → close +1.2 bp a day (sd 78), 15:30 → close −0.5 bp (sd 32), open → close +1.8 bp — within the written ±2: the time of day carries no drift worth a trade.
+
+**X1 — the entry fill against the close fill** (per entry; the bootstrap band of the mean; on the book):
+
+| universe · run | mean | median | 5–95 % of the mean | on the book |
+|---|---|---|---|---|
+| ETFs · 10:15 (live) | +0.08 % | +0.08 % | −0.12 … +0.27 | −0.05 pp/yr |
+| ETFs · 15:30 | +0.06 % | +0.05 % | −0.02 … +0.14 | −0.04 |
+| ETFs · open | −0.08 % | −0.04 % | −0.38 … +0.21 | +0.05 |
+| names · 10:15 | −0.08 % | −0.18 % | −0.29 … +0.13 | +0.13 |
+| names · 15:30 | +0.04 % | 0.00 % | −0.02 … +0.11 | −0.07 |
+| names · open | −0.02 % | −0.22 % | −0.32 … +0.29 | +0.03 |
+
+**X1 holds**: every fill within the written ±0.3 % (the open within ±0.5), every band straddling zero. On the sector ETFs the 10:15 buyer pays 8 bp more than the close on average (−0.05 pp/yr — the fill ledger's expected sign); on the names the morning fill is 8 bp *cheaper* (the dipped names drift up into the close), worth +0.13 pp/yr with a band that includes zero.
+
+**X2 / X3 — the exits on the broker against the close-based exit** (the backtest's entry held fixed; backtest kind → live kind; the live minus the backtest return per event; days earlier):
+
+| universe · backtest kind | n | live kinds | Δ return mean / median | days earlier |
+|---|---|---|---|---|
+| ETFs · target | 7 | 7 targets | **−0.47 %** / −0.10 % | 1.0 |
+| ETFs · stop | 6 | 6 stops | **+3.45 %** / +2.79 % | 2.7 |
+| ETFs · holding limit | 48 | 45 limits, 2 targets, 1 stop | −0.37 % / +0.06 % | 1.2 |
+| **ETFs · all** | 61 | | **−0.01 %** per trade, band −0.77 … +0.60 | → **−0.005 pp/yr** |
+| names · target | 61 | 61 targets | **−1.72 %** / −1.12 % | 2.3 |
+| names · stop | 64 | 64 stops | **+1.43 %** / +1.15 % | 2.0 |
+| names · holding limit | 45 | 41 limits, 2 targets, 2 stops | +0.98 % / +0.27 % | 1.6 |
+| **names · all** | 170 | | **+0.18 %** per trade, band −0.18 … +0.59 | → **+0.31 pp/yr** |
+
+**X2 holds on the shape and exceeds its range on the ETFs**: the broker-side stop sells at the level while the close-based backtest sold at the lower close of the breach day — **+3.45 % per stop event on the ETFs** (written 0.5 … 1.5: their six stop days were big down days) and +1.43 % on the names (inside the range); the whipsaw — a stop touched intraday on a day whose close recovered, a trade the backtest kept — is **1 of 48 holding-limit trades on the ETFs and 2 of 45 on the names** (written 10 … 30 % more stop events: far fewer — the −12 % level is deep enough that an intraday touch rarely reverses). **X3 fails on the names in the live limit's disfavour**: the resting target sells at the +20 % touch, two days before the backtest's close at or above it, and the names overshoot — **−1.72 % per target event** (written 0 … 1; −0.47 on the ETFs, inside); the extra targets the close never confirmed are 2 of 45 (written 0 … 20 %, at the floor). On the names the stop's gain and the target's cost nearly cancel: +0.18 % per trade, +0.31 pp/yr (above the written ±0.05, the band including zero).
+
+**X4 — the whole sleeve re-priced** (live entries at each run, broker exits; against the close-filled backtest):
+
+| universe · entry run | mean Δ per trade | IS / OOS | 5–95 % of the mean | on the book (IS / OOS) |
+|---|---|---|---|---|
+| **ETFs · 10:15 (live)** | **−0.07 %** | +0.37 / −0.47 | −0.68 … +0.52 | **−0.045 pp/yr** (+0.21 / −0.32) |
+| ETFs · 15:30 | −0.11 % | +0.52 / −0.68 | −0.90 … +0.48 | −0.067 (+0.30 / −0.45) |
+| ETFs · open | +0.00 % | +0.58 / −0.52 | −0.65 … +0.59 | +0.002 |
+| ETFs · 10:15 vs 15:30 | +0.04 % | −0.15 / +0.21 | | +0.022 |
+| **names · 10:15 (live)** | +0.31 % | +0.66 / −0.08 | −0.38 … +1.04 | **+0.535** (+1.17 / −0.13) |
+| names · 15:30 | −0.00 % | +0.18 / −0.21 | −0.46 … +0.44 | −0.005 (+0.32 / −0.35) |
+| names · open | −0.10 % | +0.21 / −0.45 | −1.09 … +0.70 | −0.181 |
+| names · 10:15 vs 15:30 | +0.31 % | +0.48 / +0.13 | | +0.540 |
+
+**X4 holds on the live universe and fails in magnitude on the names.** The live mechanics against the close-filled backtest on the sector ETFs: **−0.045 pp/yr** (written ±0.2), the halves +0.21 / −0.32 — the fill ledger (069) and the backtester's close-fill convention (081) are as accurate as they were taken to be. On the names +0.54 pp/yr (written ±0.2), **all of it in the first half** (+1.17 / −0.13) with a band from −0.38 to +1.04 per trade: 2017–21's names ran past their targets and bounced from their stops in a way 2022 → did not. The 10:15 run against the 15:30 run: +0.02 pp/yr on the ETFs with the halves of opposite sign (−0.15 / +0.21 per trade), +0.54 on the names with the same sign in both halves (+0.48 / +0.13).
+
+**The pre-registered drop rule** — the entry run moves only if one run beats the other by more than 0.3 pp/yr in both halves on the ETFs with the same sign on the names — **fails on the ETFs** (+0.02 overall, the halves disagree). **Nothing changes.**
+
+**Decision.** The runs stay at 10:15 and 15:30; the close-filled backtests stand. Kept: (1) **on the live universe the time of day is worth nothing**: SPY drifts ±1 bp an hour, the 10:15 fill costs 8 bp against the close, the live mechanics net to −0.05 pp/yr — the roadmap's 0.06 to the decimal; (2) **the broker-side stop is the one live mechanic that pays**, +1.4 … +3.5 % per stop event over a close-based exit, and it whipsaws far less than feared (1 … 2 of 45 … 48 held trades) — Decision 060's stop coverage is worth keeping exactly as it is; (3) **the resting target limit gives up the overshoot** — on single names −1.7 % per event, on the ETFs −0.5 — a possible refinement (sell the target at the close of the touch day instead of the touch) that is worth +0.1 pp/yr on the ETFs at most and is not proposed: the limit guarantees the exit, the close-day sale would need a run to be alive; (4) the ideas block of handover §8 is **complete** — 1 the macro gate (094), 2 crypto (095 / 096 / 097), 3 selling volatility (098), 4 positioning (099), 5 execution timing (100); E6 stays parked. The 15-minute bars stay in the library for any later intraday question.
+
+**Scripts / docs**: `scripts/param_search/exectiming.py` (pre-registration `b414da5`, the run), `fetch_15min.py` (run on titanserver); roadmap C5 row; todo Phase 2.40; README rows and the library bullet; handover §8 item 5 ✅ and the block closed.
+
 ## Decision 099: Positioning and leverage as a regime input — the speculators' net S&P 500 futures position (CFTC, 1986 →) and the public's margin debt (FINRA, 1997 →) as a third insurance signal on 37 years: every gate and every warning reads inside its block-shuffled placebo band or below it, none beats the incumbent in both halves, the gates' apparent gains are the insurance switched off (a 5 … 14-point deeper 2008); **closed, the insurance keeps its two signals** (roadmap C2, handover §8 idea 4, library data, 2026-11-04)
 **Date**: 2026-11-04
 **Why**: handover §8 idea 4 — "who is crowded" as a state variable: does the positioning of speculators or the leverage of the public know something about the market's falls that its own price (the live two-signal insurance, the shock trigger) does not? The Decision 077 construction: a state from a different population as a third insurance signal on the book, against the incumbent and against the state block-shuffled. **Data, in the library since Decision 072**: the CFTC Commitments of Traders (legacy futures-only, one zip per year 1986 →) — the non-commercial (speculator) net position in S&P 500 futures as a share of open interest, the big contract at weight 1 (1986 → its 2021 delisting), the E-mini at 0.2 (1997 →), the micro at 0.02 (2019 →), 1,940 weekly readings, read with a 7-day lag (Tuesday's position is published Friday); FINRA's margin debt (monthly, 1997-01 → 2026-09, released in the third week of the following month → read two months late). NAAIM publishes no feed (manual) and AAII is walled — both out, as the roadmap said. **States**, each a rolling real-time percentile rank: COT **crowded long** (the net speculative share's rank over the trailing 3 years — the contrarian reading) and **crowded short** (its mirror — the trend reading); **margin stretched** (the 12-month change of margin debt, its rank over 5 years) and **margin shrinking** (its mirror — the deleveraging leg). Each at 0.7 / 0.8 / 0.9 as a **gate** (de-risk only when the SMA says bear AND the state is on), a **warning** (SMA OR state) and alone; the placebo = the state block-shuffled in 63-session blocks, 20 draws at 0.8. The century book (dip on 49 industries 40 / top momentum decile 60, de-risked capital at 0) on **1989-01-03 → 2026-08-31** (split 2007-11, eras 1989–2000 / 2000–10 / 2010 →) and the ETF book on the decade. Hypotheses R1–R3 and Decision 077's drop rule in `scripts/param_search/positioning.py`, **committed before the first run** (`46d9434`); one run, 13 s. **Nothing live changes.**
