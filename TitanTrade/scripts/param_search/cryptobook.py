@@ -149,7 +149,7 @@ def sleeve_run(u, dates, picker):
             target = np.zeros(N)
             if len(picks):
                 target[picks] = total / len(picks)
-            tr = np.abs(target - value).sum() + (cash if len(picks) else 0.0) * 0; turn += tr / total
+            tr = np.abs(target - value).sum(); turn += tr / total   # sells and buys, each side charged
             total -= COST * tr; value = target * (total / max(target.sum(), 1e-12)) if len(picks) else np.zeros(N); cash = 0.0 if len(picks) else total
         curve[t] = value.sum() + cash
     return curve[1:] / curve[:-1] - 1, turn / (S / 252)
@@ -172,7 +172,10 @@ def trend_family(level):
     for m in (50, 100, 200, 300):
         sma = np.full(n, np.nan); sma[m - 1:] = (cs[m:] - cs[:-m]) / m; out[f"sma{m}"] = level > sma
     for k in (1, 3, 6, 12):
-        w = 21 * k; mom = np.full(n, np.nan); mom[w + 5:] = level[5:-w] / level[:-w - 5] - 1 if w + 5 < n else np.nan; out[f"mom{k}"] = mom > 0
+        w = 21 * k; mom = np.full(n, np.nan)
+        if w + 5 < n:
+            mom[w + 5:] = level[w:-5] / level[:-w - 5] - 1   # the return from t − 5 − w to t − 5 (the 5-session skip)
+        out[f"mom{k}"] = mom > 0
     return out
 
 
@@ -288,8 +291,8 @@ def main():
                 elig_m[i] = cur[cols]
         res = fastbt.run(mkt, {**books.LIVE, "cost_per_side": COST, "eligible": elig_m}, dd[0], None, want_trades=True)
         cv = res["_curve"]; rdip = cv[1:] / cv[:-1] - 1; i0 = mkt.dates.index(res["start"]); ddd = mkt.dates[i0:i0 + len(cv)]
-        c, mdd = stats(rdip); a, b = halves(rdip, ddd, split); ewa, ewb = halves(ew[len(dd) - len(ddd):], ddd, split) if len(ddd) <= len(dd) else ewh
-        print(f"\n  D — the dip rule on the liquid coins ({len(cols)} ever liquid): CAGR {c:+.1%} (IS {a:+.1%} / OOS {b:+.1%}), DD {mdd:.0%}, {len(res['trades'])} trades | vs EW-liquid {c - stats(ew[len(dd) - len(ddd):])[0]:+.1%} (IS {a - ewa:+.1%} / OOS {b - ewb:+.1%})")
+        c, mdd = stats(rdip); a, b = halves(rdip, ddd, split); ew2 = ew[len(dd) - len(ddd):]; ewa, ewb = halves(ew2, ddd, split)
+        print(f"\n  D — the dip rule on the liquid coins ({len(cols)} ever liquid, from {ddd[0]}): CAGR {c:+.1%} (IS {a:+.1%} / OOS {b:+.1%}), DD {mdd:.0%}, {len(res['trades'])} trades | EW-liquid on the same window: CAGR {stats(ew2)[0]:+.1%} (IS {ewa:+.1%} / OOS {ewb:+.1%}), DD {stats(ew2)[1]:.0%} | gap {c - stats(ew2)[0]:+.1%} (IS {a - ewa:+.1%} / OOS {b - ewb:+.1%})")
         # V — volatility-scaled BTC vs a constant exposure of the same average
         rs = hold["BTC"][first:]; vol = np.array([np.std(rs[max(0, t - 30):t]) * np.sqrt(252) if t >= 10 else np.nan for t in range(len(rs))])
         e = np.clip(0.5 / vol, 0, 1); e = np.nan_to_num(e, nan=1.0); x = np.concatenate([[1.0], e[:-1]]); rv = x * rs - COST * np.abs(np.diff(np.concatenate([[0.0], x])))
