@@ -92,7 +92,16 @@ def get_ohlcv(
 
 
 def get_latest_price(ticker: str, cfg: Config) -> float | None:
-    """Latest trade price from Alpaca."""
+    """Latest trade price from Alpaca (the crypto endpoint for a ``BTC/USD``-style symbol, Decision 097)."""
+    if "/" in ticker:
+        try:
+            resp = fetch_with_retry("GET", f"{cfg.alpaca.data_base_url}/v1beta3/crypto/us/latest/trades",
+                                    headers=_alpaca_data_headers(cfg), params={"symbols": ticker})
+            price = (resp.json().get("trades", {}).get(ticker) or {}).get("p")
+            return float(price) if price else None
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"Latest crypto price fetch failed for {ticker}: {exc}")
+            return None
     url = f"{cfg.alpaca.data_base_url}/v2/stocks/{ticker}/trades/latest"
     try:
         resp = fetch_with_retry(

@@ -103,8 +103,9 @@ A stock that failed to fetch carries `"error"` and empty inputs; the plan treats
 | `insurance.exposure_scale` | 1.0, or `insurance_scale` while `risk_off` |
 | `shock` | `signals.shock_state` over `market_context.spy.closes`: `active` while a −`drop_pct` move over `lookback_days` sessions happened within the last `hold_days`; `sessions_left` until it expires; `worst_drop` the worst such return in the window |
 | `exposure_scale` | `min(insurance.exposure_scale, shock.exposure_scale)` — what both core legs scale by |
-| `sleeve.target_pct` | `exposure_scale × 0.98 × momentum_weight` — the momentum ETF's share of equity this run (0.98 = 1 − the 2 % reserve, Decision 090) |
+| `sleeve.target_pct` | `exposure_scale × 0.98 × momentum_weight × (1 − crypto_weight)` — the momentum ETF's share of equity this run (0.98 = 1 − the 2 % reserve, Decision 090; the bitcoin leg's share off the top, 097) |
 | `cash_leg` | `{ticker, target_pct}` with `target_pct = (1 − exposure_scale) × 0.98` when `cash_ticker` is set (071), else `null` |
+| `crypto_leg` | `{ticker, weight, target_pct}` with `target_pct = crypto_weight` when `crypto_ticker` is set (097) — untouched by `exposure_scale`; else `null` |
 | `free_slots` | `max_slots − held − pending_buys` |
 
 ## 6. Trade Log (`state/trade_log.json`)

@@ -373,6 +373,9 @@ def _core_legs(cfg: Any) -> tuple[str, ...]:
     legs = [cfg.trading.core_ticker, cfg.trading.momentum_ticker]
     if getattr(cfg.trading, "cash_ticker", ""):
         legs.append(cfg.trading.cash_ticker)
+    crypto = getattr(cfg.trading, "crypto_ticker", "")
+    if crypto:
+        legs += [crypto, crypto.replace("/", "")]   # the bitcoin leg (097), as ordered and as the position reports it
     return tuple(legs)
 
 

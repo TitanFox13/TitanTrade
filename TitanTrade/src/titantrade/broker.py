@@ -186,7 +186,7 @@ def place_market_sell(ticker: str, qty: float, cfg: Config) -> dict[str, Any]:
         "qty": str(qty),
         "side": "sell",
         "type": "market",
-        "time_in_force": "day",
+        "time_in_force": "gtc" if "/" in ticker else "day",   # Alpaca accepts only gtc / ioc for crypto
     }
     log.info(f"Market SELL: {qty} {ticker}")
     resp = fetch_with_retry("POST", url, headers=_headers(cfg), json_body=body)
@@ -203,7 +203,7 @@ def place_market_buy(ticker: str, qty: float, cfg: Config) -> dict[str, Any]:
         "qty": str(qty),
         "side": "buy",
         "type": "market",
-        "time_in_force": "day",
+        "time_in_force": "gtc" if "/" in ticker else "day",   # Alpaca accepts only gtc / ioc for crypto
     }
     log.info(f"Market BUY: {qty} {ticker}")
     resp = fetch_with_retry("POST", url, headers=_headers(cfg), json_body=body)

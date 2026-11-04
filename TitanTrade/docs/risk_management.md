@@ -7,7 +7,7 @@ The system's job is to not lose money, and secondarily to make money. Missed opp
 ## What Protects the Book
 
 - **Position level**: a GTC stop-limit at −12% on every whole-share overlay position (placed by the bracket, converted on fill, re-placed by the 09:35 ET coverage job if ever missing — Decision 060); a +20% target (sold only when the live quote confirms the position mark — Decision 084) and a 60-trading-day limit evaluated at each executor run; the orphan close for any position without a plan item.
-- **Portfolio level**: flat slots of 25% of the dip sleeve (10% of equity, max 3) under a 70% overlay cap, the 2% cash reserve, the drawdown breaker, the sector / correlation / earnings / macro gates, the two-signal insurance (SPY < 200-day SMA **and** sector breadth < 50% → exposure halves, no new entries; fails open when inputs are unknown) and the shock trigger (068: SPY −7% over 10 sessions within the last 20 → exposure halves, no new entries); exposure = min of the two, applied to both core legs (SPY, SPMO).
+- **Portfolio level**: flat slots of 25% of the dip sleeve (10% of equity, max 3) under a 70% overlay cap, the 2% cash reserve, the drawdown breaker, the sector / correlation / earnings / macro gates, the two-signal insurance (SPY < 200-day SMA **and** sector breadth < 50% → exposure halves, no new entries; fails open when inputs are unknown) and the shock trigger (068: SPY −7% over 10 sessions within the last 20 → exposure halves, no new entries); exposure = min of the two, applied to both core legs (SPY, SPMO). The bitcoin leg (097) sits outside the exposure rules and every gate: a held 5 % of equity re-set only outside ±25 % of its target, covered by the account-level guards (the breaker, the suspect-value guard, the reserve) and by nothing else — Decisions 095 / 096 found no stop or timing rule that beats its placebo on bitcoin.
 - **What no longer sells**: the LLM sentry, the intraday price check, the hedge swap and the trailing / TP1 manager — measured as net losses or untested (Decision 060, Evidence 3) and frozen under `legacy/`.
 
 ## The Eight Gates (`risk_manager.pre_trade_check`)
@@ -45,6 +45,7 @@ Evaluated in order for every NEW item (an entry that expired unfilled is simply 
 | `slot_pct` / `max_slots` | 0.25 (of the dip sleeve) / 3 | same |
 | `momentum_ticker` / `momentum_weight` | SPMO / 0.6 | same |
 | `cash_ticker` | "" (off); SGOV at go-live if cash earns nothing (071) | same |
+| `crypto_ticker` / `crypto_weight` / `crypto_band_pct` | BTC/USD / 0.05 / 0.25 (097; "" / 0 = off) | same |
 | `shock_drop_pct` / `shock_lookback_days` / `shock_hold_days` / `shock_scale` | 0.07 / 10 / 20 / 0.5 | same |
 | `tp_pct` / `stop_pct` / `max_hold_days` | 0.20 / 0.12 / 60 | same |
 | `insurance_sma_days` / `insurance_breadth` / `insurance_scale` | 200 / 0.5 / 0.5 | same |

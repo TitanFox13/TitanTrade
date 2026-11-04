@@ -42,6 +42,7 @@ The book has three kinds of holdings and one reserve:
 | what the checkup says | normal | a problem |
 |---|---|---|
 | "SPMO n % of its 59 % target" | Within the band, or below it while old positions run out | Far below target with free cash sitting idle for more than a run or two |
+| "BTC/USD target 5.0 % of equity (held, outside the exposure rules)" | Within its ±25 % band (3.75–6.25 % of equity); one BUY of ≈ 0.06 BTC on the first run after the deploy, then a handful of trades a year | Buys or sells of it run after run (the band is broken), or an orphan-close, gap-check or stop-coverage line naming BTCUSD (it must be a core leg to all three) |
 | "DXCM / URI / JPM held" (the transition names) | Each with its stop, target and clock from the plan; they leave only by those three exits | A forced sale of one of them; one without a plan item |
 | "n free slots, candidates: …" | 0 free slots while the three old names are held; afterwards 0–3 | A free slot with a valid candidate and no entry, with no gate named as the reason |
 | "SPY n %" | 0 during the transition; later the small remainder | SPY above the remainder while slots are held (money double-counted) |
@@ -65,7 +66,7 @@ Every action in the trade log must be one the rules prescribe:
 |---|---|
 | a BUY of a sector ETF | a NEW item in the plan that day, at the plan's levels, through the eight gates |
 | a SELL of a dip position | the broker's stop; the +20 % target; the 60-trading-day clock; an orphan close (a position with no plan item); gap-down protection after a large overnight gap |
-| a BUY or SELL of SPY, SPMO (or the cash-leg ETF when on) | a core rebalance toward its target, outside the band |
+| a BUY or SELL of SPY, SPMO, BTC/USD (or the cash-leg ETF when on) | a core rebalance toward its target, outside the band |
 
 Anything else is a finding. The two things that look like problems and are not: a position that leaves the watchlist keeps its item and exits on its own (never force-sold); an entry order that did not fill by the close simply comes back the next run.
 

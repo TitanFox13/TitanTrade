@@ -119,11 +119,19 @@ class TradingSettings:
     # (1 − exposure) × 95 %. "" = off; invisible on paper (no distributions),
     # +0.17 pp/yr decade-like, +0.5 on the century (Decision 068 addendum).
     cash_ticker: str = ""
+    # Bitcoin leg (Decision 097): a held crypto position at ``crypto_weight`` of
+    # equity, outside the exposure rules (never scaled by the insurance or the
+    # shock trigger, never timed — Decision 096), re-set only when it drifts
+    # ``crypto_band_pct`` of its target; the two sleeves take the rest pro rata.
+    # "" / 0 = off. Orders use Alpaca's "BTC/USD"; positions report "BTCUSD".
+    crypto_ticker: str = ""
+    crypto_weight: float = 0.0
+    crypto_band_pct: float = 0.25
 
     @property
     def overlay_slot_pct(self) -> float:
-        """One dip slot as a share of equity: ``slot_pct`` of the dip sleeve."""
-        return self.slot_pct * (1 - self.momentum_weight)
+        """One dip slot as a share of equity: ``slot_pct`` of the dip sleeve (after the bitcoin leg's share)."""
+        return self.slot_pct * (1 - self.momentum_weight) * (1 - self.crypto_weight)
 
 
 @dataclass(frozen=True)
@@ -143,6 +151,7 @@ MECHANICAL_FIELDS = {
     "momentum_ticker", "momentum_weight",
     "shock_drop_pct", "shock_lookback_days", "shock_hold_days", "shock_scale",
     "design", "cash_ticker",
+    "crypto_ticker", "crypto_weight", "crypto_band_pct",
 }
 
 

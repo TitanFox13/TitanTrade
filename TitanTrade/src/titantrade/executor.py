@@ -36,8 +36,8 @@ from titantrade.market_context import load_stock_sectors
 from titantrade.market_data import get_latest_price
 from titantrade.protection import check_gap_down_protection, close_orphaned_positions, close_position_settled
 from titantrade.entries import handle_entry, open_buy_commitment, record_stop_out_cooldowns
-from titantrade.core_allocation import _is_core_ticker, manage_core_position
-from titantrade.mechanical import cash_target_pct, core_target_pct, momentum_target_pct
+from titantrade.core_allocation import _is_core_ticker, manage_core_position, position_symbol
+from titantrade.mechanical import cash_target_pct, core_target_pct, crypto_target_pct, momentum_target_pct
 from titantrade.risk_manager import _notify_suspect_value, account_value_suspect, load_peak_value
 from titantrade.signals import trading_days_between
 from titantrade.trade_state import _load, _save, position_opened_at
@@ -329,9 +329,17 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
             cash_now = sum(float(p.get("market_value") or 0) for p in positions if p.get("symbol") == cash_leg) / portfolio_value if portfolio_value else 0.0
             legs.insert(0, (cash_leg, cash_target)) if cash_now > cash_target else legs.append((cash_leg, cash_target))
             log.info(f"{cash_leg} target {cash_target:.0%} of equity (idle capital), now {cash_now:.0%}")
+        crypto = cfg.trading.crypto_ticker
+        if crypto and (cfg.trading.crypto_weight > 0 or position_symbol(crypto) in held_now):
+            # The bitcoin leg (097): last, with what the other legs' sales freed; its own band, fractional units.
+            crypto_target = crypto_target_pct(cfg)
+            crypto_now = sum(float(p.get("market_value") or 0) for p in positions if p.get("symbol") == position_symbol(crypto)) / portfolio_value if portfolio_value else 0.0
+            legs.append((crypto, crypto_target))
+            log.info(f"{crypto} target {crypto_target:.1%} of equity (held, outside the exposure rules), now {crypto_now:.1%}")
         for leg, target in legs:
+            extra = {"band_pct": cfg.trading.crypto_band_pct, "fractional": True} if leg == crypto else {}
             try:
-                core_trade = manage_core_position(cfg, target_pct=target, ticker=leg, committed_cash=committed)
+                core_trade = manage_core_position(cfg, target_pct=target, ticker=leg, committed_cash=committed, **extra)
                 if core_trade:
                     executed.append(core_trade)
                     positions = get_positions(cfg)

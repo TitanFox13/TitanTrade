@@ -261,6 +261,8 @@ def build_plan(
             "shock_lookback_days": cfg.trading.shock_lookback_days,
             "shock_hold_days": cfg.trading.shock_hold_days,
             "shock_scale": cfg.trading.shock_scale,
+            "crypto_ticker": cfg.trading.crypto_ticker,
+            "crypto_weight": cfg.trading.crypto_weight,
         },
         "stale_inputs": stale,
         "insurance": insurance,
@@ -272,6 +274,7 @@ def build_plan(
             "target_pct": momentum_target_pct(cfg, exposure_scale),
         },
         "cash_leg": {"ticker": cfg.trading.cash_ticker, "target_pct": cash_target_pct(cfg, exposure_scale)} if cfg.trading.cash_ticker else None,
+        "crypto_leg": {"ticker": cfg.trading.crypto_ticker, "weight": cfg.trading.crypto_weight, "target_pct": crypto_target_pct(cfg)} if cfg.trading.crypto_ticker else None,
         "breadth": {k: v for k, v in breadth_ctx.items() if k != "flags"},
         "items": items,
         "watch": watch,
@@ -310,7 +313,7 @@ def core_target_pct(
         if not _is_core_ticker(p.get("symbol", ""), cfg)
     )
     planned = planned_new_slots * cfg.trading.overlay_slot_pct * portfolio_value
-    investable = exposure_scale * (1 - MIN_CASH_RESERVE_PCT / 100) * (1 - cfg.trading.momentum_weight)
+    investable = exposure_scale * (1 - MIN_CASH_RESERVE_PCT / 100) * (1 - cfg.trading.momentum_weight) * (1 - cfg.trading.crypto_weight)
     target = investable - (overlay + planned) / portfolio_value
     return max(0.0, min(1.0, round(target, 4)))
 
@@ -324,8 +327,13 @@ def cash_target_pct(cfg: Config, exposure_scale: float) -> float:
 
 def momentum_target_pct(cfg: Config, exposure_scale: float) -> float:
     """The momentum sleeve's target share of equity (Decision 068):
-    ``exposure_scale × (1 − cash reserve) × momentum_weight``."""
-    return round(max(0.0, exposure_scale) * (1 - MIN_CASH_RESERVE_PCT / 100) * cfg.trading.momentum_weight, 4)
+    ``exposure_scale × (1 − cash reserve) × momentum_weight``, after the bitcoin leg's share (097)."""
+    return round(max(0.0, exposure_scale) * (1 - MIN_CASH_RESERVE_PCT / 100) * cfg.trading.momentum_weight * (1 - cfg.trading.crypto_weight), 4)
+
+
+def crypto_target_pct(cfg: Config) -> float:
+    """The bitcoin leg's share of equity (Decision 097): ``crypto_weight``, untouched by the exposure rules — the bet is the bet."""
+    return round(cfg.trading.crypto_weight, 4) if cfg.trading.crypto_ticker else 0.0
 
 
 def _pending_buy_tickers(cfg: Config) -> set[str]:

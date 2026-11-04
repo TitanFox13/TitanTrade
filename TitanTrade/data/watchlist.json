@@ -1,10 +1,38 @@
 {
-  "watchlist": ["XLK", "XLV", "XLF", "XLE", "XLI", "XLY", "XLB", "XLRE", "XLP", "XLU", "XLC"],
-  "shadow_watchlist": ["CRWD", "ANET", "LLY", "DXCM", "HCA", "JPM", "GS", "DVN", "WMT", "URI", "GE", "DASH", "DECK", "FCX", "EQIX"],
+  "watchlist": [
+    "XLK",
+    "XLV",
+    "XLF",
+    "XLE",
+    "XLI",
+    "XLY",
+    "XLB",
+    "XLRE",
+    "XLP",
+    "XLU",
+    "XLC"
+  ],
+  "shadow_watchlist": [
+    "CRWD",
+    "ANET",
+    "LLY",
+    "DXCM",
+    "HCA",
+    "JPM",
+    "GS",
+    "DVN",
+    "WMT",
+    "URI",
+    "GE",
+    "DASH",
+    "DECK",
+    "FCX",
+    "EQIX"
+  ],
   "settings": {
     "trading_mode": "paper",
     "mechanical": {
-      "design": "070",
+      "design": "097",
       "dip_pct": 0.08,
       "dip_lookback_days": 90,
       "trend_sma_days": 150,
@@ -21,7 +49,10 @@
       "shock_drop_pct": 0.07,
       "shock_lookback_days": 10,
       "shock_hold_days": 20,
-      "shock_scale": 0.5
+      "shock_scale": 0.5,
+      "crypto_ticker": "BTC/USD",
+      "crypto_weight": 0.05,
+      "crypto_band_pct": 0.25
     }
   }
 }

@@ -21,6 +21,7 @@ from titantrade.risk_manager import MIN_CASH_RESERVE_PCT
 from titantrade.trade_state import _append_trade, _trade_record
 
 log = get_logger("core_allocation")
+MIN_NOTIONAL = 10.0   # a fractional (crypto) order below this is dust, not a rebalance
 
 
 def _is_core_ticker(ticker: str, cfg: Config) -> bool:
@@ -29,23 +30,34 @@ def _is_core_ticker(ticker: str, cfg: Config) -> bool:
     return ticker in core_tickers(cfg)
 
 
+def position_symbol(ticker: str) -> str:
+    """Alpaca reports a crypto position as ``BTCUSD`` while orders and quotes use ``BTC/USD``."""
+    return ticker.replace("/", "")
+
+
 def core_tickers(cfg: Config) -> tuple[str, ...]:
     legs = [cfg.trading.core_ticker, cfg.trading.momentum_ticker]
     if cfg.trading.cash_ticker:
         legs.append(cfg.trading.cash_ticker)
+    if cfg.trading.crypto_ticker:
+        legs += [cfg.trading.crypto_ticker, position_symbol(cfg.trading.crypto_ticker)]
     return tuple(legs)
 
 
 def manage_core_position(
     cfg: Config, target_pct: float | None = None, ticker: str | None = None, committed_cash: float = 0.0,
+    band_pct: float | None = None, fractional: bool = False,
 ) -> dict[str, Any] | None:
     """Rebalance a core leg (default SPY; the momentum ETF when ``ticker``
     says so) toward ``target_pct`` of equity (default: the whole investable
     book). Skipped off-hours (market orders). A buy spends only the cash above
     the reserve *and* above ``committed_cash`` — the notional of entry brackets
     still pending from an earlier run, which take their cash when they fill
-    (Decision 090: without this a 2 % reserve could fill into margin). Returns
-    the trade record if an order fired, else None."""
+    (Decision 090: without this a 2 % reserve could fill into margin).
+    ``band_pct`` is a band relative to the target instead of the equity-wide
+    one (the bitcoin leg, Decision 097: ±25 % of its 5 %); ``fractional``
+    sizes in fractional units (crypto). Returns the trade record if an order
+    fired, else None."""
     if not is_market_open(cfg):
         log.info("Core position management deferred — market closed")
         return None
@@ -59,9 +71,9 @@ def manage_core_position(
 
     core_pct = (1 - MIN_CASH_RESERVE_PCT / 100) if target_pct is None else max(0.0, min(1.0, target_pct))
     target_value = portfolio_value * core_pct
-    band_value = portfolio_value * cfg.trading.core_rebalance_band_pct
+    band_value = portfolio_value * (core_pct * band_pct if band_pct is not None else cfg.trading.core_rebalance_band_pct)
 
-    position = next((p for p in get_positions(cfg) if p.get("symbol") == ticker), None)
+    position = next((p for p in get_positions(cfg) if p.get("symbol") == position_symbol(ticker)), None)
     current_value = float(position.get("market_value", 0)) if position else 0.0
     current_price = float(position.get("current_price", 0)) if position else 0.0
     if not current_price:
@@ -77,16 +89,16 @@ def manage_core_position(
     if drift < 0:
         # Under target: buy with the cash on hand, keeping the reserve.
         spendable = min(-drift, max(cash_balance - portfolio_value * MIN_CASH_RESERVE_PCT / 100 - max(committed_cash, 0.0), 0.0))
-        qty = float(int(spendable / current_price))
-        if qty < 1:
+        qty = round(spendable / current_price, 6) if fractional else float(int(spendable / current_price))
+        if qty * current_price < MIN_NOTIONAL if fractional else qty < 1:
             log.info(f"Core: under target by ${-drift:,.0f} but no spendable cash — waiting")
             return None
         place_market_buy(ticker, qty, cfg)
         action = "BUY"
     else:
         held_qty = float(position.get("qty", 0)) if position else 0.0
-        qty = float(int(min(drift / current_price, held_qty)))
-        if qty < 1:
+        qty = round(min(drift / current_price, held_qty), 6) if fractional else float(int(min(drift / current_price, held_qty)))
+        if qty * current_price < MIN_NOTIONAL if fractional else qty < 1:
             return None
         place_market_sell(ticker, qty, cfg)
         action = "SELL"
@@ -98,10 +110,10 @@ def manage_core_position(
         target_value=target_value, current_value=current_value,
     )
     _append_trade(trade)
-    log.info(f"Core {action} {qty:.0f} {ticker} @ ${current_price:.2f} (target ${target_value:,.0f}, was ${current_value:,.0f})")
+    log.info(f"Core {action} {qty:g} {ticker} @ ${current_price:,.2f} (target ${target_value:,.0f}, was ${current_value:,.0f})")
     try:
         from titantrade.notifier import notify_core_rebalance
-        notify_core_rebalance(action, ticker, int(qty), current_price, target_value, current_value)
+        notify_core_rebalance(action, ticker, qty if fractional else int(qty), current_price, target_value, current_value)
     except Exception as exc:  # noqa: BLE001
         log.warning(f"Core rebalance notify failed: {exc}")
     return trade
