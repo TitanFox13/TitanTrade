@@ -23,7 +23,8 @@ SOURCES = {
     # Cboe index histories (daily, CSV): volatility, the option-writing benchmarks (the hindsight-free answer to "sell puts at the dip")
     "cboe": {f"{k}_History.csv": f"https://cdn.cboe.com/api/global/us_indices/daily_prices/{k}_History.csv" for k in
              ("VIX", "VIX9D", "VIX3M", "VIX6M", "VVIX", "SKEW", "VXN", "VXD", "RVX", "OVX", "GVZ",
-              "PUT", "BXM", "BXMD", "BXY", "CLL", "CNDR", "BFLY", "RXM", "PPUT", "WPUT", "CMBO", "BXMC")},
+              "PUT", "BXM", "BXMD", "BXY", "CLL", "CNDR", "BFLY", "RXM", "PPUT", "WPUT", "CMBO", "BXMC",
+              "VPD", "VPN")},   # the VIX premium strategy indices (short VIX futures on bills, VPN capped) — Decision 098
     # FRED (key-free CSV endpoint): rates, spreads, stress, macro, recession flags, a few indices
     "fred": {f"{k}.csv": f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={k}" for k in
              ("VIXCLS", "VXVCLS", "VXNCLS", "DGS1MO", "DTB3", "DGS2", "DGS10", "DGS30", "T10Y2Y", "T10Y3M", "DFF", "FEDFUNDS",

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 ROOT = "data/param_search/external"
 SECT = ["XLK", "XLV", "XLF", "XLE", "XLI", "XLY", "XLB", "XLRE", "XLP", "XLU", "XLC"]
 NAMES = ["CRWD", "ANET", "LLY", "DXCM", "HCA", "JPM", "GS", "DVN", "WMT", "URI", "GE", "DASH", "DECK", "FCX", "EQIX"]
-TIINGO_SYMBOLS = ["SPY", "SPMO", "MTUM", "QQQ", "IWM", "SHY", "IEF", "TLT", "GLD", "BIL"] + SECT + NAMES
+TIINGO_SYMBOLS = ["SPY", "SPMO", "MTUM", "QQQ", "IWM", "SHY", "IEF", "TLT", "GLD", "BIL", "SVXY", "XIV", "VXX"] + SECT + NAMES   # SVXY / XIV / VXX: the short- and long-VIX products, Decision 098
 UA = "TitanTrade research (contact via the repository)"
 
 
