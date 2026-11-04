@@ -4,7 +4,9 @@ the live dip universe (operator's pick, 2026-10-29). Decision 062 chose the live
 a strategy change — test it like one" (Decision 065 Evidence). Same stage-1 grid (6,000 cells), same plateau scoring
 (median over the twelve one-step neighbours), same stage-3 walk-forward of the *selection procedure*, now on D (the 11
 sector ETFs, Alpaca 2016 →, split 2022) and F (the 49 French industries 1927 →, split 1990; four quarter-century eras
-for the finalists); C (Yahoo sectors 1999 →) is still unavailable. Slots 3 × 25 % of the dip book (the live sleeve),
+for the finalists); C (Yahoo sectors 1999 →) is still unavailable. **Decision 092 (B11, 2026-11-04) adds G** — the sector ETFs
+1999-11 → on Tiingo (split 2013-05, the walk-forward both ways): P1–P5 and the rule apply to G as to D and F, the consensus
+now over three universes. Slots 3 × 25 % of the dip book (the live sleeve),
 insurance off in the grid as in 062, ×0.5 in the slot grid and the two-sleeve scoring. Pre-registered hypotheses:
   P1  plateau: the live cell sits on a plateau on both universes — the median of its twelve neighbours within ±0.5
       pp/yr of the cell, and on D no neighbour flips the sign of the full-period excess;
@@ -41,11 +43,13 @@ import stage3  # noqa: E402
 LIVE_CELL = dict(dip_pct=0.08, dip_lookback_days=90, trend_sma_days=150, max_hold_days=60, tp_pct=0.20, stop_pct=0.12)
 SECTOR_BEST_062 = dict(dip_pct=0.08, dip_lookback_days=60, trend_sma_days=150, max_hold_days=60, tp_pct=0.20, stop_pct=0.20)
 FIXED = dict(insurance_scale=1.0, slot_pct=0.25, max_slots=3)
-UNI = {"D": ("D_alpaca_sectors_2016", "2016-01-04", "2022-01-01"), "F": ("F_french_49ind_1926", "1927-07-01", "1990-01-01")}
+UNI = {"D": ("D_alpaca_sectors_2016", "2016-01-04", "2022-01-01"), "F": ("F_french_49ind_1926", "1927-07-01", "1990-01-01"),
+       "G": ("G_tiingo_sectors_1999", "1999-11-01", "2013-05-01")}   # G: Decision 092 (B11) — the sector ETFs 1999 → on Tiingo, two more bears
 WINDOWS = {"D": [("2016-01-04", "2021-12-31", "2022-01-01", "2026-10-12")],
            "F": [("1927-07-01", "1974-12-31", "1975-01-01", "2026-08-31"), ("1975-01-01", "2026-08-31", "1927-07-01", "1974-12-31"),
-                 ("1927-07-01", "1989-12-31", "1990-01-01", "2026-08-31"), ("1950-01-01", "1999-12-31", "2000-01-01", "2026-08-31")]}
-MIN_TR = {"D": 2.0, "F": 3.0}
+                 ("1927-07-01", "1989-12-31", "1990-01-01", "2026-08-31"), ("1950-01-01", "1999-12-31", "2000-01-01", "2026-08-31")],
+           "G": [("1999-11-01", "2013-04-30", "2013-05-01", "2026-11-03"), ("2013-05-01", "2026-11-03", "1999-11-01", "2013-04-30")]}
+MIN_TR = {"D": 2.0, "F": 3.0, "G": 2.0}
 _mkt = None
 
 
@@ -184,4 +188,5 @@ if __name__ == "__main__":
     top = {f"consensus #{i + 1}": dict(zip(al.KEYS, k)) for i, k in enumerate(best[:3])}
     bestD = max((r for r in by["D"].values() if r["trades_per_year"] >= MIN_TR["D"]), key=lambda r: r["plat_oos_excess"])["pt"]
     bestF = max((r for r in by["F"].values() if r["trades_per_year"] >= MIN_TR["F"]), key=lambda r: r["plat_oos_excess"])["pt"]
-    blend({"LIVE 8/90/150/60/20/12": LIVE_CELL, "062 sector-best 8/60/150/60/20/20": SECTOR_BEST_062, "D best by plateau OOS": bestD, "F best by plateau OOS": bestF, **top})
+    bestG = max((r for r in by["G"].values() if r["trades_per_year"] >= MIN_TR["G"]), key=lambda r: r["plat_oos_excess"])["pt"]
+    blend({"LIVE 8/90/150/60/20/12": LIVE_CELL, "062 sector-best 8/60/150/60/20/20": SECTOR_BEST_062, "D best by plateau OOS": bestD, "F best by plateau OOS": bestF, "G best by plateau OOS": bestG, **top})

@@ -9,6 +9,8 @@ Data lives in ``data/param_search/`` (git-ignored; archived on titanserver under
 | D_alpaca_sectors_2016 | 11 SPDR sector ETFs (Alpaca SIP)          | SPY            | 2016 → | none |
 | B_yahoo_names_1999    | the 15 live names (Yahoo adj. close)      | SPY            | 1999 → | names chosen in 2026 |
 | C_yahoo_sectors_1999  | 11 SPDR sector ETFs (Yahoo adj. close)    | SPY            | 1999 → | none |
+| G_tiingo_sectors_1999 | 11 SPDR sector ETFs (Tiingo adj. close)   | SPY            | 1999-11 → | none (XLRE / XLC join as they list) |
+| H_tiingo_names_1999   | the 15 names (Tiingo adj. close)          | SPY            | 1999-11 → | names chosen in 2026 |
 | E_sp500_2016          | S&P 500 members as of 2016-01-04 (502 with Alpaca bars, delisted names included) | SPY | 2016 → | none (point-in-time list) |
 | F_french_49ind_1926   | Kenneth French 49 industry portfolios, value-weighted daily total returns → index levels | French market factor (Mkt-RF + RF) | 1926 → | none |
 
@@ -41,6 +43,11 @@ def yahoo(sym):
         if c is not None and c > 0:
             out[datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%d")] = float(c)
     return out
+
+
+def tiingo(sym):
+    """Tiingo's adjusted close by date (external/tiingo/<SYM>.json, fetch_keyed.py; dividends and splits adjusted)."""
+    return {r["date"][:10]: float(r["adjClose"]) for r in json.load(open(f"{S}/external/tiingo/{sym}.json")) if r.get("adjClose")}
 
 
 def _french_section(path, header_prefix):
@@ -185,6 +192,10 @@ def load(key):
         return fastbt.Market(yahoo("SPY"), {n: yahoo(n) for n in NAMES}, {s: yahoo(s) for s in SECT})
     if key == "C_yahoo_sectors_1999":
         return fastbt.Market(yahoo("SPY"), {s: yahoo(s) for s in SECT}, {s: yahoo(s) for s in SECT})
+    if key == "G_tiingo_sectors_1999":   # Decision 092 (B11): the 11 sector ETFs as they list (9 from 1998-12, XLRE 2015, XLC 2018), Tiingo adjusted
+        return fastbt.Market(tiingo("SPY"), {s: tiingo(s) for s in SECT}, {s: tiingo(s) for s in SECT})
+    if key == "H_tiingo_names_1999":     # the 15 names as they list — chosen in 2026, hindsight by construction
+        return fastbt.Market(tiingo("SPY"), {n: tiingo(n) for n in NAMES}, {s: tiingo(s) for s in SECT})
     if key == "E_sp500_2016":
         syms = [s for s in sp500_2016_symbols() if os.path.exists(f"{S}/alpaca_hist/sp500_2016/{s}.json")]
         return fastbt.Market(alpaca("SPY"), {s: alpaca(s, "sp500_2016") for s in syms}, {s: alpaca(s) for s in SECT})
@@ -195,6 +206,8 @@ def load(key):
 
 
 START = {"A_alpaca_names_2016": "2016-01-04", "D_alpaca_sectors_2016": "2016-01-04", "B_yahoo_names_1999": "1999-01-04",
-         "C_yahoo_sectors_1999": "1999-01-04", "E_sp500_2016": "2016-01-04", "F_french_49ind_1926": "1927-07-01"}
+         "C_yahoo_sectors_1999": "1999-01-04", "E_sp500_2016": "2016-01-04", "F_french_49ind_1926": "1927-07-01",
+         "G_tiingo_sectors_1999": "1999-11-01", "H_tiingo_names_1999": "1999-11-01"}   # 1999-11: the 200-day SMA needs the ETFs' first ten months
 SPLIT = {"A_alpaca_names_2016": "2022-01-01", "D_alpaca_sectors_2016": "2022-01-01", "B_yahoo_names_1999": "2018-01-01",
-         "C_yahoo_sectors_1999": "2018-01-01", "E_sp500_2016": "2022-01-01", "F_french_49ind_1926": "1990-01-01"}
+         "C_yahoo_sectors_1999": "2018-01-01", "E_sp500_2016": "2022-01-01", "F_french_49ind_1926": "1990-01-01",
+         "G_tiingo_sectors_1999": "2013-05-01", "H_tiingo_names_1999": "2013-05-01"}   # the midpoint of 1999-11 → 2026-11
