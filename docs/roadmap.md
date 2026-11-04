@@ -59,8 +59,8 @@
 | Fundamentals (profitability, leverage, accruals) | 🚫 B2 said no (Decision 075) | the century sorts say profitability is a premium to *hold*, not a filter for dips; no pipeline |
 | Earnings dates and surprises | B10 | the gate, and whether a dip *into* earnings is different (Decision 066: nothing at entry predicts a trade, but earnings were not a feature) |
 | Option-implied information (VIX term structure, SKEW, VVIX) | B6, then 💡 | as a regime input it will meet the placebo; the analogue verdict stands until a pre-registered test beats it |
-| Positioning (CFTC) and leverage (FINRA margin) | 💡 low | "who is crowded" as a state variable → the states.py machinery with its placebo; prior low |
-| Sentiment surveys (AAII walled, NAAIM manual) | 💡 low | contrarian signals are weak and already priced in the literature's post-publication decay |
+| Positioning (CFTC) and leverage (FINRA margin) | ✅ run 2026-11-04 → **Decision 099: closed** | the speculators' net S&P position and margin debt as rolling real-time ranks, each as a gate on / a warning beside the SMA insurance on 1989 → and the decade: every variant inside its block-shuffled placebo band or below it, none beats the incumbent in both halves, the gates' gains are the insurance switched off (2008 five to fourteen points deeper); "who is crowded" is known after the move |
+| Sentiment surveys (AAII walled, NAAIM manual) | 🚫 closed with 099 | no feed exists (NAAIM publishes none, AAII is walled); contrarian survey signals are the weakest of a family that has now failed four times against the market's own price (077, 078, 099) — reopen only if a feed and a pre-registered placebo test appear together |
 | News / text | 🚫 | the LLM era's lesson (Decision 060): no skill at the horizon this book trades |
 
 ### C3 Instruments
