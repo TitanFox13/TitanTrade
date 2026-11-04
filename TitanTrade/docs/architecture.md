@@ -103,7 +103,7 @@ No module imports `executor`. `executor.py` re-exports the broker functions it c
 | Min notional | $500 (dust guard, 054) | risk_manager |
 | Drawdown breaker | 8% from peak; ±50% → suspect data: entries blocked and the whole run keeps only the stops (054 / 084) | risk_manager / executor |
 | Earnings blackout | 2 days | earnings / risk_manager |
-| Macro blackout | 6 h, high-impact only | risk_manager |
+| Macro blackout | 6 h before a scheduled FOMC decision — the morning run on decision days (094) | risk_manager |
 | Sector / correlation | 50% / 0.75 | risk_manager |
 | Stop | −12% stop-limit, GTC after fill, one coverage helper (060) | entries / executor |
 | Target / holding limit | +20% / 60 trading days, close-based | executor |

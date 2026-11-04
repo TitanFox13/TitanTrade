@@ -23,7 +23,7 @@ Every trading decision is a rule on prices; parameters are the Decision 062 plat
 4. **Overlay cap**: overlay positions ≤ 70% of equity (both core legs excluded)
 5. **Position size**: the slot (`slot_pct` × (1 − momentum weight) = 10% of equity), reduced to the cash and overlay headroom; anything below $500 notional is blocked as dust (054)
 6. **Sector exposure**: ≤ 50% of equity in one sector after the trade (core legs excluded)
-7. **Macro blackout**: no entry within 6 h of FOMC / NFP / CPI / core PCE / GDP (046)
+7. **Macro blackout**: no entry within 6 h before a scheduled FOMC decision — in practice the 10:15 ET run on a decision day, ~8 mornings a year; the 08:30 ET data releases (payrolls, CPI, PPI, GDP, PCE, retail sales) are fetched from FRED but fall outside the 6-hour window of both scheduled runs, and the 046 keyword whitelist matches FOMC and payrolls only (footprint measured on 27 years in 094: a tenth of a point either way)
 8. **Correlation**: blocked when the average 60-day correlation with held positions exceeds 75% — single names only; a sector ETF (`sector_etfs`) passes with "not applied" (Decision 070)
 
 A blocked entry that failed ≤ 2 gates is recorded in `state/near_misses.json` with the gate results and a market snapshot.

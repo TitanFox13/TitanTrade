@@ -20,7 +20,7 @@ Evaluated in order for every NEW item (an entry that expired unfilled is simply 
 4. **Overlay cap** — overlay positions ≤ 70% of equity (`compute_overlay_headroom`, both core legs excluded). Protects the core.
 5. **Position size** — the slot is `overlay_slot_pct` = `slot_pct × (1 − momentum_weight)` × equity, reduced to the cash and overlay headroom, floored to whole shares; anything below `MIN_POSITION_NOTIONAL` ($500) is blocked as dust (054). No ATR, confidence or VIX scaling (061).
 6. **Sector exposure** — the trade may not push one sector above 50% of equity.
-7. **Macro blackout** — no entry within 6 h of a high-impact release: FOMC, NFP / jobs, CPI, core PCE, GDP (046 whitelist).
+7. **Macro blackout** — no entry within 6 h before a scheduled FOMC decision (`data/fomc_dates.json`, 14:00 ET): in practice the 10:15 ET run on a decision day. The 08:30 ET releases from FRED's calendar (payrolls, CPI, PPI, GDP, PCE, retail sales) never fall inside the window of a scheduled run, and the 046 keyword whitelist matches FOMC and payrolls only — so they do not block. Priced on 27 years in Decision 094 (a tenth of a point either way; a wider gate buys nothing on the sector ETFs).
 8. **Correlation** — blocked when the average 60-day correlation with held positions exceeds 0.75 (hidden concentration across sectors). Single names only: a ticker in `sector_etfs` is a diversified basket and passes with "not applied" (Decision 070 — the sector floor was measured without the gate, which would have blocked ~1 in 5 second slots on the ETFs' real correlations).
 
 ## Broker-Side Protection
