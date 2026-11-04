@@ -6,7 +6,8 @@ on that venue; the coins that never listed there are still missing) into ``exter
 on Binance** (trading and halted, daily klines from 2017-08) into ``external/binance/`` — the second universe for the
 consensus check. UTC days; Coinbase 300 candles per request, Binance 1,000. CSV: date,open,high,low,close,volume,
 usd_volume (Coinbase's usd_volume = base volume × close; Binance's is the quote volume). Manifest entries per file like
-the rest of the library (Decision 072); a pair that returns nothing is recorded as not ok. Re-run to refresh.
+the rest of the library (Decision 072); a pair that returns nothing is recorded as not ok. Six workers; a re-run skips
+what was fetched today.
 Run from TitanTrade/: uv run python -I scripts/param_search/fetch_crypto.py [--all] [--venue=coinbase|binance]
 """
 import datetime as dt
@@ -15,6 +16,7 @@ import os
 import sys
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fetch_external import ROOT, UA  # noqa: E402
@@ -51,39 +53,41 @@ def binance(symbol):
         start = k[-1][0] + 86_400_000; time.sleep(0.12)
 
 
-def write(venue, name, rows, url, manifest):
+def write(venue, name, rows, url):
     os.makedirs(f"{ROOT}/{venue}", exist_ok=True); dest = f"{ROOT}/{venue}/{name}.csv"; days = sorted(rows)
     with open(dest, "w") as f:
         f.write("date,open,high,low,close,volume,usd_volume\n")
         for d in days:
             f.write(d + "," + ",".join(f"{x:.10g}" for x in rows[d]) + "\n")
     n = os.path.getsize(dest); span = (days[0], days[-1], len(days)) if days else None
-    manifest[f"{venue}/{name}.csv"] = {"url": url, "ok": bool(days), "bytes": n, "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(), "span": span}
-    return span
+    return f"{venue}/{name}.csv", {"url": url, "ok": bool(days), "bytes": n, "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(), "span": span}
+
+
+def fetch_one(venue, name):
+    if venue == "coinbase":
+        return write("coinbase", name, coinbase(name), f"{CB}/products/{name}/candles?granularity=86400")
+    return write("binance", name, binance(name), f"{BN}/klines?symbol={name}&interval=1d")
 
 
 def main():
     mpath = f"{ROOT}/manifest.json"; manifest = json.load(open(mpath)) if os.path.exists(mpath) else {}
-    all_ = "--all" in sys.argv; venue = next((a.split("=")[1] for a in sys.argv if a.startswith("--venue=")), None)
+    all_ = "--all" in sys.argv; venue = next((a.split("=")[1] for a in sys.argv if a.startswith("--venue=")), None); today = dt.date.today().isoformat()
+    tasks = []
     if venue in (None, "coinbase"):
-        products = sorted(p["id"] for p in get(f"{CB}/products") if p["quote_currency"] == "USD") if all_ else list(PRODUCTS)
-        for i, p in enumerate(products):
-            try:
-                span = write("coinbase", p, coinbase(p), f"{CB}/products/{p}/candles?granularity=86400", manifest)
-                print(f"ok  coinbase/{p}.csv {span}  [{i + 1}/{len(products)}]", flush=True)
-            except Exception as exc:  # noqa: BLE001
-                manifest[f"coinbase/{p}.csv"] = {"url": f"{CB}/products/{p}/candles", "ok": False, "error": str(exc)[:160]}; print(f"FAIL coinbase/{p} {exc}", flush=True)
-            if i % 20 == 19:
-                json.dump(manifest, open(mpath, "w"), indent=1)
+        tasks += [("coinbase", p) for p in (sorted(p["id"] for p in get(f"{CB}/products") if p["quote_currency"] == "USD") if all_ else PRODUCTS)]
     if all_ and venue in (None, "binance"):
-        symbols = sorted(s["symbol"] for s in get(f"{BN}/exchangeInfo")["symbols"] if s["quoteAsset"] == "USDT")
-        for i, s in enumerate(symbols):
+        tasks += [("binance", s["symbol"]) for s in get(f"{BN}/exchangeInfo")["symbols"] if s["quoteAsset"] == "USDT"]
+    tasks = [(v, n) for v, n in tasks if not (manifest.get(f"{v}/{n}.csv", {}).get("fetched_at", "")[:10] == today and manifest[f"{v}/{n}.csv"].get("ok"))]
+    print(f"{len(tasks)} pairs to fetch (the rest fetched today)", flush=True)
+    with ThreadPoolExecutor(max_workers=6) as pool:   # the public limits allow ~10 requests/s per venue
+        futures = {pool.submit(fetch_one, v, n): (v, n) for v, n in tasks}
+        for i, f in enumerate(as_completed(futures)):
+            v, n = futures[f]
             try:
-                span = write("binance", s, binance(s), f"{BN}/klines?symbol={s}&interval=1d", manifest)
-                print(f"ok  binance/{s}.csv {span}  [{i + 1}/{len(symbols)}]", flush=True)
+                key, entry = f.result(); manifest[key] = entry; print(f"ok  {key} {entry['span']}  [{i + 1}/{len(tasks)}]", flush=True)
             except Exception as exc:  # noqa: BLE001
-                manifest[f"binance/{s}.csv"] = {"url": f"{BN}/klines?symbol={s}", "ok": False, "error": str(exc)[:160]}; print(f"FAIL binance/{s} {exc}", flush=True)
-            if i % 20 == 19:
+                manifest[f"{v}/{n}.csv"] = {"url": f"{v}:{n}", "ok": False, "error": str(exc)[:160]}; print(f"FAIL {v}/{n} {exc}", flush=True)
+            if i % 50 == 49:
                 json.dump(manifest, open(mpath, "w"), indent=1)
     json.dump(manifest, open(mpath, "w"), indent=1)
 
