@@ -6,15 +6,16 @@ on that venue; the coins that never listed there are still missing) into ``exter
 on Binance** (trading and halted, daily klines from 2017-08) into ``external/binance/`` — the second universe for the
 consensus check. UTC days; Coinbase 300 candles per request, Binance 1,000. CSV: date,open,high,low,close,volume,
 usd_volume (Coinbase's usd_volume = base volume × close; Binance's is the quote volume). Manifest entries per file like
-the rest of the library (Decision 072); a pair that returns nothing is recorded as not ok. Six workers; a re-run skips
-what was fetched today.
-Run from TitanTrade/: uv run python -I scripts/param_search/fetch_crypto.py [--all] [--venue=coinbase|binance]
+the rest of the library (Decision 072); a pair that returns nothing is recorded as not ok. Three workers by default (`--workers=N`; Coinbase throttles six), a
+back-off on 429; a re-run skips what was fetched today.
+Run from TitanTrade/: uv run python -I scripts/param_search/fetch_crypto.py [--all] [--venue=coinbase|binance] [--workers=N]
 """
 import datetime as dt
 import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -26,10 +27,16 @@ CB = "https://api.exchange.coinbase.com"
 BN = "https://api.binance.com/api/v3"
 
 
-def get(url):
+def get(url, tries=6):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.load(r)
+    for attempt in range(tries):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 or attempt == tries - 1:
+                raise
+            time.sleep(2.0 * (attempt + 1))   # Coinbase's public limit is ~10 requests/s per IP; back off and retry
 
 
 def coinbase(product):
@@ -79,7 +86,8 @@ def main():
         tasks += [("binance", s["symbol"]) for s in get(f"{BN}/exchangeInfo")["symbols"] if s["quoteAsset"] == "USDT"]
     tasks = [(v, n) for v, n in tasks if not (manifest.get(f"{v}/{n}.csv", {}).get("fetched_at", "")[:10] == today and manifest[f"{v}/{n}.csv"].get("ok"))]
     print(f"{len(tasks)} pairs to fetch (the rest fetched today)", flush=True)
-    with ThreadPoolExecutor(max_workers=6) as pool:   # the public limits allow ~10 requests/s per venue
+    workers = int(next((a.split("=")[1] for a in sys.argv if a.startswith("--workers=")), 3))
+    with ThreadPoolExecutor(max_workers=workers) as pool:   # 3 stays under Coinbase's ~10 requests/s; Binance tolerates 6
         futures = {pool.submit(fetch_one, v, n): (v, n) for v, n in tasks}
         for i, f in enumerate(as_completed(futures)):
             v, n = futures[f]
