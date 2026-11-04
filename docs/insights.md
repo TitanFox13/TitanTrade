@@ -150,6 +150,18 @@ switches themselves have cost about a point a year since 1975 with the cash at z
 a point with it in bills; they earned their keep only in the Depression. They stay on for the
 drawdown, and the carry is what makes them cheaper — not a reason to turn them off, and not a
 reason to buy an ETF leg when the broker's cash programme already pays on every idle dollar.
+
+### The Two Bears Belong to the Two Sleeves (Decision 092)
+Twenty-seven years of real sector funds, the first look at the book through both slow bears,
+say something the century could only hint at. In the dot-com bust the momentum sleeve was the
+bear: the leaders fell deeper than the market, and the insurance, which only halves exposure,
+could not undo that — the book fell 42 against the market's 48. In the credit bear of 2008 the
+roles flipped: the dip rule alone was no protection at all (it fell 53 against 55), and the two
+switches were worth nineteen points. So the book's defence is two different things that happen
+to sit together: the dip sleeve's trend filter against a bubble, the switches against a credit
+crunch. Neither covers the other's bear, and nothing in the book covers both at once. The price
+of carrying both over the whole window is about a point a year, paid mostly in the calm up-years
+when a switch sat half out on a stale signal — 2006, 2011, 2019, 2023 — not in the rebounds.
 ### Bonds Rally When the Book Steps Aside; Gold Did Once (Decision 080)
 The idle half of the book, parked in a 10-year Treasury instead of bills, earned about
 0.8 points a year more over fifty-five years with a drawdown five points shallower, and
