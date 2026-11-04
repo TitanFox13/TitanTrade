@@ -1,5 +1,61 @@
 # Important Decisions Log
 
+## Decision 098: Selling volatility as a sleeve — the Cboe VIX premium index earned the market's return at 1.2× its volatility with a deeper fall (−62 %) and a luck meter at a coin flip; the investable short-VIX products lost 11 %/yr over sixteen years with a −93 % day; a 10 % sleeve moves the book by ±0.5 pp/yr and fails the pre-registered rule on two of three windows; **no sleeve, the door closes with numbers** (roadmap C3, handover §8 idea 3, free data, 2026-11-04)
+**Date**: 2026-11-04
+**Why**: handover §8 idea 3 — the volatility risk premium (being paid to carry the market's fear) as a sleeve beside the dip and momentum sleeves, the last of the option-family questions after put-writing (Decision 074). Built the way `putwrite.py` was: the same books (`carry.sets()` — the century book on the long window, the sector-dip / SPMO book on the decade), the same blend under min(insurance ×0.5, shock ×0.5), the same crash leg, the same drop rule. **Data, free**: Cboe's **VPD** (the VIX Premium Strategy Index — short one-month VIX futures collateralised in bills, 2007-11 →) and **VPN** (the capped version, a VIX call bought against the short, 2008-06 →) joined the library's Cboe set (`fetch_external.py --only=cboe`); the investable products from Tiingo (`fetch_keyed.py`): **XIV** 2010-11-30 → 2018-02-21 (terminated after its −93 % day) spliced into **SVXY** from 2018-02-21 — the path a holder lived through — and **VXX** (the long side) for the record. Windows: **19y** 2007-11-16 → 2026-08-31 (split 2017-04, eras 2007–11 / 2012–18-02 / 2018-03 →), **ETP** 2010-11-30 → 2026-08-31 (split 2018-09), **decade** 2017-01-03 → 2026-10-12 (split 2022). Hypotheses V1–V3 and the drop rule in `scripts/param_search/volsell.py`, **committed before the first run** (`26520e4`); one run, 4 s. **Nothing live changes.**
+
+**V1 — alone vs the market** (French VW market, total return; σ/σm = volatility relative to the market):
+
+| series | window | excess | IS / OOS | σ/σm | DD (market) | Sharpe (market) | worst year | eras / roll3 |
+|---|---|---|---|---|---|---|---|---|
+| **VPD** | 2007-11 → 2026-08 | **−0.64** | +1.3 / −2.7 | **1.21** | **−61.7** (−53.3) | 0.55 (0.64) | −47.0 | +1.3 / −1.8 / −0.9; t +0.12, P(excess > 0) 48 % |
+| VPN (capped) | 2008-06 → | −2.82 | −1.3 / −4.4 | 0.96 | −52.8 (−50.5) | 0.56 (0.67) | −30.7 | 31 % |
+| **the ETP splice** (XIV → SVXY) | 2010-11 → | **−11.33** | −18.5 / −3.9 | **3.18** | **−97.7** (−34.2) | 0.49 (0.86) | −91.0 | 51 % |
+| VXX (long volatility) | 2009-01 → | −67.67 | −76.5 / −57.5 | 3.69 | −100.0 | −0.76 | −107 | 0 % |
+
+Worst days: VPD −31.2 % (2020-03-16), VPN −18.1 % (2018-02-05), the splice **−92.6 %** (2018-02-06), VXX −20.6 % (2025-04-09). **V1 holds on the return and fails two legs in the premium's disfavour**: VPD sits within the written ±2 of the market (−0.6) — but at **1.2× the market's volatility, not 0.6 … 1.0**, with a **deeper fall (−62 vs −53)**, a −47 % year and a luck meter that is a coin flip (t 0.1, P 48 %): the premium paid for carrying fear bought the market's return with more of it. VPN gives up 2.2 pp/yr for its cap (written 1 … 3) and still fell 53 %. The products are not the index: **−11 %/yr over sixteen years** at 3.2× the market's volatility with a −93 % day and a −98 % drawdown (written −10 … +10, 2.5 … 3.5×, −95 %). VXX, the other side, −68 %/yr.
+
+**V2 — the sleeve beside the book** (10 % and 20 % from the dip sleeve, 10 % from momentum, VPN, the product; excess vs the market):
+
+| window · variant | excess | IS / OOS | DD | Sharpe | worst yr | eras / roll3 | vs the book |
+|---|---|---|---|---|---|---|---|
+| **19y** the book (dip 40 / mom 60) | −0.51 | −0.3 / −0.7 | −33.0 | 0.64 | −13.1 | +3.8 / −2.3 / −1.5 | — |
+| 19y + VPD 10 from the dip sleeve | −0.07 | +0.6 / −0.7 | −32.2 | 0.67 | −13.9 | +4.2 / −1.6 / −1.2 | +0.44; t −0.12, P(excess > 0) 47 % |
+| 19y + VPD 20 | +0.35 | +1.4 / −0.8 | −31.6 | 0.70 | −14.8 | +4.6 / −0.9 / −1.0 | +0.86 |
+| 19y + VPD 10 from momentum | −0.63 | −0.4 / −0.9 | −32.6 | 0.66 | −12.0 | +3.9 / −2.9 / −1.3 | −0.12 |
+| 19y + VPN 10 | −0.32 | +0.4 / −1.1 | −32.1 | 0.66 | −14.8 | +4.1 / −1.7 / −1.6 | +0.19 |
+| 19y VPD 100 % under the rules | −0.54 | +2.2 / −3.4 | −37.7 | 0.69 | −27.5 | +5.0 / −3.7 / −1.2 | −0.03 |
+| **ETP** the book | −2.37 | −3.1 / −1.7 | −27.8 | 0.70 | −13.1 | 27 % | — |
+| ETP + VPD 10 | −1.93 | −2.3 / −1.5 | −26.6 | 0.73 | −13.9 | 24 % | +0.44 (passes the rule on this window) |
+| ETP + the product 10 | −0.91 | −0.1 / −1.7 | −30.8 | 0.72 | −17.0 | 45 % | +1.46 — all of it 2010–17, given back on 2018-02-06 |
+| **decade** the book | +1.36 | +0.3 / +2.5 | −20.0 | 1.10 | −11.3 | 59 % | — |
+| decade + VPD 10 | +1.14 | −0.3 / +2.6 | −20.6 | 1.08 | −8.9 | 52 % | −0.22 |
+| decade + VPD 20 | +0.90 | −0.9 / +2.8 | −22.1 | 1.05 | −7.7 | 56 % | −0.46 |
+| decade + VPN 10 | +0.78 | −0.4 / +2.0 | −19.3 | 1.07 | −9.2 | 52 % | −0.58 |
+| decade + the product 10 | +0.53 | −1.6 / +2.7 | **−28.9** | 0.97 | −15.7 | 59 % | −0.83 |
+| decade VPD 100 % under the rules | −2.74 | −6.1 / +0.7 | −35.4 | 0.71 | −20.3 | 44 % | −4.10 |
+
+**V2 holds on every book-level number and fails its correlation claim.** At 10 % the sleeve moves the book by +0.44 (19y) and −0.22 (decade) — inside the written ±0.5 — the Sharpe by +0.03 / −0.02, the drawdown by +0.8 / −0.6 points; at 20 % by +0.86 / −0.46 (written ±1). The product at 10 % costs the decade 0.8 pp/yr and **9 points of drawdown** (written 0.5 … 2 and 3 … 8) — on the 19y window its row is flattered, the splice sits in cash until 2010-11 and misses 2008. **The premium is not a copy of the dip sleeve's bet**: VPD's excess correlates **−0.01 / +0.00 / +0.05** with the dip sleeve's excess and +0.01 … +0.02 with momentum's (written +0.2 … +0.5 and −0.1 … +0.2) — day to day it is its own thing; it is at the crash level that they meet (V3). The luck meter on the book with VPD 10: t −0.12, P(excess > 0) 47 % — the +0.44 is noise.
+
+**V3 — the crash leg** (19y; book minus market peak → trough and the rebound year; the market and the permanent rows absolute):
+
+| | 2008 | 2018-02 | 2020 | 2022 |
+|---|---|---|---|---|
+| market (absolute) | −51 / +75 | −10 / +7 | −34 / +87 | −25 / +21 |
+| the book (idle in cash) | +22 / −26 | −0 / −11 | +12 / −16 | +11 / −11 |
+| the book + VPD 10 | +23 / −26 | −1 / −10 | +12 / −21 | +11 / −8 |
+| **VPD permanently** | **−46** / +72 | −16 / +14 | **−47** / +55 | −6 / +47 |
+| VPN permanently (2008-06 →) | n/a | −4 / +1 | +13 / −51 | +15 / +20 |
+| the ETP splice (2010-11 →) | n/a | **−96** / +21 | −55 / +49 | −23 / +71 |
+
+VPD fell −46 % in 2008 (written −20 … −45, at the edge) and **−47 % in 2020 (written −20 … −40 — worse: the −31 % day)**; −16 % in 2018-02 and only −6 % in 2022 (a slow bear is where the premium pays). The product: −96 % in two weeks of 2018-02, −55 % in 2020. VPN's cap paid in 2020 (+13 %) and then gave back 51 % in the rebound year. The premium is a crash asset: it loses hardest exactly when the book's insurance is paying — the 2008 and 2020 columns are where the +0.44 of the 19-year window is at risk.
+
+**The pre-registered drop rule** — a sleeve only if the book with it beats the 40 / 60 book on return in both halves and every era, with a Sharpe no lower, **on both windows** — **fails**: VPD 10 and 20 pass on the ETP window (2010 →, both halves +0.2 … +0.8 better, Sharpe +0.03 … +0.06) and fail on the 19-year window (the second half equal, −0.7 vs −0.7) and on the decade (the first half −0.3 vs +0.3, the Sharpe lower); VPN, the product and the momentum-funded variant fail everywhere. **No volatility-selling sleeve.**
+
+**Decision.** Nothing changes; the door closes with numbers, as expected. Kept: (1) **the volatility premium is the market's return at more risk** on nineteen years: 1.2× the volatility, a deeper fall, a −47 % year, a coin-flip luck meter — the published "high Sharpe" lives in the calm years between crashes and dies in 2008 and 2020; (2) **the investable products are not the index**: −11 %/yr with a −93 % day; what a retail account can buy carried the roll and the leverage, not the premium; (3) **it is not a second copy of the dip sleeve's bet** day to day (correlation 0), which was wrong in the pre-registration — it is a crash asset whose losses coincide with the book's insurance paying, so a 10 % sleeve adds nothing on the decade and +0.4 of noise on nineteen years; (4) the option family is now fully priced (074 put-writing, protective puts and collars; 098 the premium both ways): **nothing in it beats the two sleeves and the two switches**. Roadmap C3's volatility row closes; the VPD / VPN histories and the three products stay in the library (not yet archived to titanserver).
+
+**Scripts / docs**: `scripts/param_search/volsell.py` (pre-registration `26520e4`, the run), `fetch_external.py` (VPD / VPN in the Cboe set), `fetch_keyed.py` (SVXY / XIV / VXX); roadmap C3 row; todo Phase 2.38; README rows and the library bullet; handover §8 item 3 ✅. Next: handover §8 item 4 (positioning and sentiment as a regime input) on the operator's go.
+
 ## Decision 097: The bitcoin leg — 5 % of equity held in BTC/USD, outside the exposure rules, never timed, re-set only outside a ±25 % band; the two sleeves take the rest pro rata; **built and tested, not yet deployed** (the operator's bet, taken at 5 % after Decisions 095 / 096, 2026-11-04)
 **Date**: 2026-11-04
 **Why**: Decision 096 left one thing standing — holding bitcoin — and a weight curve with no optimum. The operator read the decade table (the book +16.7 %/yr with a −20.0 % worst fall; with 5 % bitcoin +19.7 / −20.7; with 10 % +22.6 / −23.1) and the forecasts (J.P. Morgan's 10 %/yr expected return at 55 % volatility; the allocation research at 1 … 5 %; the sell-side targets cut all through 2026; the cycle's shrinking runs), asked whether 10 % was "the clear winner", and settled on **5 %**: at the institutions' expected return a 10 % slice costs five more points of drawdown for one point of return, 5 % keeps the book's bear-year edge over SPY (2022: −14.9 vs SPY −18.2; at 10 % the book would have matched SPY) and is where the published allocation work tops out. **Stops, timing and the stock protections were asked for and declined on the evidence**: the trend family is placebo-level on bitcoin (096), a 12 % trailing stop fires four times a year and the three widths tried give the usual one-lucky-cell pattern (12 % −5 pp/yr for a smaller fall, 25 % −28, 40 % −12 for nothing), volatility scaling cuts no drawdown, the book's switches move it ±0.2; and at 5 % of the book bitcoin's −83 % worst fall costs the book 0.7 points of drawdown — nothing to protect. The account-level guards (the drawdown breaker, the ±50 % suspect-value guard, the 2 % reserve with its bracket netting) cover the slice as they cover everything. **A conviction bet on one asset, taken by the operator with the research's recommendation against it on record (095, 096); tracked on its own line so the rules keep being judged on their own.**
