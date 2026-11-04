@@ -16,7 +16,7 @@ import urllib.request
 
 S = os.environ.get("PARAM_SEARCH_DATA", "data/param_search")
 OUT = f"{S}/external/sec_facts"
-UA = {"User-Agent": "TitanTrade research jan.hendrych@ampulse-energy.com", "Accept-Encoding": "gzip, deflate"}
+UA = {"User-Agent": "TitanTrade research honzik@juniorskicamp.cz", "Accept-Encoding": "gzip, deflate"}
 TAGS = {"us-gaap": ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax", "SalesRevenueNet", "RevenuesNetOfInterestExpense",
                     "CostOfRevenue", "CostOfGoodsAndServicesSold", "CostOfGoodsSold", "CostOfServices", "CostOfGoodsAndServicesSoldExcludingDepreciationDepletionAndAmortization",
                     "SellingGeneralAndAdministrativeExpense", "InterestExpense", "InterestExpenseNonoperating", "OperatingIncomeLoss", "GrossProfit",

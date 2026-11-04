@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 S = os.environ.get("PARAM_SEARCH_DATA", "data/param_search")
 ROOT = f"{S}/external"
-UA = "TitanTrade research (jan.hendrych@ampulse-energy.com)"
+UA = "TitanTrade research (honzik@juniorskicamp.cz)"
 FRENCH = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/"
 AQR = "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/"
 
@@ -62,6 +62,11 @@ SOURCES = {
              "gold_monthly.csv": "https://datahub.io/core/gold-prices/r/monthly.csv",
              "finra_margin_page.html": "https://www.finra.org/investors/learn-to-invest/advanced-investing/margin-statistics",
              "finra_margin_statistics.xlsx": "https://www.finra.org/sites/default/files/2021-03/margin-statistics.xlsx"},
+    # The Fed's FOMC meeting calendars (one page per year 1999 → 2020, the current page for 2021 →) and the BLS release
+    # schedules (one page per year 2000 →, every major release with its date and time) — the macro gate valued on history (Decision 094)
+    "fed": {**{f"fomchistorical{y}.html": f"https://www.federalreserve.gov/monetarypolicy/fomchistorical{y}.htm" for y in range(1999, 2021)},
+            "fomccalendars.html": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"},
+    "bls": {f"schedule_{y}.html": f"https://www.bls.gov/schedule/{y}/home.htm" for y in range(2000, 2027)},
     # SEC financial statement data sets (quarterly zips, ~50–130 MB each, 2009q1 →): fetched on demand by the fundamentals project;
     # the two most recent quarters here as a format check. Fair-access policy: ≤ 10 requests/s, a User-Agent with contact.
     "sec": {f"{q}.zip": f"https://www.sec.gov/files/dera/data/financial-statement-data-sets/{q}.zip" for q in ("2026q2", "2026q3")},
