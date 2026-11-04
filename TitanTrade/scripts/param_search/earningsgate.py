@@ -70,7 +70,7 @@ def main():
     # E2: the entries the live gate would have blocked, in the no-gate run
     live = mask(mkt, reports, 2, -1); blocked, free = [], []
     for t in base["trades"]:
-        j = mkt.name_list.index(t["ticker"]); k = mkt.idx[t["entry_date"]]
+        j = mkt.name_list.index(t["ticker"]); k = mkt.idx[t["exit_date"]] - t["days"]   # fastbt records the exit date and the sessions held
         (blocked if not live[k, j] else free).append(t)
     def desc(ts):
         rr = np.array([t["return"] for t in ts]); stops = np.mean([t["exit"] == "stop" for t in ts]) if ts else float("nan")

@@ -1,5 +1,28 @@
 # Important Decisions Log
 
+## Decision 093: The earnings gate valued on 27 years of the shadow names — the live 2-day gate is worth +0.01 pp/yr, inside a placebo band of ±1, blocks 1.7 % of sessions and two of 417 entries; the eight entries it would have blocked were better than the rest; **the gate stays, moot live** (roadmap B10, the operator's Alpha Vantage key, 2026-11-04)
+**Date**: 2026-11-04
+**Why**: the earnings gate (`earnings.py`: no new entry while the name's next report is within 2 calendar days, narrowed from 5 in the LLM era) had only six months of near misses to judge it by. The operator's free Alpha Vantage key (2026-11-04) gives every reported date for the 15 names back to 1996 (`fetch_keyed.py` → `external/alphavantage/`). Live the gate is moot since Decision 070 — the dip sleeve trades sector ETFs, which have no earnings — so the test prices it on the only universe it can touch: the shadow names 1999-11 → 2026-11 on Tiingo (universe H), the reported dates as a `fastbt` eligibility mask. Hypotheses E1–E3 and the drop rule in `scripts/param_search/earningsgate.py`, **committed before the first run** (`ee22dab`); one fix after the first run, before any number was read for E2 (the entry session is the exit date minus the sessions held — `fastbt` records no entry date). **Nothing live changes.**
+
+**E1 — the gate's price** (the dip rule on the 15 names, insurance off inside, excess vs SPY; split 2013-05):
+
+| gate | excess | IS / OOS | DD · Sharpe | trades | sessions blocked | vs no gate |
+|---|---|---|---|---|---|---|
+| no gate | +9.44 | +12.11 / +6.54 | −63.5 · 0.79 | 417 | — | — |
+| **the live gate: 2 days before** | **+9.45** | +12.08 / +6.60 | −63.5 · 0.79 | 415 | 1.7 % | **+0.01** |
+| the old gate: 5 days before | +7.78 | +10.98 / +4.34 | −63.0 · 0.74 | 413 | 3.2 % | −1.66 |
+| through: 2 before + the day after | +9.48 | +13.38 / +5.32 | −63.3 · 0.80 | 409 | 3.7 % | +0.04 |
+
+**E1 holds for the live gate** (+0.01, written ≤ 0.2; 1.7 % of sessions and 2 of 417 entries, both under the written 2–4 % / 3–8 %) and for the through gate (+0.04); **the old 5-day gate fails its ≤ 0.4** at −1.66 — four entries fewer, 1.7 pp/yr less: on fifteen names with three slots, which handful of trades a gate removes decides the number, not the gate's logic.
+
+**E2 — the entries the live gate would have blocked** (in the no-gate run): **8 of 417**, median return **+20.1 %**, mean +11.0 %, 12 % stopped — against the other 409 at median +4.3 %, mean +3.9 %, 37 % stopped. Not "no worse" but *better*, on eight trades: the premise that a dip two days before a report is a coin-flip is not what the sample shows, and eight is too few to show anything. **The placebo** (twenty draws of random blackout windows, the same count and length per name): the gate's effect 5 % −1.41 / median +0.16 / 95 % +1.07; the live gate's +0.01 sits inside the band, the old 5-day gate's −1.66 just outside it on the wrong side. **E2 holds** on its placebo leg and on the "no worse" leg in the direction that matters.
+
+**E3** — the live universe has no earnings; the gate never fires on the book.
+
+**Decision.** B10 is run; **the gate stays as it is** (the drop rule: removal only above a 0.5 pp/yr cost and with the blocked entries beating the rest outside the band — the cost is 0.01). Kept: (1) on 27 years of the shadow names the gate is free — it blocks almost nothing (two entries) and what it blocks was not the disaster it guards against; (2) a gate's measured value on a three-slot book is path noise of ±1 pp/yr (the placebo band), so no earnings rule will ever be *shown* to pay or cost on this data — a reason to keep the gate as a safety rule, not to tune it; (3) the B track is now **complete**: every keyed item has run.
+
+**Scripts / docs**: `scripts/param_search/earningsgate.py` (pre-registration `ee22dab`, the fix, the run); roadmap B10 ✅ and the running order; todo Phase 2.33; handover note.
+
 ## Decision 092: The book on real ETFs through two more bears — 1999 → on Tiingo: the sector floor is +2 pp/yr over 27 years (above the +0 … +1 written), the switches cost it a point a year and turn 2008 from −53 into −36 %, the dot-com bust was the momentum sleeve's bear, the two-sleeve book +2.3 pp/yr with every era and both halves positive; **knowledge, nothing changes** (roadmap B11, the operator's Tiingo key, 2026-11-04)
 **Date**: 2026-11-04
 **Why**: the sector dip sleeve had only ever been tested on Alpaca's 2016 → bars (one bear, 2022, and two fast crashes) and the century on French industry portfolios; the Yahoo 1999 → files of Decision 062 never came back after the rate-limiting. The operator's free Tiingo key (received 2026-11-04) gives the 11 sector ETFs from their listing — nine from 1998-12, XLRE 2015, XLC 2018 — SPY from 1993, MTUM from 2013, SPMO from 2015, the 15 names from theirs, plus QQQ / IWM / SHY / IEF / TLT / GLD / BIL for later, all dividend- and split-adjusted (`fetch_keyed.py` → `external/tiingo/`, 36 files; the Alpha Vantage key fetched the 15 names' earnings histories the same hour, `external/alphavantage/`, for B10). Done the Decision 062 way: hypotheses H1–H5 and the drop rule in `scripts/param_search/longhist.py`, **committed before the first run** (`270c6e9`); `datasets.tiingo`, the universes **G** (the sector ETFs 1999-11 → as they list) and **H** (the 15 names). Window 1999-11-01 → 2026-11-03 (6,793 sessions), split 2013-05-01, eras 1999–2007 / 2007–2015 / 2015 →. The momentum sleeve has no investable fund before 2013, so the book's sleeve is a **labelled splice**: the French top momentum decile to 2013-04-17, MTUM to 2015-10-11, SPMO after. **Nothing live changes.**

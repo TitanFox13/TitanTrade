@@ -6,8 +6,14 @@ What is actually open, by where it waits; the phases below are the record and ke
 - **Live time**: the checkup ≈ 2026-11-12, written in the order of `docs/how_to_read_a_checkup.md` (Phases 2.26, 2.23) — verify: the first ETF entry and its fill-ledger row, the benchmark wording at 20 trading days (2.9), SPMO rebalanced only outside its 5 % band and no orphan-close attempt on it (2.7), a settled-close exit seen live (2.2), no "SUSPECT ACCOUNT VALUE" / "target not confirmed" line without a real glitch (Decision 084), DXCM's clock against its stop's expiry (≈ Jan 21 / 22); the go/stop rule needs a ≥ 10 % SPY drawdown (2.0).
 - **The operator**: the go-live checklist (2.0 — fund ≥ $25k, W-8BEN, enrol the cash programme and leave `cash_ticker` off (Decision 087), the healthchecks URL (2.10), the tax line); ~~the free Tiingo and Alpha Vantage keys~~ (received 2026-11-04); the WARNING → INFO cosmetic done and rotation closed 2026-11-03 (Decision 091).
 - **Housekeeping at the next checkup**: `external/sec_facts/` and `alpaca_hist/quality/` archived on titanserver if not yet (2.16); `git pull --ff-only` on the server (docs and research scripts only — nothing to deploy); titanserver disk and build cache (1.36).
-- **Research**: B10 (the earnings gate on the shadow names, data in hand since 2026-11-04) and B11's H3 (the grid running) — then the B track is done; E6 at the back (roadmap); the 2.1 "next search" boxes predate the sector universe (Decision 070) and Track D's closed doors.
+- **Research**: the B track is complete (B10 → Decision 093, B11 → 092); only B11's H3 (the parameter grid with the 1999 → universe) was still running when 092 was written — its result is appended there; E6 at the back (roadmap); the 2.1 "next search" boxes predate the sector universe (Decision 070) and Track D's closed doors.
 - **Phases 1.37 and earlier** (the LLM-era book) keep their open boxes as history; the conversion (Decisions 061–063) superseded them.
+
+## Phase 2.33: The earnings gate on history — roadmap B10 run, the gate stays (2026-11-04) — Decision 093
+Hypotheses E1–E3 and the drop rule committed before the run (`ee22dab`, `earningsgate.py`); the entry-session fix made before E2 was read. Nothing live changed; the B track is complete.
+- [x] **E1**: the live 2-day gate +0.01 pp/yr on the 15 names 1999 → (1.7 % of sessions, 2 of 417 entries); the through gate +0.04; the old 5-day gate −1.66 (four trades fewer — path noise on a three-slot book).
+- [x] **E2**: the eight entries the live gate would have blocked ran at a median +20 % vs +4 % for the rest (12 % vs 37 % stopped) — eight trades; the placebo band of random windows is ±1 pp/yr and the live gate sits inside it. **E3**: the live book (sector ETFs) never meets the gate.
+- [x] Roadmap B10 ✅, the running order; handover note.
 
 ## Phase 2.32: The book on real ETFs 1999 → — roadmap B11 run on the operator's Tiingo key, knowledge (2026-11-04) — Decision 092
 Operator: the two free keys ("tingo: … alpha: …"), stored in the git-ignored `.env`. `fetch_keyed.py` pulled 36 Tiingo histories and the 15 names' earnings from Alpha Vantage within the free limits; `datasets.tiingo`, universes G / H; hypotheses H1–H5 committed before the run (`270c6e9`, `longhist.py`). Nothing live changed.
@@ -16,7 +22,7 @@ Operator: the two free keys ("tingo: … alpha: …"), stored in the git-ignored
 - [x] **H4** the 15 names +9.4 (hindsight); **H5** Tiingo ≈ Alpaca to 0.01 %/day with the named exceptions (SPMO 56 days, XLF's 2016 spin-off, the March-2020 closes); the decade segment +1.55 vs +1.36.
 - [ ] **H3** the parameter re-check with G (`etfparams.py`, 6,000 cells on 27 years): running; appended to Decision 092 when it lands — expected the live cell on the plateau, no change.
 - [x] Roadmap B11 ✅, Track H rows ✅, the C1 vol-managed row; README rows; one insight; handover note.
-- [ ] **Next**: B10 — the earnings gate on the shadow names' history (data in hand), pre-registered first.
+- [x] **Next**: B10 — run the same afternoon → Decision 093 (Phase 2.33).
 
 ## Phase 2.31: The operator's calls on the open dials; the momentum weight as a curve (2026-11-03) — Decision 091
 Operator: "just spmo" · "going live i will give you instructions when we have no other tasks left in the roadmap" · "7 close it" · "make informational" · the momentum weight "as a continuous graph".
