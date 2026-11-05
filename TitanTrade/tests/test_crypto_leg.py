@@ -3,6 +3,7 @@ re-set only outside its own band, sized in fractional units, never an orphan, ne
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 from titantrade.broker import place_market_buy
@@ -75,3 +76,28 @@ class TestCryptoLeg:
             place_market_buy("SPY", 10, fake_config)
         assert fetch.call_args_list[0].kwargs["json_body"]["time_in_force"] == "gtc"
         assert fetch.call_args_list[1].kwargs["json_body"]["time_in_force"] == "day"
+
+
+NOW = "2026-11-05T15:00:00+00:00"
+
+
+class TestLegOrder:
+    @patch("titantrade.executor.record_stop_out_cooldowns", return_value=0)
+    @patch("titantrade.executor.check_gap_down_protection", return_value=[])
+    @patch("titantrade.executor.close_orphaned_positions", return_value=[])
+    @patch("titantrade.executor.manage_core_position", return_value=None)
+    @patch("titantrade.executor.load_stock_sectors", return_value=None)
+    @patch("titantrade.executor.get_open_orders", return_value=[])
+    @patch("titantrade.executor.get_positions", return_value=[{"symbol": "SPY", "qty": "70", "market_value": "60000"}])
+    @patch("titantrade.executor.get_account", return_value={"portfolio_value": "100000", "cash": "40000", "buying_power": "80000"})
+    @patch("titantrade.executor.is_market_open", return_value=True)
+    def test_the_bitcoin_leg_runs_after_spy_and_before_the_sleeve(self, mock_open, mock_account, mock_positions, mock_oo, mock_sec, mock_core,
+                                                                 mock_orphan, mock_gap, mock_cooldown, fake_config, tmp_state_dir):
+        from titantrade.executor import execute_trades
+        (tmp_state_dir / "data_bundle.json").write_text(json.dumps({"generated_at": NOW, "stocks": {}}))
+        (tmp_state_dir / "plan.json").write_text(json.dumps({"generated_at": NOW, "exposure_scale": 1.0, "items": [], "watch": [{"ticker": "AAA", "reason": "no signal"}]}))
+        execute_trades(_cfg(fake_config, watchlist=["AAA"]))
+        calls = [(c.kwargs["ticker"], c.kwargs["target_pct"]) for c in mock_core.call_args_list]
+        assert [t for t, _ in calls] == ["SPY", "BTC/USD", "SPMO"] and calls[1][1] == 0.05 and calls[2][1] == round(0.98 * 0.6 * 0.95, 4)
+        assert mock_core.call_args_list[1].kwargs["band_pct"] == 0.25 and mock_core.call_args_list[1].kwargs["fractional"] is True
+        assert "band_pct" not in mock_core.call_args_list[2].kwargs   # the sleeve keeps the equity-wide band and whole shares

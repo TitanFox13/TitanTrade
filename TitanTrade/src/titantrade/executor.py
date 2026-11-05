@@ -331,10 +331,11 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
             log.info(f"{cash_leg} target {cash_target:.0%} of equity (idle capital), now {cash_now:.0%}")
         crypto = cfg.trading.crypto_ticker
         if crypto and (cfg.trading.crypto_weight > 0 or position_symbol(crypto) in held_now):
-            # The bitcoin leg (097): last, with what the other legs' sales freed; its own band, fractional units.
+            # The bitcoin leg (097 / 102): right after SPY and before the momentum sleeve — a fixed share, funded from
+            # the SPY sale and any freed cash before the sleeve (a residual that fills over time) takes the rest.
             crypto_target = crypto_target_pct(cfg)
             crypto_now = sum(float(p.get("market_value") or 0) for p in positions if p.get("symbol") == position_symbol(crypto)) / portfolio_value if portfolio_value else 0.0
-            legs.append((crypto, crypto_target))
+            legs.insert(legs.index((cfg.trading.core_ticker, core_target)) + 1, (crypto, crypto_target))
             log.info(f"{crypto} target {crypto_target:.1%} of equity (held, outside the exposure rules), now {crypto_now:.1%}")
         for leg, target in legs:
             extra = {"band_pct": cfg.trading.crypto_band_pct, "fractional": True} if leg == crypto else {}

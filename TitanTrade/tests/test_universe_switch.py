@@ -37,7 +37,8 @@ class TestConfig:
         from pathlib import Path
         live = json.loads((Path(__file__).resolve().parents[1] / "data" / "watchlist.json").read_text())
         assert live["watchlist"] == ETFS and len(live["shadow_watchlist"]) == 15 and "DXCM" in live["shadow_watchlist"]
-        assert live["settings"]["mechanical"]["design"] == "070" and live["settings"]["mechanical"]["momentum_weight"] == 0.6
+        m = live["settings"]["mechanical"]
+        assert m["design"] == "097" and m["momentum_weight"] == 0.6 and m["crypto_ticker"] == "BTC/USD" and m["crypto_weight"] == 0.05   # the 070 universe, the 097 bitcoin leg
 
 
 class TestPlan:

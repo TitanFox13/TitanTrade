@@ -42,7 +42,7 @@ The book has three kinds of holdings and one reserve:
 | what the checkup says | normal | a problem |
 |---|---|---|
 | "SPMO n % of its 59 % target" | Within the band, or below it while old positions run out | Far below target with free cash sitting idle for more than a run or two |
-| "BTC/USD target 5.0 % of equity (held, outside the exposure rules)" | Within its ±25 % band (3.75–6.25 % of equity); one BUY of ≈ 0.06 BTC on the first run after the deploy, then a handful of trades a year | Buys or sells of it run after run (the band is broken), or an orphan-close, gap-check or stop-coverage line naming BTCUSD (it must be a core leg to all three) |
+| "BTC/USD target 5.0 % of equity (held, outside the exposure rules)" | Within its ±25 % band (3.75–6.25 % of equity); funded by the first legacy exit after Decision 102 (it runs right after SPY, before SPMO), then a handful of trades a year | Buys or sells of it run after run (the band is broken), or an orphan-close, gap-check or stop-coverage line naming BTCUSD (it must be a core leg to all three) |
 | "DXCM / URI / JPM held" (the transition names) | Each with its stop, target and clock from the plan; they leave only by those three exits | A forced sale of one of them; one without a plan item |
 | "n free slots, candidates: …" | 0 free slots while the three old names are held; afterwards 0–3 | A free slot with a valid candidate and no entry, with no gate named as the reason |
 | "SPY n %" | 0 during the transition; later the small remainder | SPY above the remainder while slots are held (money double-counted) |
