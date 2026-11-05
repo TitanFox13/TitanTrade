@@ -115,6 +115,16 @@ Volumes: `./state` and `./logs` on both; `./data` on `api` (watchlist edits thro
 
 `scripts/backup_state.sh` snapshots `state/` (trade log, plan, strategy, fill ledger, cooldowns, peak, archive) and `data/watchlist.json` into `/home/TitanTrade/backups/titantrade-state-<UTC stamp>.tar.gz`, keeping the last 30. Host cron on titanserver (Decision 071): `30 21 * * * /home/TitanTrade/TitanTrade/scripts/backup_state.sh >> /home/TitanTrade/backups/backup.log 2>&1` — after the 20:30 UTC daily summary. Restore on a host with the checkout: `tar xzf /home/TitanTrade/backups/<archive> -C /home/TitanTrade/TitanTrade` (then `docker compose up -d api`). Off-server copies: `scripts/pull_backup.sh [dest]` pulls the latest archive over ssh with the base64 pipe (`scp` fails there) into a git-ignored `backups/` folder next to the checkout — run it at every checkup from any machine with the `titanserver` alias.
 
+## The paper drill (Decision 103)
+
+Forces the live paths a scheduled run rarely reaches, on the paper account, with the package's own functions — never on a live account. From `/home/TitanTrade/TitanTrade`, market open, away from the scheduled runs, after `scripts/backup_state.sh`:
+
+```bash
+docker exec -i -e STEP=status titantrade-api-1 uv run python - < scripts/paper_drill.py
+```
+
+Steps in order: `status` (read-only) → `renew NAME=<held>` (cancel its GTC stop; `ensure_stop_coverage` must re-place it) → `close NAME=<held>` (the settled close, trigger `drill_holding_limit`) → `targets TP=0.01` (one execute with `tp_pct` lowered: the core legs first, then every held name above the stand-in target exits through the quote-confirmed path; restored after) → `entry DIP=0.04` (one plan with `dip_pct` lowered → the bracket, the GTC stop on fill, coverage; restored, the plan refreshed) → `restamp` (the clean window restarts). Each step prints its log lines. Only the `close` row in `trade_log.json` carries a `drill_*` trigger; the `targets` and `entry` rows carry the live triggers and are told apart by their timestamps. 2026-11-05 15:27 – 15:33 UTC: every path held (Decision 103).
+
 ## The server-down runbook (Decision 071)
 
 **What keeps working with the server down**: the GTC stop-limits on the dip positions — until their expiry: Alpaca's aged-order policy cancels every GTC order **90 days after creation, at 16:15 ET on its `expires_at` date** (Alpaca docs, "Orders at Alpaca"). While the server runs, the 09:35 ET coverage job re-places it the next morning (an overnight gap on day 90, normally never reached because the 60-trading-day clock exits first). A standalone GTC stop is also cancelled by Alpaca ahead of a mandatory corporate action on its symbol (split, symbol change, merger) and adjusted on a forward split — the same coverage job is the backstop; bracket legs carry DNR/DNC and are not. The core legs (SPY, SPMO, SGOV) carry no stop by design.

@@ -42,6 +42,7 @@ cd TitanTrade && uv run --extra test python -m pytest tests/ -q
 cd TitanTrade
 docker compose up -d api cloudflared            # API server + scheduler + tunnel
 docker compose run --rm titantrade <command>    # one-off CLI commands
+docker exec -i -e STEP=status titantrade-api-1 uv run python - < scripts/paper_drill.py   # the paper drill (Decision 103): status | renew | close | targets | entry | restamp — paper account only
 ```
 
 Deploy = `git pull && docker compose build api titantrade && docker compose up -d api` — both images, every time (the CLI image drifts otherwise).

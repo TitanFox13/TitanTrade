@@ -117,6 +117,9 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 
 `/api/health`, `/api/portfolio`, `/api/plan`, `/api/trades`, `/api/near-misses`, `/api/costs`, `/api/universe-proposal`, `/api/post-mortem`, `/api/benchmark`, `/api/benchmark/refresh`, `/api/fill-ledger`, `/api/settings`, `PUT /api/settings/mode`, `/api/watchlist` (GET / PUT), `/api/scheduler`, `/api/scheduler/{id}`, `POST /api/scheduler/{id}/trigger`, `PUT /api/scheduler/{id}/enabled`. See [TitanTrade/docs/api_reference.md](../TitanTrade/docs/api_reference.md).
 
+## The Paper Drill (Decision 103)
+`scripts/paper_drill.py`, run inside the api container during market hours, one step per invocation (`status`, `renew`, `close`, `targets`, `entry`, `restamp`): forces the stop renewal, the settled close, the quote-confirmed target exit, a bracket entry with its GTC stop on fill and the core legs' funding through the package's own functions on the paper account; every parameter edit restored in a `finally`, the state backed up first. Run once, 2026-11-05: every path held, no bug.
+
 ## Test Suite (zero token spend)
 
 289 tests in `TitanTrade/tests/`, every external call mocked (`unittest.mock.patch`):
