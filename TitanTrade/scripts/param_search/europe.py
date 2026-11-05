@@ -75,7 +75,7 @@ HDR = f"{'':58} {'excess':>7} {'IS':>6} {'OOS':>6} | {'DD':>6} {'mktDD':>6} | {'
 
 def fmt(label, s):
     return (f"{label:58} {s['excess']:+7.2%} {s['is']:+6.1%} {s['oos']:+6.1%} | {s['dd']:6.1%} {s['mkt_dd']:6.1%} | {s['sharpe']:5.2f} {s['mkt_sharpe']:5.2f} | {s['worst_year']:+6.1%} | "
-            + " ".join(f"{x:+6.1%}" for x in s["eras"]) + (f" | {master.luck_line(s)}" if "t" in s else ""))
+            + (" ".join(f"{x:+6.1%}" for x in s["eras"]) if "eras" in s else f"roll3 {s['roll3_pos']:.0%}") + (f" | {master.luck_line(s)}" if "t" in s else ""))
 
 
 def ew_basket(symbols):
