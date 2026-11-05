@@ -56,8 +56,9 @@ SOURCES = {
                                                 "Asia_Pacific_ex_Japan_3_Factors_Daily_CSV.zip", "Asia_Pacific_ex_Japan_Mom_Factor_Daily_CSV.zip",
                                                 "Emerging_5_Factors_CSV.zip", "Emerging_MOM_Factor_CSV.zip",
                                                 "Developed_3_Factors_Daily_CSV.zip", "Developed_Mom_Factor_Daily_CSV.zip",
-                                                "Europe_25_Portfolios_ME_Prior_12_2_Daily_CSV.zip", "Japan_25_Portfolios_ME_Prior_12_2_Daily_CSV.zip",
-                                                "Developed_ex_US_25_Portfolios_ME_Prior_12_2_Daily_CSV.zip")},
+                                                "Europe_25_Portfolios_ME_Prior_250_20_daily_CSV.zip", "Europe_6_Portfolios_ME_Prior_250_20_daily_CSV.zip",   # the daily momentum sorts carry a 250-20-day prior (the 12-2 ones are monthly) — Decision 101
+                                                "Japan_6_Portfolios_ME_Prior_250_20_daily_CSV.zip", "Developed_ex_US_6_Portfolios_ME_Prior_250_20_daily_CSV.zip",
+                                                "Developed_6_Portfolios_ME_Prior_250_20_daily_CSV.zip", "Europe_5_Factors_Daily_CSV.zip")},
     # NAAIM exposure index page (the xlsx link is parsed from it), datahub gold monthly 1833 →
     "misc": {"naaim_page.html": "https://naaim.org/programs/naaim-exposure-index/",
              "gold_monthly.csv": "https://datahub.io/core/gold-prices/r/monthly.csv",
