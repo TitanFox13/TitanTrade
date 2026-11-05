@@ -60,7 +60,7 @@ A problem is an inconsistency, not a reading: a switch "on" while its printed in
 
 ## 3. The trades since the last checkup
 
-*The eight trades of 2026-11-05 between 15:27 and 15:32 UTC (JPM out, the bitcoin top-up, SPMO, DXCM and URI out, SPY, SPMO, XLE in) are the paper drill (Decision 103): chosen by the drill, not by the rules — only the JPM row says so (`drill_holding_limit`). Everything after 15:32 UTC that day is the rules again, and the clean window starts there.*
+*The eight trades of 2026-11-05 between 15:27 and 15:32 UTC (JPM out, the bitcoin top-up, SPMO, DXCM and URI out, SPY, SPMO, XLE in) are the paper drill (Decision 103): chosen by the drill, not by the rules — only the JPM row says so (`drill_holding_limit`). The four trades of 16:11 – 16:12 UTC (SPY and SPMO sold to half their targets and bought back) are the drill's de-risk round trip. Everything after 16:13 UTC that day is the rules, and the clean window starts there.*
 
 Every action in the trade log must be one the rules prescribe:
 
