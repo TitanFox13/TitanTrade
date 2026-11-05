@@ -13,6 +13,11 @@ Steps, in the order run:
   entry     dip_pct → DIP (default 0.04) → refresh_plan → execute (SPY nets the planned slot, the leg and the sleeve
             fill, the bracket goes out) → the GTC stop on fill checked → dip_pct restored → refresh_plan
   restamp   strategy.json → window_started_at = now (the clean window restarts after the drill)
+  shock     shock_drop_pct → SHOCK (default 0.02, under the worst ten-session move) for ONE plan: the shock trigger fires,
+            exposure ×0.5, SPY and SPMO sell to half their targets, the bitcoin leg and the held slot untouched (the
+            de-risk path, Decision 068); the threshold restored, the plan refreshed (shock off). Second drill, 2026-11-05.
+  execute   refresh_plan → execute_trades — a scheduled signals + execute run by hand (after `shock`: the re-risk, SPY and
+            SPMO bought back to their full targets)
 Every config edit is restored in a finally; the state is backed up by scripts/backup_state.sh before the first step.
 """
 import json
@@ -84,6 +89,22 @@ def main():
         finally:
             set_setting("dip_pct", old); refresh_plan(load_config())
         status(load_config())
+    elif STEP == "shock":
+        from titantrade.executor import execute_trades
+        from titantrade.mechanical import refresh_plan
+        old = set_setting("shock_drop_pct", float(os.environ.get("SHOCK", "0.02")))
+        try:
+            plan = refresh_plan(load_config()); sh = plan.get("shock", {}); say(f"shock active {sh.get('active')} (worst {sh.get('worst_drop')}, {sh.get('sessions_left')} sessions left) exposure x{plan.get('exposure_scale')} NEW {[i['ticker'] for i in plan.get('items', []) if i.get('action') == 'NEW']}")
+            executed = execute_trades(load_config()); say(f"executed {len(executed)}: " + "; ".join(f"{t.get('ticker')} {t.get('action')} {t.get('shares')} @ {t.get('price')} [{t.get('trigger')}]" for t in executed))
+            time.sleep(15); status(load_config())
+        finally:
+            set_setting("shock_drop_pct", old); plan = refresh_plan(load_config()); say(f"plan refreshed: shock active {plan.get('shock', {}).get('active')} exposure x{plan.get('exposure_scale')}")
+    elif STEP == "execute":
+        from titantrade.executor import execute_trades
+        from titantrade.mechanical import refresh_plan
+        plan = refresh_plan(load_config()); say(f"plan: exposure x{plan.get('exposure_scale')} held {plan.get('held')} NEW {[i['ticker'] for i in plan.get('items', []) if i.get('action') == 'NEW']}")
+        executed = execute_trades(load_config()); say(f"executed {len(executed)}: " + "; ".join(f"{t.get('ticker')} {t.get('action')} {t.get('shares')} @ {t.get('price')} [{t.get('trigger')}]" for t in executed))
+        time.sleep(15); status(load_config())
     elif STEP == "restamp":
         p = STATE_DIR / "strategy.json"; s = json.load(open(p)); old = s.get("window_started_at"); s["window_started_at"] = datetime.now(timezone.utc).isoformat()
         json.dump(s, open(p, "w"), indent=2); say(f"window_started_at {old} → {s['window_started_at']} (design {s.get('design')})")
