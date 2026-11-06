@@ -36,6 +36,24 @@ Hypotheses, written before the run:
 Drop rule: a fast layer (or B4) becomes a proposal only if its cell beats B1 on return in both halves and all three
 eras with a Sharpe no lower and a 2020 fall no deeper, AND sits above its placebo's 90th percentile. Expected: no cell.
 Nothing changes live. Run: uv run --with numpy python -I scripts/param_search/intraday.py
+
+ADDENDUM, written after the first run and before the second (part 2): every B1 + FAST cell was noise or worse (I1, I2,
+I4 held in substance), but FAST ALONE at −3 % / h20 — the watcher *instead of* the slow rules, a far more sensitive
+shock trigger without the insurance — scored +4.73 (B0 +4.45, B1 +1.28), DD −22.3, Sharpe 1.18, every era and both
+halves ahead. The drop rule needs its placebo and its 2020 fall, and the Decision 062 bar needs every era the data
+allows: the century has no intraday bars, so part 2 runs the same trigger in its daily-close form (a −X % session →
+half for H sessions from the next session) on the decade blend and on the century book beside the live −7 / 10 / 20
+shock, with and without the insurance. Expectations, written before part 2:
+  P1 the daily-close version of −3 % / 20 on the decade within ±0.7 pp/yr of the intraday cell — the gain is the
+     sensitivity of the trigger, not seeing it within the day (the count: the rest of the day is a coin flip).
+  P2 on the century the −3 % / 20 rule is on far more often (the 1930s, 1987, 2008 are full of −3 % days) and gives
+     back 1 … 3 pp/yr against the live shock in the calm eras (1950–75, 1975–2000) while cutting the 1929–32 fall;
+     against the live book (insurance + shock) it is below in at least two of four eras. If instead it beats the live
+     shock in every era with no deeper fall, that is a real result and becomes a proposal.
+  P3 the placebo for FAST ALONE −3 % / h20 (48 random trigger days over all sessions, h20): median ≈ B0 − 1, the real
+     cell above the 90th percentile — the −3 % days cluster in the bad stretches, which is what any shock trigger is.
+  P4 the neighbours: −2 / h20 and −4 / h20 alone within ±1 pp/yr of −3 / h20 (a plateau), else a spike.
+  P5 the 2020 fall of FAST ALONE −3 % / h20: −18 … −24 (halved on 2020-02-24 / 25, before the slow shock's 02-27).
 """
 import datetime as dt
 import json
@@ -82,6 +100,16 @@ def leg_returns(day_bars, prev_close, trig_hm, e0, e1):
     return e0 * (pt / prev_close - 1) + e1 * (close / pt - 1) - 2 * COST * (e0 - e1)
 
 
+def hold_flags(trigger_days, n, hold):
+    """A close-based fast shock: on for ``hold`` sessions from the session AFTER each trigger day."""
+    e = np.zeros(n, dtype=bool); k = 0
+    for i in range(n):
+        if k > 0: e[i] = True
+        k = max(0, k - 1)
+        if trigger_days[i]: k = hold
+    return e
+
+
 def run_book(sessions, spy, mom, slow, triggers, restore):
     """Daily returns of 0.4 SPY / 0.6 SPMO under the slow exposure ``slow`` (per session) and the fast layer:
     ``triggers`` maps a session to its trigger time. ``restore`` says how long the half-exposure lasts."""
@@ -92,8 +120,7 @@ def run_book(sessions, spy, mom, slow, triggers, restore):
         if trig is not None and e0 > 0.5:
             e1 = 0.5
             if restore == "next": fast_until = i + 1
-            elif restore == "h5": fast_until = i + 5
-            elif restore == "h20": fast_until = i + 20
+            elif restore.startswith("h"): fast_until = i + int(restore[1:])
         else:
             e1 = e0; trig = None
         r[i] = W_SPY * leg_returns(spy[s], spy_prev[s], trig, e0, e1) + W_MOM * leg_returns(mom[s], mom_prev[s], trig, e0, e1)
@@ -180,5 +207,98 @@ def main():
         print(f"  {lab:8} market {episode(r_mkt, dates, a, b):+6.1%} | B0 {episode(B0, dates, a, b):+6.1%}  B1 {episode(B1, dates, a, b):+6.1%}  −3/next {episode(S[(0.03, 'next')][0], dates, a, b):+6.1%}  −5/next {episode(S[(0.05, 'next')][0], dates, a, b):+6.1%}  B4 {episode(B4, dates, a, b):+6.1%}")
 
 
+def part2():
+    global spy_prev, mom_prev
+    spy, mom = bars("SPY"), bars("SPMO")
+    dec = books.decade(etfs=("SPMO",)); d = dec["d"]; shock = books.shock_flags(dec["spy"], -0.07, 10, 20)
+    flags = {d[i + 1]: (bool(dec["bear"][i]), bool(shock[i])) for i in range(len(d) - 1)}
+    sessions = [s for s in d[1:] if s in spy and s in mom]
+    dropped = {}
+    for s in d[1:]:
+        if s not in mom: dropped[s[:4]] = dropped.get(s[:4], 0) + 1
+    print(f"\n=== PART 2 — sessions without SPMO 15-minute bars, dropped from part 1, by year: {dropped}")
+    allspy = sorted(spy); allmom = sorted(mom)
+    for s in sessions:
+        spy_prev[s] = spy[allspy[allspy.index(s) - 1]][-1][1]; mom_prev[s] = mom[allmom[allmom.index(s) - 1]][-1][1]
+    dates = [allspy[allspy.index(sessions[0]) - 1]] + sessions; n = len(sessions)
+    r_mkt = np.array([spy[s][-1][1] / spy_prev[s] - 1 for s in sessions])
+    ins_only = np.array([0.5 if flags[s][0] else 1.0 for s in sessions]); shock_only = np.array([0.5 if flags[s][1] else 1.0 for s in sessions])
+    slow = np.minimum(ins_only, shock_only); ones = np.ones(n)
+    sc = lambda r, luck=0: master.score(r, r_mkt, dates, SPLIT, ERAS, luck_draws=luck)  # noqa: E731
+    trig = {}
+    for x in DEPTHS:
+        trig[x] = {}
+        for s in sessions:
+            for hm, c in spy[s]:
+                if c / spy_prev[s] - 1 <= -x: trig[x][s] = hm; break
+    B0 = run_book(sessions, spy, mom, ones, {}, "close"); B1 = run_book(sessions, spy, mom, slow, {}, "close")
+    B5 = run_book(sessions, spy, mom, shock_only, {}, "close"); B6 = run_book(sessions, spy, mom, ins_only, {}, "close")
+    s0, s1, s5, s6 = sc(B0), sc(B1), sc(B5), sc(B6)
+    hdr = f"  {'book':34} {'excess':>6} {'IS':>6} / {'OOS':>6} | {'DD':>6} {'Sharpe':>5} {'worst':>6} | eras 2017–19 2020–22 2023 → | on"
+    print("\n--- the core book: the slow rules apart, and the watcher alone by depth × hold (the share of sessions at half exposure last)\n" + hdr)
+    for lab, s, e in (("B0 no switches", s0, ones), ("B1 live switches", s1, slow), ("B5 the slow shock alone", s5, shock_only), ("B6 the insurance alone", s6, ins_only)):
+        print(row(lab, s, s1) + f" | {np.mean(e < 1):.0%}")
+    best = None
+    for x in DEPTHS:
+        for H in (5, 10, 20, 40):
+            rr = run_book(sessions, spy, mom, ones, trig[x], f"h{H}"); s = sc(rr)
+            on = np.mean(hold_flags(np.array([sessions[i] in trig[x] for i in range(n)]), n, H))
+            print(row(f"B3 fast alone −{x:.0%} / h{H}", s, s1) + f" | {on:.0%}")
+            if (x, H) == (0.03, 20): best = (rr, s)
+    print("--- the insurance kept, the slow shock replaced by the fast one")
+    for x in (0.02, 0.03, 0.04):
+        rr = run_book(sessions, spy, mom, ins_only, trig[x], "h20"); print(row(f"B6 + fast −{x:.0%} / h20", sc(rr), s1))
+    rr3, s3 = best
+    print("\n--- FAST ALONE −3 % / h20 judged: the luck meter against B1 and against the slow shock alone, the placebo, the big falls")
+    for lab, base in (("vs B1 (live switches)", B1), ("vs B5 (slow shock alone)", B5), ("vs B0 (no switches)", B0)):
+        dd = master.score(rr3, base, dates, SPLIT, ERAS, luck_draws=400)
+        print(f"  {lab:26} {dd['excess']:+.2%} (IS {dd['is']:+.2%} / OOS {dd['oos']:+.2%}; eras {' '.join(f'{x:+.1%}' for x in dd['eras'])}); {master.luck_line(dd)}")
+    rng = np.random.default_rng(12); real = trig[0.03]; times = list(real.values()); pl = []
+    for _ in range(20):
+        days = rng.choice(n, size=len(real), replace=False); fake = {sessions[i]: times[rng.integers(len(times))] for i in days}
+        pl.append(sc(run_book(sessions, spy, mom, ones, fake, "h20"))["excess"])
+    pl = np.array(pl)
+    print(f"  placebo ({len(real)} random trigger days over all sessions, h20, 20 draws): median {np.median(pl):+.2%}, 10–90 % {np.percentile(pl, 10):+.2%} … {np.percentile(pl, 90):+.2%} — the real cell {s3['excess']:+.2%} ({'above' if s3['excess'] > np.percentile(pl, 90) else 'inside' if s3['excess'] >= np.percentile(pl, 10) else 'below'} the band)")
+    print("  the big falls: the market, B0, B1, B5, FAST ALONE −3 / h20")
+    for lab, a, b in EPISODES:
+        print(f"    {lab:8} market {episode(r_mkt, dates, a, b):+6.1%} | B0 {episode(B0, dates, a, b):+6.1%}  B1 {episode(B1, dates, a, b):+6.1%}  B5 {episode(B5, dates, a, b):+6.1%}  fast −3/h20 {episode(rr3, dates, a, b):+6.1%}")
+    # P1 — the daily-close version of the same trigger on the decade (the core book from the 15-minute closes; the halving from the next session)
+    print("\n--- P1: the same trigger read at the CLOSE (half from the next session), the core book on the decade")
+    for x in (0.02, 0.03, 0.04):
+        for H in (10, 20, 40):
+            e = np.where(hold_flags(r_mkt <= -x, n, H), 0.5, 1.0)
+            print(row(f"close-based −{x:.0%} / {H} alone", sc(run_book(sessions, spy, mom, e, {}, "close")), s1) + (f"   ← the intraday cell: {s3['excess']:+.2%}" if (x, H) == (0.03, 20) else ""))
+    # P2 — the century and the decade blend (the dip / momentum book of every Decision 067 → 104 number), the daily trigger beside the live shock
+    print("\n--- P2: the dip / momentum blend (books.sets) with the live shock −7 / 10 / 20 replaced by a −X % session → H sessions at half, with and without the insurance")
+    for name, dd, lvl, r, bear, split, eras in books.sets():
+        live_shock = books.shock_flags(lvl, -0.07, 10, 20); master.shock_scale_holder[0] = 0.5
+        hdr2 = f"  {'':36} {'excess':>6} {'IS':>6} / {'OOS':>6} | {'DD':>6} {'Sharpe':>5} {'worst':>6} | " + ("eras" if eras else "roll3") + " | on"
+        print(f"  === {name} {dd[0]} → {dd[-1]}\n" + hdr2)
+        def line(lab, rr, e_on, base=None, luck=0):
+            s = master.score(rr, r["mkt"], dd, split, eras, luck_draws=luck)
+            tail = " ".join(f"{x:+5.1%}" for x in s["eras"]) if eras else f"roll3 {s['roll3_pos']:.0%}"
+            print(f"  {lab:36} {s['excess']:+6.2%} {s['is']:+6.2%} / {s['oos']:+6.2%} | {s['dd']:6.1%} {s['sharpe']:5.2f} {s['worst_year']:+6.1%} | {tail} | {e_on:.0%}" + (f" | vs live {s['excess'] - base['excess']:+5.2%}" if base else "") + (f"\n  {'':36} {master.luck_line(s)}" if luck else ""))
+            return s
+        sl = line("live: insurance + shock −7/10/20", master.book(0.4, r["dip"], r["mom"], r["mkt"], bear, 0.5, live_shock, None, False, None), np.mean(bear | live_shock))
+        line("the slow shock alone (no insurance)", master.book(0.4, r["dip"], r["mom"], r["mkt"], bear, None, live_shock, None, False, None), np.mean(live_shock), sl)
+        line("no switches", master.book(0.4, r["dip"], r["mom"], r["mkt"], bear, None, None, None, False, None), 0.0, sl)
+        for x in (0.02, 0.03, 0.04, 0.05):
+            for H in (10, 20, 40):
+                fast = hold_flags(r["mkt"] <= -x, len(r["mkt"]), H)
+                line(f"insurance + fast −{x:.0%} / {H}", master.book(0.4, r["dip"], r["mom"], r["mkt"], bear, 0.5, fast, None, False, None), np.mean(bear | fast), sl)
+                if H == 20:
+                    line(f"fast −{x:.0%} / {H} alone (no insurance)", master.book(0.4, r["dip"], r["mom"], r["mkt"], bear, None, fast, None, False, None), np.mean(fast), sl, luck=400 if x == 0.03 else 0)
+        fast = hold_flags(r["mkt"] <= -0.03, len(r["mkt"]), 20)
+        rr_f = master.book(0.4, r["dip"], r["mom"], r["mkt"], bear, None, fast, None, False, None)
+        rr_l = master.book(0.4, r["dip"], r["mom"], r["mkt"], bear, 0.5, live_shock, None, False, None)
+        dd2 = master.score(rr_f, rr_l, dd, split, eras, luck_draws=400)
+        print(f"  fast −3 % / 20 alone AGAINST the live book: {dd2['excess']:+.2%} (IS {dd2['is']:+.2%} / OOS {dd2['oos']:+.2%}" + (f"; eras {' '.join(f'{x:+.1%}' for x in dd2['eras'])}" if eras else "") + f"); {master.luck_line(dd2)}")
+        if eras:
+            print("  the big falls (the market, live, fast −3 / 20 alone):")
+            for lab, a, b in [("1929-32", "1929-09-03", "1932-06-01"), ("1973-74", "1973-01-11", "1974-10-03"), ("1987", "1987-08-25", "1987-12-04"), ("2000-02", "2000-03-24", "2002-10-09"), ("2007-09", "2007-10-09", "2009-03-09"), ("2020", "2020-02-19", "2020-03-23"), ("2022", "2022-01-03", "2022-10-12")]:
+                print(f"    {lab:8} market {episode(r['mkt'], dd, a, b):+6.1%} | live {episode(rr_l, dd, a, b):+6.1%}  fast {episode(rr_f, dd, a, b):+6.1%}")
+
+
 if __name__ == "__main__":
     main()
+    part2()
