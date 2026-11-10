@@ -83,6 +83,8 @@ Built-in APScheduler in the API container (`data/schedule.json`, America/New_Yor
 
 Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/scheduler/{id}/enabled`. Job history is kept in memory per container (`GET /api/scheduler/{id}`).
 
+- **The container heals itself (Decision 107)**: `/api/health` is 200 while the scheduler thread runs and 503 otherwise; the api container's Docker health check reads it every minute and the host's auto-heal watcher (label `autoheal=true`) restarts the container after three misses. Silent by design; the daily summary stays the human heartbeat.
+
 ## Discord Notifications
 
 - Per-job completion / failure embeds (duration, result summary, error text); transient webhook failures retried twice (058)

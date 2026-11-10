@@ -11,6 +11,16 @@ services:
       - ./state:/app/state
       - ./logs:/app/logs
     restart: unless-stopped
+    # Decision 107: /api/health is 503 when the scheduler thread is not running; three misses in a row mark the
+    # container unhealthy and the host's auto-heal watcher (label autoheal=true, resevolve-autoheal-1) restarts it.
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    labels:
+      autoheal: "true"
 
   # Cloudflare tunnel — routes trade.praguefun.cz → api:8000.
   # CLOUDFLARE_TUNNEL_TOKEN must be set in .env.

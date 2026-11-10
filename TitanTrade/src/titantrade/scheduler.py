@@ -247,6 +247,11 @@ def _resolve_timezone(name: str) -> Any:
         return name
 
 
+def scheduler_running() -> bool:
+    """True while the APScheduler thread is alive — what the container's health check reads (Decision 107)."""
+    return bool(_scheduler is not None and _scheduler.running)
+
+
 def start_scheduler() -> None:
     """Read schedule.json, register all enabled jobs, and start.
 

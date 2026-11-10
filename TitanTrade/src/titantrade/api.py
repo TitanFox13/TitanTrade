@@ -9,7 +9,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -18,6 +18,7 @@ from .scheduler import (
     get_all_jobs,
     get_job_history,
     set_job_enabled,
+    scheduler_running,
     start_scheduler,
     stop_scheduler,
     trigger_job,
@@ -58,8 +59,13 @@ def _state_or_404(filename: str) -> dict:
 
 
 @app.get("/api/health")
-def health() -> dict:
-    return {"status": "ok"}
+def health(response: Response) -> dict:
+    """200 while the scheduler thread is alive, 503 otherwise: the container's Docker health check reads this and the
+    host's auto-heal watcher restarts an unhealthy container (Decision 107)."""
+    running = scheduler_running()
+    if not running:
+        response.status_code = 503
+    return {"status": "ok" if running else "degraded", "scheduler": running}
 
 
 # --- Book & strategy state -----------------------------------------------------
