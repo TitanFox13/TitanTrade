@@ -5,6 +5,8 @@ Run INSIDE the api container (it has the live data mount and the keys), during m
     docker exec -i -e STEP=<step> titantrade-api-1 uv run python - < scripts/paper_drill.py
 Steps, in the order run:
   status    positions, cash, open orders, the plan's held list (read-only; any time)
+  account   the account's flags — status, crypto_status, pattern_day_trader, multiplier, blocks (read-only; the go-live
+            pre-check with TRADING_MODE=live). On a LIVE account every other step refuses to run.
   renew     cancel a held name's GTC stop, then `ensure_stop_coverage` must put it back — the 90-day expiry path
   close     `close_position_settled` on NAME (default JPM): cancel the stop → settle → market sell → record (the
             holding-limit / target exit path, trigger tagged drill_*)
@@ -51,8 +53,13 @@ def status(cfg):
 
 
 def main():
-    cfg = load_config(); say(f"step {STEP}")
+    cfg = load_config(); say(f"step {STEP} | mode {cfg.trading.trading_mode} | {cfg.alpaca.base_url}")
+    if cfg.trading.trading_mode == "live" and STEP not in ("status", "account"):
+        say("LIVE account — the drill trades only on paper; status / account are the read-only steps"); sys.exit(3)
     if STEP == "status":
+        status(cfg)
+    elif STEP == "account":
+        a = get_account(cfg); say(" ".join(f"{k}={a.get(k)}" for k in ("status", "crypto_status", "currency", "equity", "cash", "buying_power", "multiplier", "pattern_day_trader", "daytrade_count", "trading_blocked", "account_blocked", "transfers_blocked", "shorting_enabled", "created_at")))
         status(cfg)
     elif STEP == "renew":
         from titantrade.executor import ensure_stop_coverage
