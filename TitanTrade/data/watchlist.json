@@ -30,7 +30,7 @@
     "EQIX"
   ],
   "settings": {
-    "trading_mode": "paper",
+    "trading_mode": "live",
     "mechanical": {
       "design": "097",
       "dip_pct": 0.08,
