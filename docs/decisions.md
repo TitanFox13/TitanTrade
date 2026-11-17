@@ -1,5 +1,32 @@
 # Important Decisions Log
 
+## Decision 109: The 8 % drawdown gate tested on history — live has it, the backtest never did: it refuses a quarter of the dip entries over 1999 → and moves the return by noise (+0.16 pp/yr on the decade, −0.13 on 1999 →, both inside the placebo band), never makes the worst fall shallower and makes it 1.9 points deeper on 1999 →; **the keep rule fails — proposed: remove it from the live entry gates; the operator's call, nothing changed** (the operator: "Test the drawdown gate", 2026-11-17)
+**Date**: 2026-11-17
+**Why**: finding 2 of the Check of 2026-11-17. `risk_manager.check_drawdown_circuit_breaker` refuses every new dip entry while the account is 8 % or more below the recorded peak (`MAX_DRAWDOWN_PCT`, a gate from the LLM era); `backtest/mechanical.py` had no such gate, and every expected number of the book (Decisions 068 / 081 / 090 / 092) was computed without it. The paper account never came near it (its peak was the LLM-era $114k); the live account's peak is the deposit, and three sessions in it was 4.8 % under it — 3.4 % from the gate.
+
+**The run** (`scripts/param_search/ddgate.py`, expectations G1–G5 and the rule committed before the first run, `c0c289c`): the live book traded path-exactly on the package engine through a new research hook (`run_mechanical_backtest(…, entry_gate=…)`: called at each entry attempt, False refuses it, the slot stays in SPY, listed in `blocked_entries`; None is the backtest of record — asserted equal). The gate **as live** (the peak moves only at an entry attempt — that is what the peak file does — seeded with the starting capital like the live account) and against the **true high-water mark**, at 5 / 8 / 10 / 12 / 15 %; the placebo = the as-live 8 % gate's own on-days shifted in time, 200 draws. Excess vs SPY in pp/yr (whole; first half / second half), worst fall in %:
+
+| | decade 2017-01 → 2026-10 (Alpaca, SPMO) | 1999-11 → 2026-11 (Tiingo, the spliced momentum of 092) |
+|---|---|---|
+| gate off — the backtest of record | +1.48 (+0.19 / +2.79), DD −19.7, 61 trades | +2.37 (+3.97 / +0.63), DD −41.1, 125 trades |
+| **gate 8 %, as live** | **+1.64** (+0.19 / +3.12), DD −19.7, 57 trades, 14 entries refused | **+2.24** (+3.61 / +0.74), DD **−43.0**, 92 trades, 132 entries refused |
+| its placebo, 5th … 95th (median) | +0.84 … +1.69 (+1.37); the gate beats 92 % | +1.72 … +2.33 (+2.10); the gate beats 73 %; placebo DD −41.1 |
+| gate 8 %, true high-water mark | +0.90, DD −22.5, 47 refused | +1.96, DD −43.0, 205 refused |
+| sessions 8 % or more under the high-water mark / under the as-live peak | 26 % / 12 % | 43 % / 30 % |
+| on the record path: entries made on gated days vs the rest | 4 at +3.4 % vs 57 at +5.0 % | 35 at +5.1 % vs 90 at +4.1 % |
+
+Other thresholds, Δ against gate-off (decade / 1999 →): as live 5 % −0.57 / −0.45, 10 % +0.10 / −0.30, 12 % +0.14 / −0.24, 15 % 0.00 / −0.25; high-water 5 … 10 % −0.6 … −0.9 on the decade with the worst fall 2.9 points deeper, −0.4 … −0.6 on 1999 →. No threshold on either peak beats gate-off in both halves of both windows; on 1999 → every gate makes the worst fall 1 … 3.5 points deeper.
+
+**Against what was written**: G1 ✓ on the decade (26 % of sessions, 14 entries), above its range on 1999 → (43 % against 25 … 40). G2 ✓ in direction (14 against 47 refusals; 132 against 205). **G3 half wrong**: the decade's sign is a gain (+0.16), not the small cost written, and the worst fall on 1999 → is 1.9 points deeper where less than 1 was written. G4 ✓ — inside the placebo band on both windows. G5 ✓.
+
+**Reading**: on return the gate is a coin — +0.16 and −0.13, each inside what shifting the same days at random does. On the worst fall it is a small loss: a refused slot stays in SPY, so nothing is protected, and over 1999 → the dips it refuses are the better ones (+5.1 % against +4.1 %) — the rebound's path. It is also not the gate the docs describe: its peak only moves at an entry attempt, which makes it looser than a real high-water mark (12 % of the decade's sessions against 26 %) — and the real one is worse (−0.6 pp/yr, 2.9 points deeper on the decade).
+
+**The rule**: keep needs (a) both halves of both windows ahead, or the worst fall 2 points shallower on both at under 0.2 pp/yr, and (b) outside the placebo band on the good side — **neither holds → proposed: remove the 8 % halt from the live entry gates**, so the live book is the backtest of record. `pre_trade_check` keeps the suspect-value guard (Decision 084 — the same peak file, still written at every attempt). The cost is inside ±0.2 pp/yr on both windows, so the alternative is named as the rule requires: keep it as a harmless leftover and make it the backtester's default (the expectation restated to ≈ +1.6 on the decade, +2.2 and a −43 % worst fall on 1999 →). Either is a code change on the live system — tests, both images — on the operator's word. **Nothing changed.**
+
+**Limits**: one path per window, and a gate's effect is path-dependent (after the first refusal the slots free differently) — the placebo is the guard against reading a path as a result; the engine has no bitcoin leg, so the live equity is a little more volatile and the live gate binds slightly more often than counted.
+
+**Docs**: `scripts/param_search/README.md`, todo Phase 2.48 / 2.47 / the index, roadmap C (two rows: the gate, the slot size), CLAUDE.md's test count (306).
+
 ## Check 2026-11-17 — the first checkup on the live account, three sessions after the switch: the machine clean, the book on design, every trade rule-prescribed; two fidelity findings for the operator, nothing changed (operator: "the bot has been running for some time")
 **Window**: 2026-11-12 17:08 → 2026-11-17 09:50 UTC (sessions Nov 12 afternoon, 13, 16). **Ops**: 0 ERROR / 0 WARNING in 168 app-log lines since the switch; every enabled job `completed` — sunday_full Nov 15 21:00 UTC (0 trades), weekday_fetch Nov 16 14:00, weekday_gapcheck 14:35 ("0 positions closed, 0 stops placed"), execute 15:15 and 20:30 (0 trades), daily_summary 21:30; the api container `(healthy)`, up since the switch, 0 restarts, nothing in the auto-heal log; the checkout at `595bc57`, mode `live`, no code change since the suite ran green on Nov 12; disk 47 %; the backup ran every night (22 kept), the Nov 16 archive pulled off-server. **No "SUSPECT" line**; the peak file holds the seeded $14,359.93.
 

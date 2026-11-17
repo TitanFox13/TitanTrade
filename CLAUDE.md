@@ -34,7 +34,7 @@ uv run --with numpy python scripts/param_search/search.py           # Parameter 
 cd TitanTrade && uv run --extra test python -m pytest tests/ -q
 ```
 
-`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 295 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens (`test_chaos.py` is the broker-anomaly drill, Decision 084; `test_reserve_check.py` the cash-reserve scenarios, Decisions 089–090). Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
+`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 306 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens (`test_chaos.py` is the broker-anomaly drill, Decision 084; `test_reserve_check.py` the cash-reserve scenarios, Decisions 089–090). Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
 
 ### Docker (production)
 
