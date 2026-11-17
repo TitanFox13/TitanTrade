@@ -56,6 +56,9 @@ def main():
     cfg = load_config(); say(f"step {STEP} | mode {cfg.trading.trading_mode} | {cfg.alpaca.base_url}")
     if cfg.trading.trading_mode == "live" and STEP not in ("status", "account"):
         say("LIVE account — the drill trades only on paper; status / account are the read-only steps"); sys.exit(3)
+    if STEP not in ("status", "account") and json.load(open(WATCHLIST))["settings"].get("trading_mode") != "paper":
+        # TRADING_MODE=paper in a container that mounts the live data/ and state/ would write paper plans and trades into the live files
+        say("the settings file on disk is not a paper one — run the drill in the isolated paper container (deployment.md)"); sys.exit(3)
     if STEP == "status":
         status(cfg)
     elif STEP == "account":

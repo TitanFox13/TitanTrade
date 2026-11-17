@@ -101,3 +101,7 @@ class TestLegOrder:
         assert [t for t, _ in calls] == ["SPY", "BTC/USD", "SPMO"] and calls[1][1] == 0.05 and calls[2][1] == round(0.98 * 0.6 * 0.95, 4)
         assert mock_core.call_args_list[1].kwargs["band_pct"] == 0.25 and mock_core.call_args_list[1].kwargs["fractional"] is True
         assert "band_pct" not in mock_core.call_args_list[2].kwargs   # the sleeve keeps the equity-wide band and whole shares
+        assert [c.kwargs["fractional"] for c in mock_core.call_args_list] == [False, True, False]
+        mock_core.reset_mock()
+        execute_trades(_cfg(fake_config, watchlist=["AAA"], fractional_core=True))
+        assert [c.kwargs["fractional"] for c in mock_core.call_args_list] == [True, True, True]   # the switch: SPY and the sleeve in fractions too

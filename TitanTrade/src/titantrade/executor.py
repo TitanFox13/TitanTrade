@@ -338,7 +338,7 @@ def execute_trades(cfg: Config) -> list[dict[str, Any]]:
             legs.insert(legs.index((cfg.trading.core_ticker, core_target)) + 1, (crypto, crypto_target))
             log.info(f"{crypto} target {crypto_target:.1%} of equity (held, outside the exposure rules), now {crypto_now:.1%}")
         for leg, target in legs:
-            extra = {"band_pct": cfg.trading.crypto_band_pct, "fractional": True} if leg == crypto else {}
+            extra = {"band_pct": cfg.trading.crypto_band_pct, "fractional": True} if leg == crypto else {"fractional": cfg.trading.fractional_core}
             try:
                 core_trade = manage_core_position(cfg, target_pct=target, ticker=leg, committed_cash=committed, **extra)
                 if core_trade:

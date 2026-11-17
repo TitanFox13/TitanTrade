@@ -119,11 +119,15 @@ Volumes: `./state` and `./logs` on both; `./data` on `api` (watchlist edits thro
 
 ## The paper drill (Decision 103)
 
-Forces the live paths a scheduled run rarely reaches, on the paper account, with the package's own functions — never on a live account. From `/home/TitanTrade/TitanTrade`, market open, away from the scheduled runs, after `scripts/backup_state.sh`:
+Forces the live paths a scheduled run rarely reaches, on the paper account, with the package's own functions — never on a live account. **Since go-live it runs beside the live system, never inside it** (Decision 111): `scripts/paper_test.sh` starts a throw-away container from the CLI image with its own `state/`, `data/` and `logs/` under `/home/TitanTrade/paper_test`, the paper keys (`TRADING_MODE=paper`) and Discord off; the drill refuses every trading step unless the mounted settings file itself says `paper`, so an env override inside the api container cannot write paper plans into the live files. From `/home/TitanTrade/TitanTrade`, market open:
 
 ```bash
-docker exec -i -e STEP=status titantrade-api-1 uv run python - < scripts/paper_drill.py
+scripts/paper_test.sh init                      # the live settings as a paper copy; add '{"fractional_core": true}' to override a setting
+scripts/paper_test.sh cli fetch                 # a fresh bundle for the paper plan
+scripts/paper_test.sh drill STEP=status         # then the steps below, e.g. STEP=entry DIP=0.04
 ```
+
+`docker exec -i -e STEP=account titantrade-api-1 uv run python - < scripts/paper_drill.py` stays the read-only look at the live account.
 
 Steps in order: `status` (read-only) → `renew NAME=<held>` (cancel its GTC stop; `ensure_stop_coverage` must re-place it) → `close NAME=<held>` (the settled close, trigger `drill_holding_limit`) → `targets TP=0.01` (one execute with `tp_pct` lowered: the core legs first, then every held name above the stand-in target exits through the quote-confirmed path; restored after) → `entry DIP=0.04` (one plan with `dip_pct` lowered → the bracket, the GTC stop on fill, coverage; restored, the plan refreshed) → `restamp` (the clean window restarts); then, as the second drill, `shock SHOCK=0.02` (the shock trigger forced on for one plan under the worst ten-session move: SPY and SPMO sell to half their targets, the leg and the held slots untouched; threshold restored and the plan refreshed in a `finally`) → `execute` (signals + execute by hand — the re-risk) → `restamp` again. Each step prints its log lines. Only the `close` row in `trade_log.json` carries a `drill_*` trigger; the `targets` and `entry` rows carry the live triggers and are told apart by their timestamps. 2026-11-05 15:27 – 15:33 UTC: every path held (Decision 103).
 

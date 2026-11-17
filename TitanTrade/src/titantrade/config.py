@@ -101,6 +101,9 @@ class TradingSettings:
     # Core: SPY is the residual of the book; rebalance when drift exceeds the band
     core_ticker: str = "SPY"
     core_rebalance_band_pct: float = 0.05
+    # SPY and the momentum ETF sized in fractions of a share. Whole shares round a
+    # SPY sale down, which on a small account funds a dip slot at ~60 % of its size.
+    fractional_core: bool = False
 
     # Momentum sleeve (Decision 068): a momentum ETF held at ``momentum_weight``
     # of the investable book, same rebalance band; the dip overlay's slots are
@@ -147,7 +150,7 @@ MECHANICAL_FIELDS = {
     "dip_pct", "dip_lookback_days", "trend_sma_days", "slot_pct", "max_slots",
     "tp_pct", "stop_pct", "max_hold_days", "insurance_sma_days",
     "insurance_breadth", "insurance_scale", "sector_etfs",
-    "core_ticker", "core_rebalance_band_pct",
+    "core_ticker", "core_rebalance_band_pct", "fractional_core",
     "momentum_ticker", "momentum_weight",
     "shock_drop_pct", "shock_lookback_days", "shock_hold_days", "shock_scale",
     "design", "cash_ticker",
