@@ -51,7 +51,7 @@ config.py, logger.py, retry.py
 ├── trade_state.py       <- trade log / near misses (archival), opening-buy lookups, record builders
 ├── pricing.py           <- entry levels, bracket sanity, ATR lookup, earnings block (pure)
 ├── cooldown.py          <- stop-out cooldown state + override policy
-├── risk_manager.py      <- the 8 gates, drawdown breaker, overlay headroom (uses market_context)
+├── risk_manager.py      <- the 8 gates, suspect-value guard, overlay headroom (uses market_context)
 ├── alerts.py            <- stuck-in-cash / churn alerts (uses trade_state, notifier)
 ├── core_allocation.py   <- SPY core rebalance (uses broker, trade_state)
 ├── protection.py        <- settled close, orphan close, gap-down (uses broker, trade_state)
@@ -101,7 +101,7 @@ No module imports `executor`. `executor.py` re-exports the broker functions it c
 | Overlay cap | 70% of equity, both core legs excluded (also from the sector gate) | risk_manager |
 | Cash reserve | 2% (Decision 090), net of pending buys for entries and for the core legs' buys, re-read after each entry | risk_manager / executor |
 | Min notional | $500 (dust guard, 054) | risk_manager |
-| Drawdown breaker | 8% from peak; ±50% → suspect data: entries blocked and the whole run keeps only the stops (054 / 084) | risk_manager / executor |
+| Suspect-value guard | account value ±50% off the peak → suspect data: entries blocked and the whole run keeps only the stops (054 / 084); no drawdown halt (110) | risk_manager / executor |
 | Earnings blackout | 2 days | earnings / risk_manager |
 | Macro blackout | 6 h before a scheduled FOMC decision — the morning run on decision days (094) | risk_manager |
 | Sector / correlation | 50% / 0.75 | risk_manager |

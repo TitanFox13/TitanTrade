@@ -63,7 +63,7 @@ APScheduler (api container, America/New_York)
 
 ## Risk Architecture
 
-Eight programmatic gates sit between the plan and every entry: earnings blackout, drawdown circuit breaker (with the ±50% suspect-value guard), cash reserve net of pending buys, overlay cap, position size (slot ≥ $500 notional), sector exposure, macro blackout, correlation. They are enforced in code; no input can bypass them.
+Eight programmatic gates sit between the plan and every entry: earnings blackout, account value plausible (the ±50% suspect-value guard; no drawdown halt since Decision 110), cash reserve net of pending buys, overlay cap, position size (slot ≥ $500 notional), sector exposure, macro blackout, correlation. They are enforced in code; no input can bypass them.
 
 Around the gates: broker-side GTC stops with one coverage helper on every path (Decision 060), a 1.5% minimum stop distance (055), the settled close for every exit (063 — cancel the resting stop, wait for the terminal state, sell, restore the stop if the sell fails), gap-down protection cross-checked against the live quote and the corporate-actions feed (053/054), and a 72 h re-entry cooldown after a stop-out with an override only after 24 h at ≥ 1% above the exit (056/059).
 

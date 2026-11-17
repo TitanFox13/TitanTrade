@@ -19,7 +19,7 @@ Every trading decision is a rule on prices; parameters are the Decision 062 plat
 
 ### Eight Entry Gates (ALL must pass)
 1. **Earnings blackout**: no entry within 2 days of earnings (Finnhub calendar)
-2. **Drawdown circuit breaker**: halt at 8% below the portfolio peak. A value ±50% off the peak, either way, is treated as broker data corruption (Decisions 054 / 084): entries pause, Discord alert, the peak file is never written — and the whole run does nothing but keep the stops (no core rebalance, no entry, no target or clock exit) while the account value is suspect
+2. **Account value plausible** (the suspect-value guard; the 8% drawdown halt that sat here was removed in Decision 110 — never in the backtest, no better than its placebo, Decision 109): a value ±50% off the peak, either way, is treated as broker data corruption (Decisions 054 / 084): entries pause, Discord alert, the peak file is never written — and the whole run does nothing but keep the stops (no core rebalance, no entry, no target or clock exit) while the account value is suspect
 3. **Cash reserve**: 2% minimum (Decision 090; was 5%), net of cash committed to pending buy orders (035); the account is re-read after every executed entry in a run (058)
 4. **Overlay cap**: overlay positions ≤ 70% of equity (both core legs excluded)
 5. **Position size**: the slot (`slot_pct` × (1 − momentum weight) = 10% of equity), reduced to the cash and overlay headroom; anything below $500 notional is blocked as dust (054)
@@ -42,7 +42,7 @@ A blocked entry that failed ≤ 2 gates is recorded in `state/near_misses.json` 
 - **Never bare**: every failure path that cancels a stop restores one
 
 ### Portfolio-Level
-- Peak tracking for the drawdown breaker (`state/peak_portfolio.json`)
+- Peak tracking for the suspect-value guard (`state/peak_portfolio.json`)
 - Sector and correlation concentration gates; cash reserve net of pending commitments
 - Two-signal insurance and the shock trigger (min) scale both core legs and pause entries
 - Flat sizing: no ATR, confidence or VIX scaling (Decision 061 — measured as noise)

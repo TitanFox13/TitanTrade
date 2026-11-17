@@ -1,5 +1,17 @@
 # Important Decisions Log
 
+## Decision 110: The 8 % drawdown halt removed from the live entry gates — the live book is the backtest of record again; the suspect-value guard stays (the operator, 2026-11-17: "remove leftover")
+**Date**: 2026-11-17
+**Why**: Decision 109 — the halt was a leftover of the LLM era that the mechanical strategy's research never contained: every expected number was computed without it, and on history it moves the return by noise, protects nothing (a refused slot stays in SPY) and makes 1999 →'s worst fall 1.9 points deeper. The operator asked why anything changes once live; the answer recorded here: **the strategy does not change — this takes out the one rule the live code had and the researched strategy never did.**
+
+**The change** (`risk_manager.py`, `tests/test_risk_manager.py`): `MAX_DRAWDOWN_PCT` and the "CIRCUIT BREAKER TRIPPED" branch are gone; `check_drawdown_circuit_breaker` becomes `check_account_value` → `(suspect, pct_below_peak)`: a value ±50 % off the peak refuses the entry and alerts as before (Decision 084), anything else updates the peak and passes. Gate 2's key in `gate_results` is `account_value` (was `drawdown`); still eight gates. The executor's whole-run guard (`account_value_suspect`), the peak file and the refusal of an implausible spike are untouched. Two tests replaced by two (a 30 % drawdown passes and the peak tracks; the suspect values block either way); 306 tests, lint clean. The backtester's `entry_gate` hook stays as the research hook it is, off by default.
+
+**What limits a fall now**: what the research says does — the insurance and the shock trigger (both halve the core legs and pause entries), the −12 % stops on the dip positions. Nothing else did before either: the halt only ever stopped new dip purchases.
+
+**Deployed 2026-11-17** (both images rebuilt, the api container restarted, `(healthy)`, mode `live`, the CLI import check, a `signals` run — no orders; the build cache pruned), between two scheduled runs.
+
+**Docs**: `docs/features.md` (gate 2, the peak line), `docs/architecture.md`, `TitanTrade/docs/architecture.md`, `TitanTrade/docs/risk_management.md` (gate 2, the failure table), `TitanTrade/docs/data_schemas.md` (the gate key), CLAUDE.md (two table rows), todo Phase 2.49 / 2.48 / the index, roadmap C, handover §2.
+
 ## Decision 109: The 8 % drawdown gate tested on history — live has it, the backtest never did: it refuses a quarter of the dip entries over 1999 → and moves the return by noise (+0.16 pp/yr on the decade, −0.13 on 1999 →, both inside the placebo band), never makes the worst fall shallower and makes it 1.9 points deeper on 1999 →; **the keep rule fails — proposed: remove it from the live entry gates; the operator's call, nothing changed** (the operator: "Test the drawdown gate", 2026-11-17)
 **Date**: 2026-11-17
 **Why**: finding 2 of the Check of 2026-11-17. `risk_manager.check_drawdown_circuit_breaker` refuses every new dip entry while the account is 8 % or more below the recorded peak (`MAX_DRAWDOWN_PCT`, a gate from the LLM era); `backtest/mechanical.py` had no such gate, and every expected number of the book (Decisions 068 / 081 / 090 / 092) was computed without it. The paper account never came near it (its peak was the LLM-era $114k); the live account's peak is the deposit, and three sessions in it was 4.8 % under it — 3.4 % from the gate.

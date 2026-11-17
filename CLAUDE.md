@@ -65,7 +65,7 @@ Deploy = `git pull && docker compose build api titantrade && docker compose up -
 | `src/titantrade/mechanical.py` | `build_plan` / `refresh_plan` (plan.json), `core_target_pct`, strategy start + legacy-position detection |
 | `src/titantrade/executor.py` | `execute_trades` orchestrator, stop coverage (`_ensure_coverage`, `ensure_stop_coverage`), held-position exits |
 | `src/titantrade/entries.py` | `handle_entry` (gates → one bracket → GTC stop on fill), stop-out cooldown scan |
-| `src/titantrade/risk_manager.py` | The 8 gates (`pre_trade_check`), drawdown breaker + suspect-value guard, overlay headroom |
+| `src/titantrade/risk_manager.py` | The 8 gates (`pre_trade_check`), the suspect-value guard (no drawdown halt since Decision 110), overlay headroom |
 | `src/titantrade/protection.py` | `close_position_settled` (cancel → settle → sell → restore stop on failure), plan-based orphan close, gap-down protection |
 | `src/titantrade/core_allocation.py` | A core leg's rebalance to a target share of equity — SPY, SPMO, the bitcoin leg (its own band, fractional units, `position_symbol` for Alpaca's `BTCUSD`) |
 | `src/titantrade/broker.py` | Alpaca REST client — the only module that talks to Alpaca |
@@ -103,7 +103,7 @@ Dependency flow: leaf modules (broker, trade_state, pricing, cooldown, signals, 
 | `trade_log.json`, `near_misses.json` | executor (append-only; overflow archived to `state/archive/`) |
 | `portfolio.json` | executor (equity / cash / positions snapshot at the end of each run; read by the daily summary and the API fallback) |
 | `abort_cooldown.json` | entries (stop-out cooldowns with the exit price) |
-| `peak_portfolio.json` | risk_manager (drawdown breaker high-water mark) |
+| `peak_portfolio.json` | risk_manager (the suspect-value guard's reference peak; written at each entry's gate check) |
 | `alert_state.json` | alerts (dedup of observability alerts) |
 | `costs.json` | cost_logger (curator token spend) |
 | `sector_cache.json` | market_context (ticker → sector, Finnhub) |

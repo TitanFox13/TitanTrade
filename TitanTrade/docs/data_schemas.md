@@ -130,7 +130,7 @@ A stock that failed to fetch carries `"error"` and empty inputs; the plan treats
 
 Records written before Decision 063 carry `stop_loss_price` / `take_profit_price`; readers (`trade_state.position_entry_stop`, `mechanical._hold_item`) accept both spellings. Past 500 records the oldest are moved to `state/archive/trade_log.<timestamp>.json`.
 
-`gate_results` keys: `earnings`, `drawdown`, `cash_reserve`, `overlay_cap`, `position_size`, `sector_exposure`, `macro_blackout`, `correlation`, each `{"passed": bool, "detail": str}`.
+`gate_results` keys: `earnings`, `account_value` (`drawdown` before Decision 110), `cash_reserve`, `overlay_cap`, `position_size`, `sector_exposure`, `macro_blackout`, `correlation`, each `{"passed": bool, "detail": str}`.
 
 ## 7. Near Misses (`state/near_misses.json`)
 

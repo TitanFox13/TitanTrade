@@ -1,7 +1,7 @@
-"""Portfolio-level risk gates (Decisions 035/046/052/054/061/063).
+"""Portfolio-level risk gates (Decisions 035/046/052/054/061/063/110).
 
-Eight gates sit between the plan and the broker: earnings blackout, drawdown
-circuit breaker, cash reserve, overlay cap, position size (flat slots),
+Eight gates sit between the plan and the broker: earnings blackout, account
+value plausible, cash reserve, overlay cap, position size (flat slots),
 sector exposure, macro blackout and correlation. All are evaluated on every
 entry so a blocked entry reports every failing gate (near-miss detection).
 """
@@ -22,7 +22,6 @@ log = get_logger("risk_manager")
 # Constants
 # ---------------------------------------------------------------------------
 
-MAX_DRAWDOWN_PCT = 8.0          # Halt new entries if portfolio drops >8% from peak
 MAX_SECTOR_EXPOSURE_PCT = 50.0  # Max % of equity in one sector
 MIN_CASH_RESERVE_PCT = 2.0      # Cash is transit, not destination; 2 % covers a 2 % adverse fill on the largest core buy (Decision 090)
 MACRO_BLACKOUT_HOURS = 6        # No new entries within 6h of high-impact macro events
@@ -40,7 +39,7 @@ MIN_POSITION_NOTIONAL = 500.0
 # reality. A diversified long-only equity book cannot organically move ±50%
 # between two executor runs; production saw Alpaca paper return $22,828
 # against a real ~$100k equity mid-way through processing the CRWD 4:1 split
-# (2026-07-07), tripping the drawdown breaker at a phantom "79.1%". The
+# (2026-07-07), a phantom "79.1%" drawdown. The
 # inverse glitch would silently corrupt peak_portfolio.json forever.
 SUSPECT_VALUE_DEVIATION_PCT = 50.0
 
@@ -95,7 +94,7 @@ def update_peak_value(current_value: float) -> float:
 
     Refuses implausible upward spikes (> SUSPECT_VALUE_DEVIATION_PCT above
     the recorded peak): a glitched broker value written into the peak file
-    would permanently trip the drawdown breaker once real values return.
+    would make every real value read as suspect once real values return.
     """
     peak = load_peak_value()
     if peak > 0 and current_value > peak * (1 + SUSPECT_VALUE_DEVIATION_PCT / 100):
@@ -141,50 +140,36 @@ def account_value_suspect(portfolio_value: float) -> bool:
     recorded peak, in either direction, is broker data corruption (the CRWD
     split's phantom $22,828, Decision 054) — never a real move between two
     runs. The executor does nothing but keep the stops on such a run
-    (Decision 084); the breaker blocks entries on it."""
+    (Decision 084); the entry gate blocks on it."""
     peak = load_peak_value()
     return peak > 0 and abs(portfolio_value / peak - 1) > SUSPECT_VALUE_DEVIATION_PCT / 100
 
 
-def check_drawdown_circuit_breaker(portfolio_value: float) -> tuple[bool, float]:
-    """Check if portfolio drawdown exceeds the max allowed.
-
-    Returns (is_tripped, drawdown_pct).
-    If tripped, NO new entries should be made.
+def check_account_value(portfolio_value: float) -> tuple[bool, float]:
+    """The entry gate on the account value: ``(suspect, pct_below_peak)``.
 
     A value beyond SUSPECT_VALUE_DEVIATION_PCT off the peak, either way, is
-    treated as broker data corruption (see the constant's comment): entries
-    stay blocked — sitting out one run is cheap insurance either way — but
-    the event is alerted as a data problem so the operator doesn't read it
-    as a real 79% crash.
+    broker data corruption (see the constant's comment): entries are refused
+    and the event is alerted as a data problem. Any other value updates the
+    peak and passes — there is no drawdown halt: the 8 % one that sat here was
+    never in the backtest and did no better than its placebo (Decisions 109 /
+    110).
     """
     peak = load_peak_value()
     if account_value_suspect(portfolio_value):
-        drawdown_pct = (peak - portfolio_value) / peak * 100
+        below_pct = (peak - portfolio_value) / peak * 100
         log.warning(
             f"SUSPECT PORTFOLIO VALUE: ${portfolio_value:,.2f} is "
-            f"{abs(drawdown_pct):.1f}% {'below' if drawdown_pct > 0 else 'above'} peak ${peak:,.2f} — likely broker "
+            f"{abs(below_pct):.1f}% {'below' if below_pct > 0 else 'above'} peak ${peak:,.2f} — likely broker "
             f"data glitch; blocking entries this run as a precaution"
         )
         _notify_suspect_value(portfolio_value, peak)
-        return True, round(drawdown_pct, 2)
+        return True, round(below_pct, 2)
 
     peak = update_peak_value(portfolio_value)
-
     if peak <= 0:
         return False, 0.0
-
-    drawdown_pct = max((peak - portfolio_value) / peak * 100, 0.0)
-
-    if drawdown_pct >= MAX_DRAWDOWN_PCT:
-        log.warning(
-            f"CIRCUIT BREAKER TRIPPED: Portfolio ${portfolio_value:,.2f} is "
-            f"{drawdown_pct:.1f}% below peak ${peak:,.2f} "
-            f"(limit: {MAX_DRAWDOWN_PCT}%)"
-        )
-        return True, round(drawdown_pct, 2)
-
-    return False, round(drawdown_pct, 2)
+    return False, round(max((peak - portfolio_value) / peak * 100, 0.0), 2)
 
 
 def max_investable_amount(
@@ -416,17 +401,12 @@ def pre_trade_check(
     else:
         _pass("earnings", "Not in earnings blackout")
 
-    # Gate 2: Drawdown circuit breaker
-    breaker_tripped, drawdown = check_drawdown_circuit_breaker(portfolio_value)
-    if breaker_tripped:
-        if drawdown >= SUSPECT_VALUE_DEVIATION_PCT:
-            _fail("drawdown", f"Portfolio value ${portfolio_value:,.0f} deviates {drawdown:.0f}% from peak — suspect broker data, blocking as precaution")
-        else:
-            _fail("drawdown", f"Circuit breaker: {drawdown:.1f}% drawdown from peak")
+    # Gate 2: Account value plausible (the suspect-value guard, Decision 084)
+    suspect, below_peak = check_account_value(portfolio_value)
+    if suspect:
+        _fail("account_value", f"Portfolio value ${portfolio_value:,.0f} deviates {abs(below_peak):.0f}% from peak — suspect broker data, blocking as precaution")
     else:
-        _pass("drawdown", f"Drawdown {drawdown:.1f}% within limit")
-        if drawdown > MAX_DRAWDOWN_PCT * 0.7:
-            result["flags"].append(f"WARNING: Drawdown at {drawdown:.1f}% (breaker at {MAX_DRAWDOWN_PCT}%)")
+        _pass("account_value", f"{below_peak:.1f}% below peak")
 
     # Gate 3: Cash reserve (net of cash committed to pending buys)
     investable = max_investable_amount(portfolio_value, cash_balance, committed_cash)

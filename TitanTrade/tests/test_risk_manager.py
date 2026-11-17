@@ -8,8 +8,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from titantrade.risk_manager import (
-    MAX_DRAWDOWN_PCT, MAX_TOTAL_OVERLAY_PCT, MIN_CASH_RESERVE_PCT, MIN_POSITION_NOTIONAL,
-    SUSPECT_VALUE_DEVIATION_PCT, check_correlation_limit, check_drawdown_circuit_breaker,
+    MAX_TOTAL_OVERLAY_PCT, MIN_CASH_RESERVE_PCT, MIN_POSITION_NOTIONAL,
+    SUSPECT_VALUE_DEVIATION_PCT, check_account_value, check_correlation_limit,
     check_macro_blackout, compute_overlay_headroom, max_investable_amount, pre_trade_check,
     update_peak_value,
 )
@@ -24,21 +24,21 @@ def _sector(monkeypatch):
     monkeypatch.setattr("titantrade.risk_manager.get_stock_sector", lambda t: "ETF" if t == "SPY" else "Technology")
 
 
-class TestDrawdownBreaker:
-    def test_trips_at_limit_and_tracks_peak(self, tmp_state_dir):
-        assert check_drawdown_circuit_breaker(100_000) == (False, 0.0)
-        tripped, dd = check_drawdown_circuit_breaker(100_000 * (1 - MAX_DRAWDOWN_PCT / 100))
-        assert tripped and dd == pytest.approx(MAX_DRAWDOWN_PCT)
-        assert check_drawdown_circuit_breaker(110_000) == (False, 0.0)   # new high
+class TestAccountValueGate:
+    def test_a_drawdown_never_blocks_and_the_peak_is_tracked(self, tmp_state_dir):
+        assert check_account_value(100_000) == (False, 0.0)
+        assert check_account_value(70_000) == (False, 30.0)               # Decision 110: no drawdown halt
+        assert check_account_value(110_000) == (False, 0.0)               # new high
+        assert json.loads((tmp_state_dir / "peak_portfolio.json").read_text())["peak_value"] == 110_000
 
     def test_suspect_values_block_but_never_corrupt_the_peak(self, tmp_state_dir):
         update_peak_value(100_000)
-        tripped, dd = check_drawdown_circuit_breaker(100_000 * (1 - SUSPECT_VALUE_DEVIATION_PCT / 100) * 0.9)
-        assert tripped and dd > SUSPECT_VALUE_DEVIATION_PCT
+        suspect, below = check_account_value(100_000 * (1 - SUSPECT_VALUE_DEVIATION_PCT / 100) * 0.9)
+        assert suspect and below > SUSPECT_VALUE_DEVIATION_PCT
         assert update_peak_value(100_000 * 2) == 100_000                 # spike refused
         assert json.loads((tmp_state_dir / "peak_portfolio.json").read_text())["peak_value"] == 100_000
-        tripped, dd = check_drawdown_circuit_breaker(100_000 * 1.6)         # Decision 084: the upside phantom blocks entries too
-        assert tripped and dd < 0
+        suspect, below = check_account_value(100_000 * 1.6)                # Decision 084: the upside phantom blocks entries too
+        assert suspect and below < 0
 
 
 class TestCashReserve:
@@ -74,7 +74,7 @@ class TestPreTradeCheck:
     def test_all_gates_pass_with_slot_sizing(self, fake_config, tmp_state_dir):
         check = pre_trade_check("AAA", _item(100.0), 100_000, 60_000, [], earnings_blocked=False, cfg=fake_config)
         assert check["allowed"] and check["shares"] == 250.0            # 25% slot
-        assert set(check["gate_results"]) == {"earnings", "drawdown", "cash_reserve", "overlay_cap", "position_size", "sector_exposure", "macro_blackout", "correlation"}
+        assert set(check["gate_results"]) == {"earnings", "account_value", "cash_reserve", "overlay_cap", "position_size", "sector_exposure", "macro_blackout", "correlation"}
 
     def test_slot_is_sized_on_the_dip_sleeve(self, fake_config, tmp_state_dir):
         from dataclasses import replace
