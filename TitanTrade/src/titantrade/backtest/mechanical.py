@@ -21,7 +21,7 @@ import json
 import math
 import statistics
 from bisect import bisect_right
-from typing import Any
+from typing import Any, Callable
 
 from titantrade.backtest.data_loader import load_historical_data
 from titantrade.risk_manager import MIN_CASH_RESERVE_PCT
@@ -124,7 +124,11 @@ def run_mechanical_backtest(
     initial_capital: float = 100_000.0,
     momentum_bars: list[dict[str, Any]] | None = None,
     cash_bars: list[dict[str, Any]] | None = None,
+    entry_gate: Callable[[str, float, list[float]], bool] | None = None,
 ) -> dict[str, Any]:
+    """``entry_gate(day, equity, curve)`` — research hook (Decision 109): called once per entry attempt with the
+    day's equity and the equity curve so far; False refuses the entry (it stays in SPY and is listed in
+    ``blocked_entries``). None, the default, is the backtest of record."""
     p = dict(DEFAULT_PARAMS)
     p.update(params or {})
     spy = _closes(spy_bars)
@@ -154,6 +158,7 @@ def run_mechanical_backtest(
     pending: list[str] = []
     curve: list[float] = []
     trades: list[dict[str, Any]] = []
+    blocked: list[dict[str, str]] = []
     exposure_log: list[float] = []
     mom_share: list[float] = []
     core_trades = {k: 0 for k in legs}
@@ -171,6 +176,9 @@ def run_mechanical_backtest(
         #    slots first; the cash gate sizes the rest down)
         for t in pending:
             if t in pos or day not in names.get(t, {}):
+                continue
+            if entry_gate is not None and not entry_gate(day, total, curve):
+                blocked.append({"ticker": t, "date": day})
                 continue
             amt = min(slot * total, val.get("SPY", 0.0) + max(cash - reserve * total, 0.0))
             if amt <= 0:
@@ -263,6 +271,7 @@ def run_mechanical_backtest(
         "shock_days": shock_days,
         "core_trades": core_trades,
         "trades": trades,
+        "blocked_entries": blocked,
         "equity_curve": [round(v, 2) for v in curve],
         "open_positions_at_end": sorted(pos),
     }

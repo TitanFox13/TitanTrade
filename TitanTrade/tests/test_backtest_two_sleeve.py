@@ -93,3 +93,9 @@ def test_momentum_weight_zero_is_the_dip_only_book():
     assert old["metrics"]["trades"] == 1 and old["trades"][0]["exit"] == "tp" and old["trades"][0]["return"] >= 0.10
     assert old["trades"] == no_bars["trades"] and old["equity_curve"] == no_bars["equity_curve"]
     assert old["avg_momentum_share"] is None and old["shock_days"] == 0 and old["core_trades"] == no_bars["core_trades"]
+
+
+def test_entry_gate_refuses_an_entry_and_lists_it():
+    aaa, spy = _bars(_dip_fixture()), _bars(_rise(400, 0.0005))
+    res = run_mechanical_backtest({"AAA": aaa}, spy, None, {"max_slots": 1}, entry_gate=lambda day, equity, curve: False)
+    assert res["metrics"]["trades"] == 0 and res["blocked_entries"][0]["ticker"] == "AAA"
