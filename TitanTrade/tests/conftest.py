@@ -47,6 +47,13 @@ def _noop_entry_stop_reconcile(request, monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _noop_core_fill_wait(monkeypatch):
+    """``manage_core_position`` polls the broker until its order fills — a live Alpaca call the core-leg tests do
+    not mock. Filled at once by default; the wait's own test patches it itself."""
+    monkeypatch.setattr("titantrade.core_allocation._wait_for_order_canceled", lambda *a, **k: "filled")
+
+
 @pytest.fixture
 def fake_config() -> Config:
     """A Config with dummy API keys — never hits real services."""

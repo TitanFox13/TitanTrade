@@ -50,7 +50,7 @@ Evaluated in order for every NEW item (an entry that expired unfilled is simply 
 | `tp_pct` / `stop_pct` / `max_hold_days` | 0.20 / 0.12 / 60 | same |
 | `insurance_sma_days` / `insurance_breadth` / `insurance_scale` | 200 / 0.5 / 0.5 | same |
 | `core_ticker` / `core_rebalance_band_pct` | SPY / 0.05 | config.py |
-| `fractional_core` | false (111: SPY and the momentum ETF in fractions of a share; off until the paper test and the operator's word) | watchlist.json → settings.mechanical |
+| `fractional_core` | false (111: SPY and the momentum ETF in fractions of a share; paper-tested 2026-11-17, off until the operator's word) | watchlist.json → settings.mechanical |
 | `design` / `shadow_watchlist` | "070" / the 15 hand-picked names (tracked, not traded) | `data/watchlist.json` |
 | `MAX_DRAWDOWN_PCT` | 8.0 | risk_manager.py |
 | `SUSPECT_VALUE_DEVIATION_PCT` | 50.0 | risk_manager.py |

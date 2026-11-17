@@ -14,7 +14,7 @@ from typing import Any
 from titantrade.config import Config
 from titantrade.logger import get_logger
 from titantrade.broker import (
-    get_account, get_positions, is_market_open, place_market_buy, place_market_sell,
+    _wait_for_order_canceled, get_account, get_positions, is_market_open, place_market_buy, place_market_sell,
 )
 from titantrade.market_data import get_latest_price
 from titantrade.risk_manager import MIN_CASH_RESERVE_PCT
@@ -22,6 +22,7 @@ from titantrade.trade_state import _append_trade, _trade_record
 
 log = get_logger("core_allocation")
 MIN_NOTIONAL = 10.0   # a fractional (crypto) order below this is dust, not a rebalance
+FILL_WAIT_SECONDS = 30.0   # how long a core order may take to fill before the run moves on without it
 
 
 def _is_core_ticker(ticker: str, cfg: Config) -> bool:
@@ -93,15 +94,21 @@ def manage_core_position(
         if qty * current_price < MIN_NOTIONAL if fractional else qty < 1:
             log.info(f"Core: under target by ${-drift:,.0f} but no spendable cash — waiting")
             return None
-        place_market_buy(ticker, qty, cfg)
+        order = place_market_buy(ticker, qty, cfg)
         action = "BUY"
     else:
         held_qty = float(position.get("qty", 0)) if position else 0.0
         qty = round(min(drift / current_price, held_qty), 6) if fractional else float(int(min(drift / current_price, held_qty)))
         if qty * current_price < MIN_NOTIONAL if fractional else qty < 1:
             return None
-        place_market_sell(ticker, qty, cfg)
+        order = place_market_sell(ticker, qty, cfg)
         action = "SELL"
+
+    # The rest of the run (the next leg, the entries) sizes on the cash this order moves, so it waits for the fill:
+    # on the paper account a fractional SPY sale filled 0.9 s after the account was read, and the run's two entries
+    # were sized on the old cash and refused as dust (Decision 111).
+    if order.get("id") and _wait_for_order_canceled(order["id"], cfg, FILL_WAIT_SECONDS) != "filled":
+        log.warning(f"Core: the {ticker} order was not filled within {FILL_WAIT_SECONDS:.0f}s — the run sizes on the cash as it is")
 
     trade = _trade_record(
         ticker=ticker, action=action, shares=qty, price=current_price,

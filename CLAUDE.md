@@ -34,7 +34,7 @@ uv run --with numpy python scripts/param_search/search.py           # Parameter 
 cd TitanTrade && uv run --extra test python -m pytest tests/ -q
 ```
 
-`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 306 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens (`test_chaos.py` is the broker-anomaly drill, Decision 084; `test_reserve_check.py` the cash-reserve scenarios, Decisions 089–090). Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
+`pytest` lives in the `test` extra, so `--extra test` is required. `addopts` suppresses the summary line — read the exit code or use `-v`. All 307 tests mock Claude, Alpaca, FRED and Finnhub: no orders, no tokens (`test_chaos.py` is the broker-anomaly drill, Decision 084; `test_reserve_check.py` the cash-reserve scenarios, Decisions 089–090). Lint with `uv run --extra dev ruff check src/titantrade tests` (`vulture` is in the same extra). `legacy/tests` is not collected (`testpaths = ["tests"]`).
 
 ### Docker (production)
 
@@ -67,7 +67,7 @@ Deploy = `git pull && docker compose build api titantrade && docker compose up -
 | `src/titantrade/entries.py` | `handle_entry` (gates → one bracket → GTC stop on fill), stop-out cooldown scan |
 | `src/titantrade/risk_manager.py` | The 8 gates (`pre_trade_check`), the suspect-value guard (no drawdown halt since Decision 110), overlay headroom |
 | `src/titantrade/protection.py` | `close_position_settled` (cancel → settle → sell → restore stop on failure), plan-based orphan close, gap-down protection |
-| `src/titantrade/core_allocation.py` | A core leg's rebalance to a target share of equity — SPY, SPMO, the bitcoin leg (its own band, fractional units, `position_symbol` for Alpaca's `BTCUSD`) |
+| `src/titantrade/core_allocation.py` | A core leg's rebalance to a target share of equity — SPY, SPMO, the bitcoin leg (its own band, fractional units, `position_symbol` for Alpaca's `BTCUSD`); waits for its order's fill before the run goes on (Decision 111) |
 | `src/titantrade/broker.py` | Alpaca REST client — the only module that talks to Alpaca |
 | `src/titantrade/pricing.py` | Near-market entry + stop / target levels, bracket sanity checks, ATR lookup, earnings block |
 | `src/titantrade/cooldown.py` | 72 h re-entry cooldown after a stop-out; override after 24 h at ≥ 1% above the exit |

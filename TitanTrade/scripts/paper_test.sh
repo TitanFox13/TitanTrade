@@ -6,9 +6,11 @@
 #                                                              archived paper state the first time
 #   scripts/paper_test.sh cli fetch                            a CLI command on the paper account
 #   scripts/paper_test.sh drill STEP=status [NAME=… DIP=… SHOCK=…]   a scripts/paper_drill.py step
+# PAPER_IMAGE=<tag> runs an image built from code that is not deployed (docker build -t titantrade-papertest <dir>).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 T=/home/TitanTrade/paper_test
+IMG=${PAPER_IMAGE:-titantrade-titantrade}
 RUN=(docker run --rm -i --env-file .env -e TRADING_MODE=paper -e DISCORD_WEBHOOK_URL= -v "$T/state:/app/state" -v "$T/data:/app/data" -v "$T/logs:/app/logs")
 case "${1:-}" in
   init)
@@ -18,8 +20,8 @@ case "${1:-}" in
 p = sys.argv[1]; w = json.load(open(p)); w["settings"]["trading_mode"] = "paper"; w["settings"]["mechanical"].update(json.loads(sys.argv[2]))
 json.dump(w, open(p, "w"), indent=2); print("paper settings:", {k: w["settings"]["mechanical"].get(k) for k in json.loads(sys.argv[2])} or "as live")' "$T/data/watchlist.json" "${2:-{\}}"
     ;;
-  cli) shift; "${RUN[@]}" titantrade-titantrade "$@" ;;
+  cli) shift; "${RUN[@]}" "$IMG" "$@" ;;
   drill) shift; envs=(); for kv in "$@"; do envs+=(-e "$kv"); done
-    "${RUN[@]}" "${envs[@]}" --entrypoint uv titantrade-titantrade run python - < scripts/paper_drill.py ;;
+    "${RUN[@]}" "${envs[@]}" --entrypoint uv "$IMG" run python - < scripts/paper_drill.py ;;
   *) echo "usage: $0 init [json] | cli <command> | drill STEP=… [NAME=… DIP=… SHOCK=…]"; exit 2 ;;
 esac

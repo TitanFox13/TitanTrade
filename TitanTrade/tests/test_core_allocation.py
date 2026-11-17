@@ -52,3 +52,14 @@ class TestCore:
         trade, buy, _ = _run(fake_config, target=0.90, cash=1_500, spy_value=10_000, spy_qty=20)   # under the 2 % reserve
         assert trade is None
         buy.assert_not_called()
+
+    def test_the_run_waits_for_the_core_order_to_fill(self, fake_config, tmp_state_dir):
+        """Decision 111: the entries that follow size on the sale's cash, so the order's fill is awaited."""
+        with patch("titantrade.core_allocation.is_market_open", return_value=True), \
+             patch("titantrade.core_allocation.get_account", return_value={"portfolio_value": "100000", "cash": "5000"}), \
+             patch("titantrade.core_allocation.get_positions", return_value=[{"symbol": "SPY", "market_value": "60000", "current_price": "500", "qty": "120"}]), \
+             patch("titantrade.core_allocation.place_market_sell", return_value={"id": "o1"}), \
+             patch("titantrade.core_allocation._wait_for_order_canceled", return_value="filled") as wait, \
+             patch("titantrade.notifier.send_discord"):
+            assert manage_core_position(fake_config, target_pct=0.25)["action"] == "SELL"
+        assert wait.call_args.args[0] == "o1"
