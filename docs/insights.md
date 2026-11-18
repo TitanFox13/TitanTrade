@@ -93,6 +93,10 @@ nothing stable was there in the features. Fix every setting before the run,
 rotate the outcomes in time for the placebo (trades bunch), and ask for two
 universes before a pass counts — the one hit came on the smallest sample of
 five, and a rule written first is what kept it a question instead of a find.
+The follow-up found a straight line under the trees' hit (shallow dips beat
+deep ones on eleven funds since 1999), which the simplest model carried and
+the heavy ones lost when re-fitted year by year — and which the century
+reverses. When a flexible model finds something, ask a ridge first.
 
 ### When the Placebo Beats Both Candidates, the Era Is Talking (Decision 068 addendum)
 Member breadth looked like a better insurance signal than sector breadth on the
