@@ -117,7 +117,7 @@
 | Any single-name dip universe (Dow 30, random lists, S&P 500) | fundamentals (B9) | 🚫 unless B2 says profitability separates dips from breaks |
 | Relative dip, fast-dip filter, down-day entry, entry month, Halloween | — | 🚫 no new data bears on them |
 | Residual momentum, industry rotation beside SPMO, let-winners-run, ATR stops, crash filters, stop cooldowns, own-momentum eligibility, ten market types, regime switching, post-crash tilt, momentum-crash guards, shorts, shock early release | — | 🚫 closed with numbers in Decisions 062–068; the new data does not touch the mechanism |
-| The entry-time model ("can AI pick the trades") | — | 🚫 closed on 1,156 century trades with a placebo |
+| The entry-time model ("can AI pick the trades") | the addendum of Decision 112 (the sector-ETF hit) | 🚫 closed on 1,156 century trades with a placebo; **re-run with non-linear learners 2026-11-18 → 🚫 closed again by the rule (Decision 112)**: boosted trees, a forest and a neural network fit their own era and predict nothing in the other on the century (4,310 trades) and the S&P 500 (7,637); *open observation*: the boosted trees pass both ways on the 11 sector ETFs 1999 → (153 trades) — one universe, unexplained; its pre-registered addendum is the operator's call |
 
 ## Track E — Other markets (diversification)
 

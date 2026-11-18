@@ -69,7 +69,7 @@ MODELS = {
                                                               early_stopping=False, random_state=s)],
     "random forest": lambda s: [RandomForestRegressor(n_estimators=300, min_samples_leaf=20, max_features=1 / 3, n_jobs=-1, random_state=s)],
     "neural net": lambda s: [TransformedTargetRegressor(
-        regressor=make_pipeline(StandardScaler(), MLPRegressor((16, 8), alpha=1.0, max_iter=500, early_stopping=True, random_state=s + k)),
+        regressor=make_pipeline(StandardScaler(), MLPRegressor(hidden_layer_sizes=(16, 8), alpha=1.0, max_iter=500, early_stopping=True, random_state=s + k)),
         transformer=StandardScaler()) for k in range(3)],
 }
 

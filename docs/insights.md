@@ -84,6 +84,16 @@ positive in one half of the century and negative in the other, and the
 decade holds three episodes. The state tells you which kind of year to brace
 for; the design already holds a sleeve for each kind.
 
+### A Flexible Model Learns the Era, Not the Market (Decision 112)
+Boosted trees ranked their own training trades at 0.5 to 0.8 and the other
+era's at zero, on a century of industry trades and on seven thousand S&P
+trades alike. The in-sample fit measures the model's capacity, not the
+market's structure; four to twelve times the data changed nothing, because
+nothing stable was there in the features. Fix every setting before the run,
+rotate the outcomes in time for the placebo (trades bunch), and ask for two
+universes before a pass counts — the one hit came on the smallest sample of
+five, and a rule written first is what kept it a question instead of a find.
+
 ### When the Placebo Beats Both Candidates, the Era Is Talking (Decision 068 addendum)
 Member breadth looked like a better insurance signal than sector breadth on the
 decade (+0.8 a year) until the placebo ran: a breadth series shuffled at random beat
