@@ -42,6 +42,39 @@ with the luck meter — and nothing more. Anything less: closed, "Models: the en
 non-linear". Nothing live changes either way.
 
 Run from TitanTrade/: uv run --with numpy --with scikit-learn python -I scripts/param_search/treemodel.py
+
+ADDENDUM (2026-11-18, `--addendum`; written after the first run, before any second look). The first run closed the
+question by the rule, with one hit the rule did not accept: on G (the 11 sector ETFs 1999 →, 153 trades) the boosted
+trees passed both ways (+0.30 / +0.30) and the ridge reached +0.20 / +0.38. Seen so far: that table and how the
+trades spread in time (91 entry months). Not seen: any feature table on G, any other window or split, any French
+basket over 1999 →. Same models, same settings, same placebo. A 90-calendar-day embargo around each split (training
+side) from here on. The French 10 industries (NoDur … Other, 1926 →) stand in for the sectors over a century.
+  A1  replication, same window: the French 10 industries 1999-11 →, every signal (10 × 9 %), split 2013-05 — the
+      boosted trees' out-of-sample ρ ≥ +0.15 both ways if the hit belongs to the window's sector baskets and not to
+      the 153 trades; expected to hold, at about 60 %;
+  A2  the narrower baskets, same window: the 49 industries 1999-11 →, every signal, split 2013-05 — expected weaker,
+      +0.05 … +0.15, above the placebo band at least one way;
+  A3  the century at sector granularity (the test the rule asked for): the French 10 industries 1927 →, every
+      signal, split 1975 and split 1999-11 (before ↔ after) — expected inside the placebo band, |ρ| ≤ 0.08: whatever
+      holds since 1999 did not hold before;
+  A4  what carries it on G: (a) at most three of the ten features have the same sign and |ρ| ≥ 0.15 with the trade
+      return in both halves, and they are market-state features; (b) on the five market-state features alone
+      (mkt_above, mkt_ret12, mkt_vol20, mkt_dd252, breadth) the boosted trees and the ridge keep ρ ≥ +0.15 both
+      ways; on the five name features alone (dip90, dip252, worst20, own_mom, rel_str) they fall inside the band at
+      least one way — it is *when* to buy a dip, not *which*;
+  A5  robustness on G: (a) splits 2008-06 / 2013-05 / 2018-11, both ways — the boosted trees pass (above the
+      placebo's 90th percentile, top − bottom ≥ 2 pp) in at least 4 of 6 cells; (b) 2009 and 2020 left out — ρ stays
+      ≥ +0.15 both ways; (c) the live cell 3 × 25 % — the same sign both ways, ρ ≥ +0.10; (d) walk-forward as it
+      would have been used — re-fitted each calendar year from 2006 on every earlier trade, a trade "taken" when its
+      prediction is above the model's own training median: ρ ≥ +0.15, above the placebo's 90th percentile, taken −
+      skipped ≥ 2 pp per trade.
+The verdict, fixed now. *A fluke*: A1 fails or A5 fails ((a) under 4 of 6, or (d) inside its band) → closed, explained
+as luck among twenty cells. *An era*: A1 and A5 hold and A3 does not show it → real in the last quarter-century's
+sector baskets and absent before; it fails the every-era bar, is recorded as knowledge, and a filter in the book is
+priced only on the operator's word, recommended against. *Real*: A1, A5 and A3 (a pass both ways on the century,
+either split, trees or ridge) → a filter in the book is pre-registered separately and proposed. Nothing live changes
+in any case.
+Run: uv run --with numpy --with scikit-learn python -I scripts/param_search/treemodel.py --addendum
 """
 import os
 import sys
@@ -60,9 +93,11 @@ from sklearn.preprocessing import StandardScaler  # noqa: E402
 
 import datasets  # noqa: E402
 import entrymodel as em  # noqa: E402
+import fastbt  # noqa: E402
 import screens  # noqa: E402
 
 DRAWS = 20
+MKT, NAME = [3, 4, 5, 6, 7], [0, 1, 2, 8, 9]     # em.FEATS: the market-state features, the name's own
 MODELS = {
     "ridge": lambda s: [make_pipeline(StandardScaler(), Ridge(alpha=10.0))],
     "boosted trees": lambda s: [HistGradientBoostingRegressor(max_iter=200, max_depth=3, learning_rate=0.05, min_samples_leaf=20,
@@ -84,12 +119,14 @@ def predict(name, Xa, ya, Xs, seed=0):
     return [np.mean([m.predict(X) for m in fits], axis=0) for X in Xs]
 
 
-def evaluate(label, X, y, when, split, rng, ridge_check=None):
+def evaluate(label, X, y, when, split, rng, ridge_check=None, embargo=0):
     o = np.argsort(when, kind="stable"); X, y, when = X[o], y[o], when[o]
     early = when < split
+    near = np.abs((when.astype("datetime64[D]") - np.datetime64(split)).astype(int)) < embargo   # dropped from training only
     print(f"\n--- {label}: {len(y)} trades, early {early.sum()} / late {(~early).sum()}, mean trade {y.mean():+.1%}", flush=True)
     passed, ridge_rho = {}, []
     for direction, a, b in (("early → late", early, ~early), ("late → early", ~early, early)):
+        a = a & ~near
         n = int(a.sum()); shifts = rng.integers(n // 10, n - n // 10, DRAWS)
         for name in MODELS:
             p_in, p_out = predict(name, X[a], y[a], (X[a], X[b]))
@@ -105,7 +142,7 @@ def evaluate(label, X, y, when, split, rng, ridge_check=None):
                   f"{'   PASS' if ok else ''}", flush=True)
     if ridge_check:     # the plumbing check: the reference model on #33's sample gives #33's published numbers
         assert np.allclose(ridge_rho, ridge_check, atol=2e-3), (ridge_rho, ridge_check)
-    return {name: all(v) for name, v in passed.items()}
+    return passed       # per model: [early → late, late → early]
 
 
 def main():
@@ -124,7 +161,7 @@ def main():
     for label, uni, mkt, member, start, params, split, check in samples:
         X, y, when, _ = em.trade_table(mkt, member, start, params)
         for name, ok in evaluate(label, X, y, when, split, rng, check).items():
-            if ok:
+            if all(ok):
                 won[name].add(uni)
     print("\n=== the rule: a model must pass on the century (F) and on a modern sample (E or G)")
     for name, unis in won.items():
@@ -132,5 +169,67 @@ def main():
         print(f"  {name:14} passes on: {', '.join(sorted(unis)) or 'nothing'} → {'REOPEN (stage 2)' if reopen else 'closed'}")
 
 
+def walk_forward(label, X, y, when, first_year, rng):
+    """As it would have been used: re-fit each calendar year on every earlier trade; a trade's score is its prediction
+    minus the model's own training median, so "taken" (score ≥ 0) needs nothing from the future."""
+    o = np.argsort(when, kind="stable"); X, y, when = X[o], y[o], when[o]
+    yr = np.array([w[:4] for w in when]); years = sorted(set(yr[yr >= first_year])); test = yr >= first_year
+    print(f"\n--- {label}: {int(test.sum())} test trades over {len(years)} years ({int((~test).sum())} before {first_year})", flush=True)
+    for name in MODELS:
+        def run(shift):      # shift None = the real outcomes; else each training set's outcomes rotated by that fraction
+            p = np.full(len(y), np.nan)
+            for Y in years:
+                a, b = yr < Y, yr == Y
+                ya = y[a] if shift is None else np.roll(y[a], int(shift * a.sum()))
+                p_a, p_b = predict(name, X[a], ya, (X[a], X[b]), seed=int(Y))
+                p[b] = p_b - np.median(p_a)
+            return p[test]
+        p = run(None); r = rho(p, y[test]); top = p >= 0
+        gap = y[test][top].mean() - y[test][~top].mean() if top.any() and (~top).any() else 0.0
+        pl = np.array([rho(run(s), y[test]) for s in rng.uniform(0.1, 0.9, DRAWS)])
+        ok = bool(r > np.percentile(pl, 90) and r >= 0.15 and gap >= 0.02)
+        print(f"  {name:14} out-of-sample ρ {r:+.3f} (placebo {np.median(pl):+.3f} [{np.percentile(pl, 10):+.3f}…{np.percentile(pl, 90):+.3f}], beaten "
+              f"{np.mean(r > pl):4.0%}) | taken {int(top.sum())} at {y[test][top].mean() if top.any() else 0:+.1%}, skipped {int((~top).sum())} at "
+              f"{y[test][~top].mean() if (~top).any() else 0:+.1%} (gap {gap:+.1%}){'   HOLDS' if ok else ''}", flush=True)
+
+
+def addendum():
+    warnings.simplefilter("ignore")
+    rng = np.random.default_rng(1122)
+    L = em.LIVE
+    ind10 = datasets.french_levels("10_Industry_Portfolios_Daily.csv", "external/french")
+    T10 = fastbt.Market(datasets.french_market(), ind10, ind10)
+    F = datasets.load("F_french_49ind_1926"); G = datasets.load("G_tiingo_sectors_1999")
+
+    def every(n, pct):
+        return {**L, "slot_pct": pct, "max_slots": n}
+
+    print("=== A1 / A2: the same window and split on the French baskets (90-day embargo throughout)")
+    evaluate("A1 French 10 industries 1999-11 →, every signal (10 × 9 %)", *em.trade_table(T10, None, "1999-11-01", every(10, 0.09))[:3], "2013-05-01", rng, embargo=90)
+    evaluate("A2 49 industries 1999-11 →, every signal (49 × 2 %)", *em.trade_table(F, None, "1999-11-01", every(49, 0.02))[:3], "2013-05-01", rng, embargo=90)
+    print("\n=== A3: the century at sector granularity")
+    X, y, when, _ = em.trade_table(T10, None, "1927-07-01", every(10, 0.09))
+    evaluate("A3 French 10 industries 1927 →, every signal, split 1975", X, y, when, "1975-01-01", rng, embargo=90)
+    evaluate("A3 French 10 industries 1927 →, every signal, split 1999-11", X, y, when, "1999-11-01", rng, embargo=90)
+    print("\n=== A4: what carries it on G")
+    X, y, when, _ = em.trade_table(G, None, "1999-11-01", every(11, 0.09))
+    early = when < "2013-05-01"
+    print(f"{'feature':10} {'ρ early':>9} {'ρ late':>9}   (Spearman with the trade return; {early.sum()} / {(~early).sum()} trades)")
+    for k, fn in enumerate(em.FEATS):
+        a, b = rho(X[early, k], y[early]), rho(X[~early, k], y[~early])
+        print(f"{fn:10} {a:+9.2f} {b:+9.2f}{'   same sign, both ≥ 0.15' if a * b > 0 and min(abs(a), abs(b)) >= 0.15 else ''}")
+    evaluate("A4b G, the five market-state features alone", X[:, MKT], y, when, "2013-05-01", rng, embargo=90)
+    evaluate("A4b G, the five name features alone", X[:, NAME], y, when, "2013-05-01", rng, embargo=90)
+    print("\n=== A5: robustness on G")
+    cells = []
+    for split in ("2008-06-01", "2013-05-01", "2018-11-01"):
+        cells += evaluate(f"A5a G, split {split}", X, y, when, split, rng, embargo=90)["boosted trees"]
+    print(f"\n  A5a boosted trees pass in {sum(cells)} of {len(cells)} cells (needs ≥ 4)")
+    keep = ~np.isin([w[:4] for w in when], ("2009", "2020"))
+    evaluate("A5b G without 2009 and 2020", X[keep], y[keep], when[keep], "2013-05-01", rng, embargo=90)
+    evaluate("A5c G at the live 3 × 25 %", *em.trade_table(G, None, "1999-11-01", L)[:3], "2013-05-01", rng, embargo=90)
+    walk_forward("A5d G walk-forward, re-fitted each year from 2006", X, y, when, "2006", rng)
+
+
 if __name__ == "__main__":
-    main()
+    addendum() if "--addendum" in sys.argv else main()
