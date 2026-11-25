@@ -78,6 +78,9 @@ def update_fill_ledger(cfg: Any, bars_for: Callable[..., list[dict[str, Any]]] =
         if (today - date.fromisoformat(session)).days > LOOKBACK_DAYS:
             continue
         try:
+            # ponytail: bars are dividend-adjusted (Decision 113) — the session's own close on the day the row is
+            # written; a row written late across an ex-dividend date is off by that dividend (under 1 % on one
+            # row, the median absorbs it). Pass a split-only fetch through bars_for if that ever matters.
             closes = {b["date"]: float(b["close"]) for b in bars_for(t["ticker"], cfg, days=LOOKBACK_DAYS + 5, feed="sip")}
         except Exception as exc:  # noqa: BLE001
             log.warning(f"Fill ledger: bars for {t['ticker']} unavailable ({exc}) — retried at the next summary")

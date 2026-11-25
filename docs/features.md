@@ -63,7 +63,7 @@ Safety rails: no entry while the ticker has open orders or is held; positions an
 
 ## Data Sources
 
-- **Alpaca Data API** (free, same keys as trading): 250-day daily bars (IEX feed for the bundle; SIP for `download-history` and the benchmark's SPY series), latest quotes, corporate actions, news for the curator
+- **Alpaca Data API** (free, same keys as trading): 250-day daily bars, split- and dividend-adjusted — the basis every researched number was computed on (Decision 113) — (IEX feed for the bundle; SIP for `download-history` and the benchmark's SPY series), latest quotes, corporate actions, news for the curator
 - **FRED** (free key): economic-release calendar for the macro gate (+ `data/fomc_dates.json` for FOMC)
 - **Finnhub** (free key): earnings calendar (blackout gate), company sector, analyst recommendations for the curator
 - All market-data calls fail open (`[]` / `None` / `{}`) on a missing key or error; the gates that consume them skip rather than block
@@ -102,7 +102,7 @@ Managed via `GET /api/scheduler`, `POST /api/scheduler/{id}/trigger`, `PUT /api/
 ## Benchmark Metrics (vs SPY)
 
 - Beta, Jensen's alpha (annualized), Sharpe for both series, information ratio, up / down capture, correlation / R², volatility, total and excess return, max drawdown, a one-line verdict
-- Source: Alpaca portfolio-equity history (with the just-closed session appended from the 15Min history, 059) aligned to SPY SIP daily closes (058)
+- Source: Alpaca portfolio-equity history (with the just-closed session appended from the 15Min history, 059) aligned to SPY SIP daily closes (058), dividend-adjusted so SPY's dividends count as the account's do (113)
 - CLI `benchmark [days] [--since]`, `GET /api/benchmark`, `GET /api/benchmark/refresh?days=N|since=…`, a line on the daily summary. The daily refresh anchors at the strategy start (`strategy.json → started_at`, Decision 065) so the window never straddles two strategies; under 20 trading days the verdict and the ratios are withheld and only the returns are shown; under 3 years (756 trading days) the verdict reads "too short to judge the return" with the annualised excess and its 90% band (1.645 × tracking error / √years) and the summary line shows that band in place of alpha (Decision 069)
 
 ## Fill-vs-Backtest Ledger (Decision 069)

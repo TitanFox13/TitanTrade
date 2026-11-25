@@ -9,7 +9,7 @@ The backend has two faces: a CLI (one-off commands via `docker compose run`) and
 ## Pipeline
 
 ### 1. Fetch (`data_fetcher.py`, 09:00 ET weekdays and in `full`)
-- 250 daily bars per watchlist name (and per `shadow_watchlist` name, for the curator — Decision 070) from Alpaca → `signal_inputs` (last close, rolling high over `dip_lookback_days`, `trend_sma_days` SMA), ATR-14, the last 5 bars for display, a 60-day pairwise correlation matrix
+- 250 daily bars per watchlist name (and per `shadow_watchlist` name, for the curator — Decision 070) from Alpaca, split- and dividend-adjusted (`adjustment=all`, the research basis — Decision 113) → `signal_inputs` (last close, rolling high over `dip_lookback_days`, `trend_sma_days` SMA), ATR-14, the last 5 bars for display, a 60-day pairwise correlation matrix
 - `market_context.build_market_context`: SPY close, 1/5/20-day returns and the last `shock_lookback_days + shock_hold_days + 1` closes (the shock trigger's window); `sector_breadth` — SPY and the 11 sector ETFs vs their `insurance_sma_days` SMA
 - Finnhub earnings (`earnings.build_earnings_context`: next date, days away, blocked flag); FRED release calendar + `data/fomc_dates.json`
 - Output: `state/data_bundle.json`

@@ -55,6 +55,13 @@ class TestAlpacaBars:
         assert [b["date"] for b in bars] == ["2026-05-01", "2026-05-02"]
         assert mock_fetch.call_count == 2
 
+    @patch("titantrade.data_providers.native.fetch_with_retry")
+    def test_bars_are_dividend_adjusted(self, mock_fetch, fake_config):
+        """Decision 113: the live signals, the benchmark's SPY and download-history read the research basis."""
+        mock_fetch.return_value = _resp({"bars": [], "next_page_token": None})
+        market_data.get_ohlcv("SPY", fake_config)
+        assert mock_fetch.call_args.kwargs["params"]["adjustment"] == "all"
+
 
 class TestAlpacaQuotes:
     @patch("titantrade.data_providers.native.fetch_with_retry")

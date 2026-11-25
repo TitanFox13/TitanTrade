@@ -84,6 +84,17 @@ positive in one half of the century and negative in the other, and the
 decade holds three episodes. The state tells you which kind of year to brace
 for; the design already holds a sleeve for each kind.
 
+### The Price Basis Is Part of the Strategy (Decision 113)
+The live system read prices without dividends added back; every backtest
+read them with. For months the two agreed on every switch reading, because
+a 0.3 % difference in an average rarely decides anything. Then one sector
+fund sat a quarter of a percent under its average on one basis and nearly
+one percent over it on the other, and the live book stayed half in cash
+where the researched one bought back. The backtester could not show it: it
+downloaded its bars through the same function. A fidelity check has to
+recompute a live reading from the research's own data, not from the live
+system's.
+
 ### A Flexible Model Learns the Era, Not the Market (Decision 112)
 Boosted trees ranked their own training trades at 0.5 to 0.8 and the other
 era's at zero, on a century of industry trades and on seven thousand S&P

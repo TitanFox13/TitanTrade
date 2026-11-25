@@ -54,6 +54,12 @@ def get_ohlcv(
     processing (not there at 20:30 UTC), while SIP has it minutes after the
     close — so callers that need *today's* close (the benchmark) ask for
     ``feed="sip"`` (Decision 058). A SIP query must end ≥15 min in the past.
+
+    Bars are split- **and dividend-adjusted** (Decision 113): every researched
+    number was computed on that basis, a split-only average sits higher by the
+    dividends paid inside its window (the insurance read 5 of 11 sectors where
+    the research basis read 6), and a split-only SPY flatters a live account
+    that collects its dividends. The latest bar is the traded price either way.
     """
     now = datetime.now(timezone.utc)
     today = now.date()
@@ -69,7 +75,7 @@ def get_ohlcv(
         "start": start.isoformat(),
         "end": end,
         "limit": "10000",
-        "adjustment": "split",
+        "adjustment": "all",
         "feed": effective_feed,
     }
     bars: list[dict[str, Any]] = []
